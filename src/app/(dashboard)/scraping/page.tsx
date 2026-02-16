@@ -41,6 +41,7 @@ export default function ScrapingPage() {
   const [pastedUrls, setPastedUrls] = useState('')
   const [discoveredUrls, setDiscoveredUrls] = useState<string[]>([])
   const [discovering, setDiscovering] = useState(false)
+  const [discoveryError, setDiscoveryError] = useState('')
   
   // Step 2: Core Data
   const [coreData, setCoreData] = useState<Record<string, any>>({})
@@ -102,6 +103,7 @@ export default function ScrapingPage() {
 
   const handleDiscover = async () => {
     setDiscovering(true)
+    setDiscoveryError('')
     try {
       // Parse keywords or use pasted URLs
       let urls: string[] = []
@@ -137,7 +139,7 @@ export default function ScrapingPage() {
       }
     } catch (error: any) {
       console.error('Discovery error:', error)
-      alert(error.message || 'Discovery failed')
+      setDiscoveryError(error.message || 'Discovery failed')
     } finally {
       setDiscovering(false)
     }
@@ -419,6 +421,16 @@ export default function ScrapingPage() {
                 One URL per line (skips discovery step)
               </p>
             </div>
+
+            {discoveryError && (
+              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+                <p className="text-sm text-destructive font-semibold mb-2">Discovery Error:</p>
+                <p className="text-sm text-destructive">{discoveryError}</p>
+                <p className="text-xs text-muted-foreground mt-2">
+                  Note: The actor "scrapearchitect/spotify-artist-scraper" may not exist or may require different input format. Try pasting URLs directly instead.
+                </p>
+              </div>
+            )}
 
             {discoveredUrls.length > 0 && (
               <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">

@@ -1,6 +1,7 @@
 const APIFY_BASE = 'https://api.apify.com/v2'
 
 export async function startActorRun(token: string, actorId: string, input: object) {
+  // Apify API format: /v2/acts/{actorId}/runs
   const res = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
