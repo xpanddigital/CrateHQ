@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
@@ -15,11 +15,7 @@ export function GrowthTrend({ artistId }: GrowthTrendProps) {
   const [loading, setLoading] = useState(true)
   const [growth, setGrowth] = useState<any>(null)
 
-  useEffect(() => {
-    fetchGrowth()
-  }, [artistId])
-
-  const fetchGrowth = async () => {
+  const fetchGrowth = useCallback(async () => {
     try {
       const res = await fetch(`/api/artists/${artistId}/growth`)
       const data = await res.json()
@@ -31,7 +27,11 @@ export function GrowthTrend({ artistId }: GrowthTrendProps) {
     } finally {
       setLoading(false)
     }
-  }
+  }, [artistId])
+
+  useEffect(() => {
+    fetchGrowth()
+  }, [fetchGrowth])
 
   if (loading) {
     return (
