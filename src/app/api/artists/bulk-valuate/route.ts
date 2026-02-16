@@ -43,16 +43,14 @@ export async function POST(request: NextRequest) {
 
     for (const artist of artists) {
       try {
-        // Use monthly listeners as proxy if streams_last_month is missing
-        const streams = artist.streams_last_month || artist.spotify_monthly_listeners || 0
-
-        if (streams === 0) {
+        // Skip if no streaming data at all
+        if (!artist.streams_last_month && !artist.spotify_monthly_listeners) {
           skipped++
           continue
         }
 
         const valuation = estimateCatalogValue({
-          streams_last_month: streams,
+          streams_last_month: artist.streams_last_month || 0,
           track_count: artist.track_count,
           spotify_monthly_listeners: artist.spotify_monthly_listeners,
           instagram_followers: artist.instagram_followers,

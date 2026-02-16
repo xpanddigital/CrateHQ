@@ -274,10 +274,12 @@ export default function ArtistDetailPage() {
                       <p className="text-sm text-muted-foreground">Estimated Offer</p>
                       <p className="text-2xl font-bold">
                         {artist.estimated_offer
-                          ? formatCurrency(artist.estimated_offer)
+                          ? (artist.estimated_offer >= 10000 
+                              ? formatCurrency(artist.estimated_offer)
+                              : 'Below threshold')
                           : '—'}
                       </p>
-                      {artist.estimated_offer_low && artist.estimated_offer_high && (
+                      {artist.estimated_offer_low && artist.estimated_offer_high && artist.estimated_offer_low >= 10000 && (
                         <p className="text-xs text-muted-foreground">
                           {formatCurrency(artist.estimated_offer_low)} — {formatCurrency(artist.estimated_offer_high)}
                         </p>

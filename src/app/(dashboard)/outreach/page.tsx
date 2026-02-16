@@ -246,7 +246,9 @@ export default function OutreachPage() {
                             <TableCell>{formatNumber(artist.streams_last_month)}</TableCell>
                             <TableCell>
                               {artist.estimated_offer_low && artist.estimated_offer_high
-                                ? `${formatCurrency(artist.estimated_offer_low)} - ${formatCurrency(artist.estimated_offer_high)}`
+                                ? (artist.estimated_offer_low >= 10000
+                                    ? `${formatCurrency(artist.estimated_offer_low)} - ${formatCurrency(artist.estimated_offer_high)}`
+                                    : 'Below threshold')
                                 : '—'}
                             </TableCell>
                           </TableRow>

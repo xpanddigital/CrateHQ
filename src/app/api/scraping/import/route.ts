@@ -44,11 +44,15 @@ export async function POST(request: NextRequest) {
         if (artist.verified !== undefined) socialLinks.verified = artist.verified
         if (artist.worldRank) socialLinks.world_rank = artist.worldRank
 
+        // Note: streams_last_month should come from actual monthly stream data
+        // topTrackStreams is the sum of total streams for top 10 tracks (not monthly)
+        // If streams_last_month is not provided, the valuation function will derive it
+        // from spotify_monthly_listeners × 2.5 as a proxy
         return {
           name: artist.name,
           spotify_url: artist._url,
           spotify_monthly_listeners: artist.monthlyListeners || 0,
-          streams_last_month: artist.topTrackStreams || 0,
+          streams_last_month: artist.streams_last_month || 0,
           track_count: artist.trackCount || 0,
           biography: artist.biography,
           genres: artist.genres || [],

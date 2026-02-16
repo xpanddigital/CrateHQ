@@ -26,7 +26,7 @@ export async function getRunStatus(token: string, runId: string) {
 }
 
 export async function getDatasetItems(token: string, datasetId: string) {
-  const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?format=json&token=${token}`, {
+  const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`, {
     headers: { 'Content-Type': 'application/json' },
   })
   if (!res.ok) {

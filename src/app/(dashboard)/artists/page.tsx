@@ -305,9 +305,13 @@ export default function ArtistsPage() {
                   </TableCell>
                   <TableCell>
                     {artist.estimated_offer_low && artist.estimated_offer_high ? (
-                      <span className="text-sm font-medium">
-                        {formatCurrency(artist.estimated_offer_low)} — {formatCurrency(artist.estimated_offer_high)}
-                      </span>
+                      artist.estimated_offer_low >= 10000 ? (
+                        <span className="text-sm font-medium">
+                          {formatCurrency(artist.estimated_offer_low)} — {formatCurrency(artist.estimated_offer_high)}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground text-sm">Below threshold</span>
+                      )
                     ) : (
                       <span className="text-muted-foreground text-sm">—</span>
                     )}
