@@ -57,6 +57,8 @@ export default function ScrapingPage() {
   const [availableTags, setAvailableTags] = useState<any[]>([])
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<any>(null)
+  const [rescrapingAll, setRescrapingAll] = useState(false)
+  const [rescrapeResult, setRescrapeResult] = useState<any>(null)
 
   useEffect(() => {
     checkApifyConfig()
@@ -262,6 +264,33 @@ export default function ScrapingPage() {
     ))
   }
 
+  const handleRescrapeAll = async () => {
+    if (!confirm('Re-scrape all existing artists? This will update their data and create growth snapshots. May take 10-15 minutes.')) {
+      return
+    }
+
+    setRescrapingAll(true)
+    setRescrapeResult(null)
+
+    try {
+      const res = await fetch('/api/scraping/rescrape-all', {
+        method: 'POST',
+      })
+
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Re-scrape failed')
+      }
+
+      const data = await res.json()
+      setRescrapeResult(data)
+    } catch (error: any) {
+      alert(error.message || 'Re-scrape failed')
+    } finally {
+      setRescrapingAll(false)
+    }
+  }
+
   const selectedCount = artists.filter(a => a.selected).length
   const withInstagram = artists.filter(a => a.hasInstagram).length
   const withYouTube = artists.filter(a => a.hasYouTube).length
@@ -325,12 +354,55 @@ export default function ScrapingPage() {
 
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
-        <p className="text-muted-foreground">
-          Multi-stage artist discovery and data enrichment pipeline
-        </p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
+          <p className="text-muted-foreground">
+            Multi-stage artist discovery and data enrichment pipeline
+          </p>
+        </div>
+        <Button
+          variant="outline"
+          onClick={handleRescrapeAll}
+          disabled={rescrapingAll}
+        >
+          {rescrapingAll ? (
+            <>
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              Re-scraping...
+            </>
+          ) : (
+            'Re-scrape All Artists'
+          )}
+        </Button>
       </div>
+
+      {rescrapeResult && (
+        <Card>
+          <CardContent className="pt-6">
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle className="h-5 w-5 text-green-500" />
+                <p className="font-semibold text-green-500">Re-scrape Complete!</p>
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-sm">
+                <div>
+                  <p className="text-muted-foreground">Total</p>
+                  <p className="font-bold">{rescrapeResult.total}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Updated</p>
+                  <p className="font-bold text-green-500">{rescrapeResult.updated}</p>
+                </div>
+                <div>
+                  <p className="text-muted-foreground">Failed</p>
+                  <p className="font-bold">{rescrapeResult.failed}</p>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Stepper */}
       <Card>

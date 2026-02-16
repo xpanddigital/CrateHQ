@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createSnapshot } from '@/lib/snapshots/create'
 
 export async function GET(
   request: NextRequest,
@@ -83,6 +84,17 @@ export async function PATCH(
     if (error) {
       console.error('Supabase update error:', error)
       throw error
+    }
+
+    // Create snapshot if streaming data was updated
+    if (updateData.spotify_monthly_listeners || updateData.streams_last_month || 
+        updateData.track_count || updateData.instagram_followers) {
+      await createSnapshot(params.id, {
+        spotify_monthly_listeners: artist.spotify_monthly_listeners,
+        streams_last_month: artist.streams_last_month,
+        track_count: artist.track_count,
+        instagram_followers: artist.instagram_followers,
+      })
     }
 
     return NextResponse.json({ artist })

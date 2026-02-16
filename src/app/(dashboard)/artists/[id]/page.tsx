@@ -13,6 +13,7 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { TagManager } from '@/components/artists/TagManager'
 import { EnrichmentPanel } from '@/components/artists/EnrichmentPanel'
+import { GrowthTrend } from '@/components/artists/GrowthTrend'
 import { ArrowLeft, Mail, Instagram, Globe, Music, Sparkles, Edit, Save, X, DollarSign, Loader2 } from 'lucide-react'
 import { Artist } from '@/types/database'
 import { formatNumber, formatCurrency, formatDate } from '@/lib/utils'
@@ -531,6 +532,8 @@ export default function ArtistDetailPage() {
         </div>
 
         <div className="space-y-6">
+          <GrowthTrend artistId={artist.id} />
+
           <EnrichmentPanel
             artistId={artist.id}
             onEnrichmentComplete={fetchArtist}
