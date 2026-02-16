@@ -58,20 +58,39 @@ export default function ArtistDetailPage() {
   const handleSave = async () => {
     setSaving(true)
     try {
+      // Only send fields that can be updated
+      const updatePayload = {
+        name: editData.name,
+        country: editData.country,
+        spotify_monthly_listeners: editData.spotify_monthly_listeners,
+        streams_last_month: editData.streams_last_month,
+        track_count: editData.track_count,
+        instagram_followers: editData.instagram_followers,
+        biography: editData.biography,
+        email: editData.email,
+        instagram_handle: editData.instagram_handle,
+        website: editData.website,
+        spotify_url: editData.spotify_url,
+      }
+
       const res = await fetch(`/api/artists/${params.id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editData),
+        body: JSON.stringify(updatePayload),
       })
 
-      if (!res.ok) throw new Error('Failed to update artist')
+      if (!res.ok) {
+        const errorData = await res.json()
+        throw new Error(errorData.error || 'Failed to update artist')
+      }
 
       const data = await res.json()
       setArtist(data.artist)
       setEditMode(false)
       router.refresh()
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating artist:', error)
+      alert(error.message || 'Failed to update artist')
     } finally {
       setSaving(false)
     }
