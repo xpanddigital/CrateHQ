@@ -11,19 +11,29 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const { artistIds, all } = await request.json()
+    const { artistIds, all, revalueAll } = await request.json()
 
     let artists: any[] = []
 
     if (all) {
-      // Get all artists without valuation
-      const { data, error } = await supabase
-        .from('artists')
-        .select('*')
-        .is('estimated_offer', null)
+      if (revalueAll) {
+        // Get ALL artists (revalue everything)
+        const { data, error } = await supabase
+          .from('artists')
+          .select('*')
 
-      if (error) throw error
-      artists = data || []
+        if (error) throw error
+        artists = data || []
+      } else {
+        // Get only artists without valuation
+        const { data, error } = await supabase
+          .from('artists')
+          .select('*')
+          .is('estimated_offer', null)
+
+        if (error) throw error
+        artists = data || []
+      }
     } else if (artistIds && Array.isArray(artistIds)) {
       // Get specific artists
       const { data, error } = await supabase

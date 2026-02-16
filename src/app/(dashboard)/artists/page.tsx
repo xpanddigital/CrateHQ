@@ -128,6 +128,30 @@ export default function ArtistsPage() {
     }
   }
 
+  const handleRevalueAll = async () => {
+    if (!confirm('Re-run valuations for ALL artists? This will update all existing valuations and may take a while.')) return
+
+    setValuating(true)
+    try {
+      const res = await fetch('/api/artists/bulk-valuate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true, revalueAll: true }),
+      })
+
+      if (!res.ok) throw new Error('Valuation failed')
+
+      const data = await res.json()
+      alert(`Re-valuated ${data.valuated} artists, skipped ${data.skipped}`)
+      fetchArtists()
+    } catch (error) {
+      console.error('Error valuating:', error)
+      alert('Failed to revalue artists')
+    } finally {
+      setValuating(false)
+    }
+  }
+
   const handleExport = (type: 'full' | 'valuation') => {
     const params = new URLSearchParams({
       type,
@@ -285,6 +309,15 @@ export default function ArtistsPage() {
           >
             <DollarSign className="h-4 w-4 mr-1" />
             Valuate All
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRevalueAll}
+            disabled={valuating}
+          >
+            <DollarSign className="h-4 w-4 mr-1" />
+            Revalue All
           </Button>
         </div>
       </Card>
