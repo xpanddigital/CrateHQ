@@ -13,9 +13,10 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { TagManager } from '@/components/artists/TagManager'
 import { EnrichmentPanel } from '@/components/artists/EnrichmentPanel'
-import { ArrowLeft, Mail, Instagram, Globe, Music, Sparkles, Edit, Save, X } from 'lucide-react'
+import { ArrowLeft, Mail, Instagram, Globe, Music, Sparkles, Edit, Save, X, DollarSign, Loader2 } from 'lucide-react'
 import { Artist } from '@/types/database'
 import { formatNumber, formatCurrency, formatDate } from '@/lib/utils'
+import { estimateCatalogValue } from '@/lib/valuation/estimator'
 
 export default function ArtistDetailPage() {
   const params = useParams()
@@ -25,6 +26,8 @@ export default function ArtistDetailPage() {
   const [editMode, setEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
   const [editData, setEditData] = useState<Partial<Artist>>({})
+  const [calculatingValue, setCalculatingValue] = useState(false)
+  const [valuationResult, setValuationResult] = useState<any>(null)
 
   const fetchArtist = useCallback(async () => {
     try {
@@ -118,6 +121,51 @@ export default function ArtistDetailPage() {
     }
   }
 
+  const handleCalculateValue = async () => {
+    if (!artist) return
+
+    setCalculatingValue(true)
+    try {
+      // Use monthly listeners as proxy if streams_last_month is missing
+      const streams = artist.streams_last_month || artist.spotify_monthly_listeners || 0
+
+      if (streams === 0) {
+        alert('Not enough streaming data to estimate catalog value. Add monthly listeners or streams data first.')
+        return
+      }
+
+      const result = estimateCatalogValue({
+        streams_last_month: streams,
+        track_count: artist.track_count,
+        spotify_monthly_listeners: artist.spotify_monthly_listeners,
+        instagram_followers: artist.instagram_followers,
+        growth_yoy: artist.growth_yoy,
+      })
+
+      setValuationResult(result)
+
+      // Save to database
+      const res = await fetch(`/api/artists/${params.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          estimated_offer: result.point_estimate,
+          estimated_offer_low: result.range_low,
+          estimated_offer_high: result.range_high,
+        }),
+      })
+
+      if (res.ok) {
+        const data = await res.json()
+        setArtist(data.artist)
+      }
+    } catch (error) {
+      console.error('Error calculating value:', error)
+    } finally {
+      setCalculatingValue(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -142,6 +190,19 @@ export default function ArtistDetailPage() {
         <div className="flex gap-2">
           {!editMode ? (
             <>
+              <Button variant="outline" onClick={handleCalculateValue} disabled={calculatingValue}>
+                {calculatingValue ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Calculating...
+                  </>
+                ) : (
+                  <>
+                    <DollarSign className="h-4 w-4 mr-2" />
+                    Get Catalog Value
+                  </>
+                )}
+              </Button>
               <Button variant="outline" onClick={handleCreateDeal}>
                 Create Deal
               </Button>
@@ -300,6 +361,56 @@ export default function ArtistDetailPage() {
               )}
             </CardContent>
           </Card>
+
+          {valuationResult && (
+            <Card className={valuationResult.qualifies ? 'border-green-500/50' : 'border-yellow-500/50'}>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2">
+                  <DollarSign className="h-5 w-5" />
+                  Catalog Valuation
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <p className="text-sm text-muted-foreground mb-1">Estimated Range</p>
+                  <p className="text-2xl font-bold">{valuationResult.display_range}</p>
+                </div>
+                <div className="flex items-center gap-4">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Confidence</p>
+                    <Badge
+                      variant="outline"
+                      className={
+                        valuationResult.confidence === 'high'
+                          ? 'text-green-500 border-green-500'
+                          : valuationResult.confidence === 'medium'
+                          ? 'text-yellow-500 border-yellow-500'
+                          : 'text-orange-500 border-orange-500'
+                      }
+                    >
+                      {valuationResult.confidence.toUpperCase()}
+                    </Badge>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Qualifies</p>
+                    <Badge
+                      variant="outline"
+                      className={
+                        valuationResult.qualifies
+                          ? 'text-green-500 border-green-500'
+                          : 'text-red-500 border-red-500'
+                      }
+                    >
+                      {valuationResult.qualifies ? 'YES' : 'NO'}
+                    </Badge>
+                  </div>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  {valuationResult.display_text}
+                </p>
+              </CardContent>
+            </Card>
+          )}
 
           <Card>
             <CardHeader>
