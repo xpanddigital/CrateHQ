@@ -36,12 +36,24 @@ const MIN_OFFER_THRESHOLD = 10_000
 const RANGE_BUFFER = 0.25
 
 /**
+ * Platform multiplier: 2.8x
+ * 
+ * Spotify typically represents ~35% of total streaming revenue.
+ * To estimate total catalog value across all platforms (Spotify, Apple Music, 
+ * YouTube Music, Amazon Music, Tidal, etc.), we multiply Spotify-based estimates by ~2.8x.
+ * 
+ * This gives a more accurate picture of the artist's full catalog value.
+ */
+const PLATFORM_MULTIPLIER = 2.8
+
+/**
  * Core estimation function.
  * 
  * Based on the log-linear relationship found in training data:
  * log(offer) ≈ 0.65 * log(streams) + 0.10 * log(tracks) + constant
  * 
  * With adjustments for growth and catalog depth.
+ * Final estimate is multiplied by PLATFORM_MULTIPLIER to account for all platforms.
  */
 export function estimateCatalogValue(input: EstimateInput): EstimateResult {
   const streams = Math.max(input.streams_last_month || 0, 0)
@@ -85,6 +97,10 @@ export function estimateCatalogValue(input: EstimateInput): EstimateResult {
     estimate *= 1.10
   }
 
+  // Apply platform multiplier to account for all streaming platforms
+  // Spotify is ~35% of total streaming revenue, so multiply by 2.8x
+  estimate *= PLATFORM_MULTIPLIER
+
   // Round to nearest $100
   const pointEstimate = Math.round(estimate / 100) * 100
 
@@ -112,8 +128,8 @@ export function estimateCatalogValue(input: EstimateInput): EstimateResult {
     confidence,
     qualifies,
     display_text: qualifies
-      ? `Artists with your streaming profile typically qualify for ${formatCurrency(rangeLow)} — ${formatCurrency(rangeHigh)} in catalog financing.`
-      : 'Based on current streaming data, this catalog may not yet meet minimum financing thresholds.',
+      ? `Total estimated catalog value across all streaming platforms: ${formatCurrency(rangeLow)} — ${formatCurrency(rangeHigh)}. Artists with your profile typically qualify for catalog financing in this range.`
+      : 'Based on current streaming data, this catalog may not yet meet minimum financing thresholds ($10K+).',
   }
 }
 
