@@ -54,17 +54,36 @@ export async function PATCH(
 
     const body = await request.json()
 
+    // Filter out undefined/null values and fields that shouldn't be updated
+    const updateData: any = {}
+    const allowedFields = [
+      'name', 'country', 'biography', 'genres', 'spotify_url',
+      'spotify_monthly_listeners', 'streams_last_month', 'streams_daily',
+      'track_count', 'instagram_handle', 'instagram_followers',
+      'tiktok_handle', 'twitter_handle', 'website', 'email',
+      'email_secondary', 'email_management', 'social_links',
+      'image_url', 'growth_mom', 'growth_qoq', 'growth_yoy'
+    ]
+
+    for (const field of allowedFields) {
+      if (body[field] !== undefined) {
+        updateData[field] = body[field]
+      }
+    }
+
+    updateData.updated_at = new Date().toISOString()
+
     const { data: artist, error } = await supabase
       .from('artists')
-      .update({
-        ...body,
-        updated_at: new Date().toISOString()
-      })
+      .update(updateData)
       .eq('id', params.id)
       .select()
       .single()
 
-    if (error) throw error
+    if (error) {
+      console.error('Supabase update error:', error)
+      throw error
+    }
 
     return NextResponse.json({ artist })
   } catch (error: any) {
