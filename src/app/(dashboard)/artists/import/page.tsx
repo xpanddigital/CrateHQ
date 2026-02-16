@@ -58,7 +58,13 @@ export default function ArtistsImportPage() {
 
         headers.forEach((header, index) => {
           const value = values[index]
-          if (!value) return
+          
+          // Always process numeric fields even if empty (will be 0)
+          const isNumericField = ['monthly_listeners', 'spotify_monthly_listeners', 'listeners', 'monthly listeners',
+                                   'streams', 'streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams',
+                                   'tracks', 'track_count', 'track count', 'number_of_tracks', 'total_tracks'].includes(header)
+          
+          if (!value && !isNumericField) return
 
           switch (header) {
             case 'name':
@@ -137,7 +143,13 @@ export default function ArtistsImportPage() {
 
         headers.forEach((header, index) => {
           const value = values[index]
-          if (!value) return
+          
+          // Always process numeric fields even if empty (will be 0)
+          const isNumericField = ['monthly_listeners', 'spotify_monthly_listeners', 'listeners', 'monthly listeners',
+                                   'streams', 'streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams',
+                                   'tracks', 'track_count', 'track count', 'number_of_tracks', 'total_tracks'].includes(header)
+          
+          if (!value && !isNumericField) return
 
           switch (header) {
             case 'name':
