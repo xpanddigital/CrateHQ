@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { TagBadge } from '@/components/shared/TagBadge'
-import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download } from 'lucide-react'
+import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2 } from 'lucide-react'
 import { Artist } from '@/types/database'
 import { formatNumber, formatDate, formatCurrency } from '@/lib/utils'
 import { ArtistAddModal } from '@/components/artists/ArtistAddModal'
@@ -36,6 +36,7 @@ export default function ArtistsPage() {
   const [showBulkTagModal, setShowBulkTagModal] = useState(false)
   const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false)
   const [valuating, setValuating] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   const fetchArtists = useCallback(async () => {
     setLoading(true)
@@ -133,6 +134,33 @@ export default function ArtistsPage() {
       ...(search && { search }),
     })
     window.open(`/api/artists/export?${params}`, '_blank')
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Are you sure you want to delete ${selectedIds.size} artist(s)? This action cannot be undone.`)) {
+      return
+    }
+
+    setDeleting(true)
+    try {
+      const res = await fetch('/api/artists/bulk-delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artistIds: Array.from(selectedIds) }),
+      })
+
+      if (!res.ok) throw new Error('Delete failed')
+
+      const data = await res.json()
+      alert(`Deleted ${data.deleted} artist(s)`)
+      setSelectedIds(new Set())
+      fetchArtists()
+    } catch (error) {
+      console.error('Error deleting:', error)
+      alert('Failed to delete artists')
+    } finally {
+      setDeleting(false)
+    }
   }
 
   if (loading && artists.length === 0) {
@@ -237,6 +265,15 @@ export default function ArtistsPage() {
               >
                 <DollarSign className="h-4 w-4 mr-1" />
                 Valuate ({selectedIds.size})
+              </Button>
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleBulkDelete}
+                disabled={deleting}
+              >
+                <Trash2 className="h-4 w-4 mr-1" />
+                Delete ({selectedIds.size})
               </Button>
             </div>
           )}
