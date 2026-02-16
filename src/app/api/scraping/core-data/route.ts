@@ -28,9 +28,9 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Apify not configured' }, { status: 500 })
     }
 
-    const actorId = 'beatanalytics/spotify-play-count-scraper'
+    const actorId = 'YZhD6hYc8daYSWXKs'
     const input = {
-      urls: urls, // Note: Actor expects "urls" array
+      urls: urls,
     }
 
     const run = await startActorRun(apifyToken, actorId, input)

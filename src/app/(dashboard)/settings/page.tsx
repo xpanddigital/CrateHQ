@@ -460,9 +460,9 @@ export default function SettingsPage() {
 
             <div className="text-xs text-muted-foreground space-y-1">
               <p><strong>Default Actors:</strong></p>
-              <p>• Discovery: scrapearchitect/spotify-artist-scraper</p>
-              <p>• Core Data: beatanalytics/spotify-play-count-scraper</p>
-              <p>• Genres: web-scraper/spotify-scraper</p>
+              <p>• Discovery: VCXf9fqUpGHnOdeUV</p>
+              <p>• Core Data: YZhD6hYc8daYSWXKs</p>
+              <p>• Genres: (optional)</p>
             </div>
           </CardContent>
         </Card>

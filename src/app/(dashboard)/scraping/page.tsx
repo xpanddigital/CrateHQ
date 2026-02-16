@@ -427,7 +427,7 @@ export default function ScrapingPage() {
                 <p className="text-sm text-destructive font-semibold mb-2">Discovery Error:</p>
                 <p className="text-sm text-destructive">{discoveryError}</p>
                 <p className="text-xs text-muted-foreground mt-2">
-                  Note: The actor "scrapearchitect/spotify-artist-scraper" may not exist or may require different input format. Try pasting URLs directly instead.
+                  Using Apify actor: VCXf9fqUpGHnOdeUV
                 </p>
               </div>
             )}

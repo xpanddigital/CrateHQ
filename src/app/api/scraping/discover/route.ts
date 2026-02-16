@@ -30,9 +30,9 @@ export async function POST(request: NextRequest) {
     }
 
     // Start discovery scraper
-    const actorId = 'scrapearchitect/spotify-artist-scraper'
+    const actorId = 'VCXf9fqUpGHnOdeUV'
     const input = {
-      searchTerms: keywords, // Note: Actor expects "searchTerms" not "searchQueries"
+      searchTerms: keywords,
       maxResults: maxResults || 50,
     }
 
