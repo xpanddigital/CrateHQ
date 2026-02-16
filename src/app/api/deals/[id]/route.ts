@@ -18,12 +18,20 @@ export async function GET(
       .from('deals')
       .select(`
         *,
-        artist:artists(*),
+        artist:artists(
+          *,
+          tags:artist_tags(tag:tags(*))
+        ),
         scout:profiles(id, full_name, avatar_url, email),
         conversations(*)
       `)
       .eq('id', params.id)
       .single()
+
+    // Transform tags structure
+    if (deal && deal.artist) {
+      deal.artist.tags = deal.artist.tags?.map((t: any) => t.tag) || []
+    }
 
     if (error) throw error
 

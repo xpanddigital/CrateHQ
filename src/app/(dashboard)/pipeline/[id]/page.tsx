@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -12,8 +12,19 @@ import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { ArrowLeft, Mail, Music, DollarSign, Calendar, User } from 'lucide-react'
+import { TagBadge } from '@/components/shared/TagBadge'
+import { ArrowLeft, Mail, Music, DollarSign, Calendar, Send, ArrowUpRight, ArrowDownLeft, Phone, Instagram, StickyNote, Clock } from 'lucide-react'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
+
+interface Conversation {
+  id: string
+  channel: 'email' | 'instagram' | 'phone' | 'note' | 'system'
+  direction: 'outbound' | 'inbound' | 'internal'
+  subject: string | null
+  body: string
+  ai_classification: string | null
+  sent_at: string
+}
 
 interface Deal {
   id: string
@@ -22,8 +33,10 @@ interface Deal {
   actual_deal_value: number | null
   commission_amount: number | null
   notes: string | null
+  next_followup_at: string | null
   stage_changed_at: string
   created_at: string
+  conversations: Conversation[]
   artist: {
     id: string
     name: string
@@ -35,6 +48,7 @@ interface Deal {
     estimated_offer_high: number | null
     email: string | null
     instagram_handle: string | null
+    tags?: Array<{ id: string; name: string; color: string }>
   }
   scout: {
     id: string
@@ -69,7 +83,12 @@ export default function DealDetailPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notes, setNotes] = useState('')
-  const [actualValue, setActualValue] = useState('')
+  const [nextFollowup, setNextFollowup] = useState('')
+  const [messageBody, setMessageBody] = useState('')
+  const [messageChannel, setMessageChannel] = useState<'email' | 'instagram' | 'phone' | 'note'>('email')
+  const [messageDirection, setMessageDirection] = useState<'outbound' | 'inbound'>('outbound')
+  const [sendingMessage, setSendingMessage] = useState(false)
+  const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const fetchDeal = useCallback(async () => {
     try {
@@ -78,7 +97,7 @@ export default function DealDetailPage() {
       if (data.deal) {
         setDeal(data.deal)
         setNotes(data.deal.notes || '')
-        setActualValue(data.deal.actual_deal_value?.toString() || '')
+        setNextFollowup(data.deal.next_followup_at ? data.deal.next_followup_at.split('T')[0] : '')
       }
     } catch (error) {
       console.error('Error fetching deal:', error)
@@ -90,6 +109,11 @@ export default function DealDetailPage() {
   useEffect(() => {
     fetchDeal()
   }, [fetchDeal])
+
+  useEffect(() => {
+    // Scroll to bottom when conversations update
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [deal?.conversations])
 
   const handleStageChange = async (newStage: string) => {
     if (!deal) return
@@ -117,8 +141,8 @@ export default function DealDetailPage() {
     try {
       const updates: any = { notes }
       
-      if (actualValue) {
-        updates.actual_deal_value = parseInt(actualValue)
+      if (nextFollowup) {
+        updates.next_followup_at = new Date(nextFollowup).toISOString()
       }
 
       const res = await fetch(`/api/deals/${deal.id}`, {
@@ -137,6 +161,57 @@ export default function DealDetailPage() {
     } finally {
       setSaving(false)
     }
+  }
+
+  const handleSendMessage = async () => {
+    if (!deal || !messageBody.trim()) return
+
+    setSendingMessage(true)
+    try {
+      const res = await fetch(`/api/deals/${deal.id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: messageChannel,
+          direction: messageDirection,
+          body: messageBody,
+        }),
+      })
+
+      if (!res.ok) throw new Error('Failed to send message')
+
+      setMessageBody('')
+      fetchDeal()
+    } catch (error) {
+      console.error('Error sending message:', error)
+      alert('Failed to send message')
+    } finally {
+      setSendingMessage(false)
+    }
+  }
+
+  const getChannelIcon = (channel: string) => {
+    switch (channel) {
+      case 'email': return <Mail className="h-4 w-4" />
+      case 'instagram': return <Instagram className="h-4 w-4" />
+      case 'phone': return <Phone className="h-4 w-4" />
+      case 'note': return <StickyNote className="h-4 w-4" />
+      default: return null
+    }
+  }
+
+  const getDirectionIcon = (direction: string) => {
+    switch (direction) {
+      case 'outbound': return <ArrowUpRight className="h-4 w-4" />
+      case 'inbound': return <ArrowDownLeft className="h-4 w-4" />
+      default: return null
+    }
+  }
+
+  const getDaysInStage = () => {
+    if (!deal) return 0
+    const days = Math.floor((Date.now() - new Date(deal.stage_changed_at).getTime()) / (1000 * 60 * 60 * 24))
+    return days
   }
 
   if (loading) {
@@ -167,33 +242,198 @@ export default function DealDetailPage() {
           </Button>
           <div>
             <h1 className="text-3xl font-bold">{deal.artist.name}</h1>
-            <p className="text-muted-foreground">Deal Details</p>
+            <p className="text-muted-foreground">
+              <Badge variant="outline" className="mr-2">{STAGES.find(s => s.value === deal.stage)?.label}</Badge>
+              {getDaysInStage()} days in stage
+            </p>
           </div>
         </div>
-        <div className="flex gap-2">
-          <Button variant="outline" asChild>
-            <Link href={`/artists/${deal.artist.id}`}>
-              <Music className="h-4 w-4 mr-2" />
-              View Artist
-            </Link>
-          </Button>
-          <Button onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Save Changes'}
-          </Button>
-        </div>
+        <Button onClick={handleSave} disabled={saving}>
+          {saving ? 'Saving...' : 'Save Changes'}
+        </Button>
       </div>
 
       <div className="grid gap-6 md:grid-cols-3">
-        <div className="md:col-span-2 space-y-6">
+        {/* Left Column - Conversation Thread */}
+        <div className="md:col-span-2">
+          <Card className="h-[calc(100vh-250px)] flex flex-col">
+            <CardHeader>
+              <CardTitle>Conversation</CardTitle>
+            </CardHeader>
+            <CardContent className="flex-1 flex flex-col overflow-hidden">
+              {/* Messages */}
+              <div className="flex-1 overflow-y-auto space-y-4 mb-4">
+                {deal.conversations && deal.conversations.length > 0 ? (
+                  deal.conversations.map((conv) => (
+                    <div
+                      key={conv.id}
+                      className={`flex ${conv.direction === 'outbound' ? 'justify-end' : 'justify-start'}`}
+                    >
+                      <div
+                        className={`max-w-[80%] rounded-lg p-4 ${
+                          conv.direction === 'outbound'
+                            ? 'bg-primary text-primary-foreground'
+                            : 'bg-muted'
+                        }`}
+                      >
+                        <div className="flex items-center gap-2 mb-2">
+                          {getDirectionIcon(conv.direction)}
+                          <Badge variant={conv.direction === 'outbound' ? 'secondary' : 'outline'} className="gap-1">
+                            {getChannelIcon(conv.channel)}
+                            {conv.channel}
+                          </Badge>
+                          {conv.ai_classification && (
+                            <Badge variant="outline" className="text-xs">
+                              {conv.ai_classification}
+                            </Badge>
+                          )}
+                        </div>
+                        {conv.subject && (
+                          <p className="font-semibold mb-1">{conv.subject}</p>
+                        )}
+                        <p className="whitespace-pre-wrap">{conv.body}</p>
+                        <p className="text-xs opacity-70 mt-2">
+                          {new Date(conv.sent_at).toLocaleString()}
+                        </p>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="flex items-center justify-center h-full text-muted-foreground">
+                    No messages yet. Start the conversation below.
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+
+              {/* Message Input */}
+              <div className="border-t pt-4 space-y-3">
+                <div className="flex gap-2">
+                  <Select value={messageDirection} onValueChange={(v: any) => setMessageDirection(v)}>
+                    <SelectTrigger className="w-[150px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="outbound">I sent this</SelectItem>
+                      <SelectItem value="inbound">They replied</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Select value={messageChannel} onValueChange={(v: any) => setMessageChannel(v)}>
+                    <SelectTrigger className="w-[130px]">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="email">Email</SelectItem>
+                      <SelectItem value="instagram">Instagram</SelectItem>
+                      <SelectItem value="phone">Phone</SelectItem>
+                      <SelectItem value="note">Note</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex gap-2">
+                  <Textarea
+                    placeholder="Type your message..."
+                    value={messageBody}
+                    onChange={(e) => setMessageBody(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        handleSendMessage()
+                      }
+                    }}
+                    rows={3}
+                    className="flex-1"
+                  />
+                  <Button 
+                    onClick={handleSendMessage} 
+                    disabled={sendingMessage || !messageBody.trim()}
+                    size="icon"
+                    className="h-auto"
+                  >
+                    <Send className="h-4 w-4" />
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Press Cmd/Ctrl + Enter to send
+                </p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right Sidebar - Artist Info & Deal Controls */}
+        <div className="space-y-4">
+          {/* Artist Info Card */}
           <Card>
             <CardHeader>
-              <CardTitle>Deal Information</CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-lg">Artist</CardTitle>
+                <Button variant="ghost" size="sm" asChild>
+                  <Link href={`/artists/${deal.artist.id}`}>
+                    <Music className="h-4 w-4" />
+                  </Link>
+                </Button>
+              </div>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="flex items-center gap-3">
+                {deal.artist.image_url && (
+                  <div className="relative h-16 w-16 rounded-lg overflow-hidden flex-shrink-0">
+                    <Image
+                      src={deal.artist.image_url}
+                      alt={deal.artist.name}
+                      fill
+                      className="object-cover"
+                    />
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <h3 className="font-semibold truncate">{deal.artist.name}</h3>
+                  {deal.artist.email && (
+                    <p className="text-sm text-muted-foreground truncate">{deal.artist.email}</p>
+                  )}
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Listeners</span>
+                  <span className="font-medium">{formatNumber(deal.artist.spotify_monthly_listeners)}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Streams/Mo</span>
+                  <span className="font-medium">{formatNumber(deal.artist.streams_last_month)}</span>
+                </div>
+              </div>
+
+              {deal.artist.estimated_offer_low && deal.artist.estimated_offer_high && (
+                <div className="pt-2 border-t">
+                  <p className="text-xs text-muted-foreground mb-1">Estimated Value</p>
+                  <p className="font-semibold">
+                    {formatCurrency(deal.artist.estimated_offer_low)} — {formatCurrency(deal.artist.estimated_offer_high)}
+                  </p>
+                </div>
+              )}
+
+              {deal.artist.tags && deal.artist.tags.length > 0 && (
+                <div className="flex flex-wrap gap-1">
+                  {deal.artist.tags.map((tag) => (
+                    <TagBadge key={tag.id} tag={tag} />
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Deal Controls */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Deal Controls</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               <div>
-                <Label>Stage</Label>
+                <Label className="text-xs">Stage</Label>
                 <Select value={deal.stage} onValueChange={handleStageChange}>
-                  <SelectTrigger>
+                  <SelectTrigger className="mt-1">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -207,135 +447,32 @@ export default function DealDetailPage() {
               </div>
 
               <div>
-                <Label>Actual Deal Value</Label>
+                <Label className="text-xs flex items-center gap-1">
+                  <Clock className="h-3 w-3" />
+                  Days in Stage
+                </Label>
+                <p className="text-2xl font-bold mt-1">{getDaysInStage()}</p>
+              </div>
+
+              <div>
+                <Label className="text-xs">Next Follow-up</Label>
                 <Input
-                  type="number"
-                  placeholder="Enter actual deal value"
-                  value={actualValue}
-                  onChange={(e) => setActualValue(e.target.value)}
+                  type="date"
+                  value={nextFollowup}
+                  onChange={(e) => setNextFollowup(e.target.value)}
+                  className="mt-1"
                 />
               </div>
 
               <div>
-                <Label>Notes</Label>
+                <Label className="text-xs">Notes</Label>
                 <Textarea
-                  placeholder="Add notes about this deal..."
+                  placeholder="Deal notes..."
                   value={notes}
                   onChange={(e) => setNotes(e.target.value)}
-                  rows={6}
+                  rows={4}
+                  className="mt-1"
                 />
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle>Artist Details</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="flex items-center gap-4">
-                {deal.artist.image_url && (
-                  <div className="relative h-20 w-20 rounded-lg overflow-hidden">
-                    <Image
-                      src={deal.artist.image_url}
-                      alt={deal.artist.name}
-                      fill
-                      className="object-cover"
-                    />
-                  </div>
-                )}
-                <div>
-                  <h3 className="font-semibold text-lg">{deal.artist.name}</h3>
-                  {deal.artist.email && (
-                    <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                      <Mail className="h-4 w-4" />
-                      {deal.artist.email}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Monthly Listeners</p>
-                  <p className="text-lg font-semibold">
-                    {formatNumber(deal.artist.spotify_monthly_listeners)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Streams/Month</p>
-                  <p className="text-lg font-semibold">
-                    {formatNumber(deal.artist.streams_last_month)}
-                  </p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        <div className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <DollarSign className="h-5 w-5" />
-                Valuation
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {deal.artist.estimated_offer_low && deal.artist.estimated_offer_high ? (
-                <>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Estimated Range</p>
-                    <p className="text-xl font-bold">
-                      {formatCurrency(deal.artist.estimated_offer_low)} —{' '}
-                      {formatCurrency(deal.artist.estimated_offer_high)}
-                    </p>
-                  </div>
-                  {deal.actual_deal_value && (
-                    <div>
-                      <p className="text-sm text-muted-foreground">Actual Value</p>
-                      <p className="text-xl font-bold text-green-600">
-                        {formatCurrency(deal.actual_deal_value)}
-                      </p>
-                    </div>
-                  )}
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground">No valuation available</p>
-              )}
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <User className="h-5 w-5" />
-                Scout
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="space-y-2">
-                <p className="font-medium">{deal.scout.full_name}</p>
-                <p className="text-sm text-muted-foreground">{deal.scout.email}</p>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Calendar className="h-5 w-5" />
-                Timeline
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              <div>
-                <p className="text-sm text-muted-foreground">Created</p>
-                <p className="font-medium">{formatDate(deal.created_at)}</p>
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground">Stage Changed</p>
-                <p className="font-medium">{formatDate(deal.stage_changed_at)}</p>
               </div>
             </CardContent>
           </Card>
