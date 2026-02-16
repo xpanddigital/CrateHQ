@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { TagBadge } from '@/components/shared/TagBadge'
-import { Plus, Search, Upload, Users, CheckCircle, XCircle } from 'lucide-react'
+import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download } from 'lucide-react'
 import { Artist } from '@/types/database'
 import { formatNumber, formatDate } from '@/lib/utils'
 import { ArtistAddModal } from '@/components/artists/ArtistAddModal'
@@ -35,6 +35,7 @@ export default function ArtistsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showBulkTagModal, setShowBulkTagModal] = useState(false)
   const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false)
+  const [valuating, setValuating] = useState(false)
 
   const fetchArtists = useCallback(async () => {
     setLoading(true)
@@ -81,6 +82,59 @@ export default function ArtistsPage() {
     }
   }
 
+  const handleBulkValuate = async () => {
+    setValuating(true)
+    try {
+      const res = await fetch('/api/artists/bulk-valuate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artistIds: Array.from(selectedIds) }),
+      })
+
+      if (!res.ok) throw new Error('Valuation failed')
+
+      const data = await res.json()
+      alert(`Valuated ${data.valuated} artists, skipped ${data.skipped}`)
+      setSelectedIds(new Set())
+      fetchArtists()
+    } catch (error) {
+      console.error('Error valuating:', error)
+    } finally {
+      setValuating(false)
+    }
+  }
+
+  const handleValuateAll = async () => {
+    if (!confirm('Valuate all artists without estimates? This may take a while.')) return
+
+    setValuating(true)
+    try {
+      const res = await fetch('/api/artists/bulk-valuate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ all: true }),
+      })
+
+      if (!res.ok) throw new Error('Valuation failed')
+
+      const data = await res.json()
+      alert(`Valuated ${data.valuated} artists, skipped ${data.skipped}`)
+      fetchArtists()
+    } catch (error) {
+      console.error('Error valuating:', error)
+    } finally {
+      setValuating(false)
+    }
+  }
+
+  const handleExport = (type: 'full' | 'valuation') => {
+    const params = new URLSearchParams({
+      type,
+      ...(search && { search }),
+    })
+    window.open(`/api/artists/export?${params}`, '_blank')
+  }
+
   if (loading && artists.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -99,6 +153,14 @@ export default function ArtistsPage() {
           </p>
         </div>
         <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => handleExport('full')}>
+            <Download className="h-4 w-4 mr-2" />
+            Export CSV
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => handleExport('valuation')}>
+            <Download className="h-4 w-4 mr-2" />
+            Export Valuation Data
+          </Button>
           <Button variant="outline" asChild>
             <Link href="/artists/import">
               <Upload className="h-4 w-4 mr-2" />
@@ -167,8 +229,26 @@ export default function ArtistsPage() {
               >
                 Enrich ({selectedIds.size})
               </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkValuate}
+                disabled={valuating}
+              >
+                <DollarSign className="h-4 w-4 mr-1" />
+                Valuate ({selectedIds.size})
+              </Button>
             </div>
           )}
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleValuateAll}
+            disabled={valuating}
+          >
+            <DollarSign className="h-4 w-4 mr-1" />
+            Valuate All
+          </Button>
         </div>
       </Card>
 
@@ -195,6 +275,7 @@ export default function ArtistsPage() {
                 </TableHead>
                 <TableHead>Name</TableHead>
                 <TableHead>Streams</TableHead>
+                <TableHead>Est. Value</TableHead>
                 <TableHead>Email</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Tags</TableHead>
@@ -221,6 +302,15 @@ export default function ArtistsPage() {
                   </TableCell>
                   <TableCell>
                     {formatNumber(artist.spotify_monthly_listeners)}
+                  </TableCell>
+                  <TableCell>
+                    {artist.estimated_offer_low && artist.estimated_offer_high ? (
+                      <span className="text-sm font-medium">
+                        {formatCurrency(artist.estimated_offer_low)} — {formatCurrency(artist.estimated_offer_high)}
+                      </span>
+                    ) : (
+                      <span className="text-muted-foreground text-sm">—</span>
+                    )}
                   </TableCell>
                   <TableCell>
                     {artist.email ? (
