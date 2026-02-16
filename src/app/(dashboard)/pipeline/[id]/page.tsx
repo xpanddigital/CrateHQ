@@ -13,7 +13,7 @@ import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { TagBadge } from '@/components/shared/TagBadge'
-import { ArrowLeft, Mail, Music, DollarSign, Calendar, Send, ArrowUpRight, ArrowDownLeft, Phone, Instagram, StickyNote, Clock } from 'lucide-react'
+import { ArrowLeft, Mail, Music, DollarSign, Calendar, Send, ArrowUpRight, ArrowDownLeft, Phone, Instagram, StickyNote, Clock, Sparkles, Check, X, Edit } from 'lucide-react'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
 
 interface Conversation {
@@ -88,6 +88,12 @@ export default function DealDetailPage() {
   const [messageChannel, setMessageChannel] = useState<'email' | 'instagram' | 'phone' | 'note'>('email')
   const [messageDirection, setMessageDirection] = useState<'outbound' | 'inbound'>('outbound')
   const [sendingMessage, setSendingMessage] = useState(false)
+  const [aiDraft, setAiDraft] = useState('')
+  const [showAiDraft, setShowAiDraft] = useState(false)
+  const [generatingAi, setGeneratingAi] = useState(false)
+  const [editingAiDraft, setEditingAiDraft] = useState(false)
+  const [showFollowupDraft, setShowFollowupDraft] = useState(false)
+  const [followupDraft, setFollowupDraft] = useState({ subject: '', body: '' })
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
   const fetchDeal = useCallback(async () => {
@@ -212,6 +218,126 @@ export default function DealDetailPage() {
     if (!deal) return 0
     const days = Math.floor((Date.now() - new Date(deal.stage_changed_at).getTime()) / (1000 * 60 * 60 * 24))
     return days
+  }
+
+  const getLatestInboundMessage = () => {
+    if (!deal?.conversations) return null
+    const inbound = deal.conversations
+      .filter(c => c.direction === 'inbound')
+      .sort((a, b) => new Date(b.sent_at).getTime() - new Date(a.sent_at).getTime())
+    return inbound[0] || null
+  }
+
+  const handleGenerateAiReply = async () => {
+    const latestInbound = getLatestInboundMessage()
+    if (!latestInbound || !deal) return
+
+    setGeneratingAi(true)
+    try {
+      const res = await fetch('/api/ai/generate-reply', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          replyText: latestInbound.body,
+          dealId: deal.id,
+          artistId: deal.artist.id,
+          classification: latestInbound.ai_classification,
+        }),
+      })
+
+      if (!res.ok) throw new Error('Failed to generate reply')
+
+      const data = await res.json()
+      setAiDraft(data.draft)
+      setShowAiDraft(true)
+      setEditingAiDraft(false)
+    } catch (error) {
+      console.error('Error generating AI reply:', error)
+      alert('Failed to generate AI reply')
+    } finally {
+      setGeneratingAi(false)
+    }
+  }
+
+  const handleApproveAiDraft = async () => {
+    if (!aiDraft.trim()) return
+
+    setSendingMessage(true)
+    try {
+      const res = await fetch(`/api/deals/${deal?.id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'email',
+          direction: 'outbound',
+          body: aiDraft,
+        }),
+      })
+
+      if (!res.ok) throw new Error('Failed to send message')
+
+      setAiDraft('')
+      setShowAiDraft(false)
+      fetchDeal()
+    } catch (error) {
+      console.error('Error sending message:', error)
+      alert('Failed to send message')
+    } finally {
+      setSendingMessage(false)
+    }
+  }
+
+  const handleGenerateFollowup = async () => {
+    if (!deal) return
+
+    setGeneratingAi(true)
+    try {
+      const res = await fetch('/api/ai/generate-followup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ dealId: deal.id }),
+      })
+
+      if (!res.ok) throw new Error('Failed to generate followup')
+
+      const data = await res.json()
+      setFollowupDraft({ subject: data.subject, body: data.body })
+      setShowFollowupDraft(true)
+    } catch (error) {
+      console.error('Error generating followup:', error)
+      alert('Failed to generate followup')
+    } finally {
+      setGeneratingAi(false)
+    }
+  }
+
+  const handleApproveFollowup = async () => {
+    if (!followupDraft.body.trim()) return
+
+    setSendingMessage(true)
+    try {
+      const res = await fetch(`/api/deals/${deal?.id}/message`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          channel: 'email',
+          direction: 'outbound',
+          subject: followupDraft.subject,
+          body: followupDraft.body,
+        }),
+      })
+
+      if (!res.ok) throw new Error('Failed to send message')
+
+      setFollowupDraft({ subject: '', body: '' })
+      setShowFollowupDraft(false)
+      fetchDeal()
+    } catch (error) {
+      console.error('Error sending message:', error)
+      alert('Failed to send message')
+    } finally {
+      setSendingMessage(false)
+    }
   }
 
   if (loading) {
@@ -358,6 +484,172 @@ export default function DealDetailPage() {
               </div>
             </CardContent>
           </Card>
+
+          {/* AI Draft Panel */}
+          {getLatestInboundMessage() && !showAiDraft && (
+            <Card className="border-primary/50">
+              <CardContent className="pt-6">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    <div>
+                      <p className="font-medium">AI Assistant Ready</p>
+                      {getLatestInboundMessage()?.ai_classification && (
+                        <p className="text-sm text-muted-foreground">
+                          Detected: <Badge variant="outline" className="ml-1">
+                            {getLatestInboundMessage()?.ai_classification}
+                          </Badge>
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  <Button onClick={handleGenerateAiReply} disabled={generatingAi}>
+                    {generatingAi ? (
+                      <>
+                        <LoadingSpinner size="sm" className="mr-2" />
+                        Generating...
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-4 w-4 mr-2" />
+                        Generate AI Reply
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* AI Draft Display */}
+          {showAiDraft && (
+            <Card className="border-primary">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    AI Generated Reply
+                  </CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowAiDraft(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <Textarea
+                  value={aiDraft}
+                  onChange={(e) => setAiDraft(e.target.value)}
+                  rows={12}
+                  className="font-mono text-sm"
+                  disabled={!editingAiDraft}
+                />
+                <div className="flex gap-2">
+                  {!editingAiDraft ? (
+                    <>
+                      <Button
+                        onClick={handleApproveAiDraft}
+                        disabled={sendingMessage}
+                        className="flex-1"
+                      >
+                        <Check className="h-4 w-4 mr-2" />
+                        Approve & Send
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setEditingAiDraft(true)}
+                      >
+                        <Edit className="h-4 w-4 mr-2" />
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setShowAiDraft(false)}
+                      >
+                        Dismiss
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        onClick={handleApproveAiDraft}
+                        disabled={sendingMessage}
+                        className="flex-1"
+                      >
+                        <Check className="h-4 w-4 mr-2" />
+                        Send Edited Version
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setEditingAiDraft(false)}
+                      >
+                        Cancel Edit
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Follow-up Draft Display */}
+          {showFollowupDraft && (
+            <Card className="border-primary">
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <CardTitle className="flex items-center gap-2">
+                    <Sparkles className="h-5 w-5 text-primary" />
+                    AI Generated Follow-up
+                  </CardTitle>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setShowFollowupDraft(false)}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <Label className="text-xs">Subject</Label>
+                  <Input
+                    value={followupDraft.subject}
+                    onChange={(e) => setFollowupDraft({ ...followupDraft, subject: e.target.value })}
+                    className="mt-1"
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs">Body</Label>
+                  <Textarea
+                    value={followupDraft.body}
+                    onChange={(e) => setFollowupDraft({ ...followupDraft, body: e.target.value })}
+                    rows={12}
+                    className="font-mono text-sm mt-1"
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    onClick={handleApproveFollowup}
+                    disabled={sendingMessage}
+                    className="flex-1"
+                  >
+                    <Check className="h-4 w-4 mr-2" />
+                    Approve & Send
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowFollowupDraft(false)}
+                  >
+                    Dismiss
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          )}
         </div>
 
         {/* Right Sidebar - Artist Info & Deal Controls */}
@@ -474,6 +766,25 @@ export default function DealDetailPage() {
                   className="mt-1"
                 />
               </div>
+
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={handleGenerateFollowup}
+                disabled={generatingAi}
+              >
+                {generatingAi ? (
+                  <>
+                    <LoadingSpinner size="sm" className="mr-2" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="h-4 w-4 mr-2" />
+                    Generate Follow-up
+                  </>
+                )}
+              </Button>
             </CardContent>
           </Card>
         </div>

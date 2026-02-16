@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { classifyReply } from '@/lib/ai/sdr'
 
+// POST /api/ai/classify - Classify artist reply
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
@@ -14,16 +15,16 @@ export async function POST(request: NextRequest) {
     const { replyText, conversationHistory } = await request.json()
 
     if (!replyText) {
-      return NextResponse.json({ error: 'Reply text is required' }, { status: 400 })
+      return NextResponse.json({ error: 'replyText is required' }, { status: 400 })
     }
 
-    const classification = await classifyReply(replyText, conversationHistory)
+    const result = classifyReply(replyText, conversationHistory || [])
 
-    return NextResponse.json(classification)
+    return NextResponse.json(result)
   } catch (error: any) {
     console.error('Error classifying reply:', error)
     return NextResponse.json(
-      { error: error.message || 'Classification failed' },
+      { error: error.message || 'Failed to classify reply' },
       { status: 500 }
     )
   }
