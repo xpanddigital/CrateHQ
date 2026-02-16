@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { DealStage } from '@/types/database'
 
+// POST /api/deals/[id]/move - Move deal to new stage
 export async function POST(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -17,13 +17,25 @@ export async function POST(
     const { stage } = await request.json()
 
     if (!stage) {
-      return NextResponse.json({ error: 'Stage is required' }, { status: 400 })
+      return NextResponse.json({ error: 'stage is required' }, { status: 400 })
+    }
+
+    // Validate stage
+    const validStages = [
+      'new', 'enriched', 'outreach_queued', 'contacted', 'replied',
+      'interested', 'call_scheduled', 'call_completed', 'qualified',
+      'handed_off', 'in_negotiation', 'contract_sent',
+      'closed_won', 'closed_lost', 'nurture'
+    ]
+
+    if (!validStages.includes(stage)) {
+      return NextResponse.json({ error: 'Invalid stage' }, { status: 400 })
     }
 
     const { data: deal, error } = await supabase
       .from('deals')
       .update({
-        stage: stage as DealStage,
+        stage,
         stage_changed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })

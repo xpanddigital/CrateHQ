@@ -109,16 +109,24 @@ export default function ArtistDetailPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           artist_id: artist.id,
-          notes: `Deal created for ${artist.name}`,
         }),
       })
 
-      if (!res.ok) throw new Error('Failed to create deal')
-
       const data = await res.json()
+
+      if (!res.ok) {
+        if (res.status === 409) {
+          alert('An active deal already exists for this artist')
+        } else {
+          throw new Error(data.error || 'Failed to create deal')
+        }
+        return
+      }
+
       router.push(`/pipeline/${data.deal.id}`)
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error creating deal:', error)
+      alert(error.message || 'Failed to create deal')
     }
   }
 

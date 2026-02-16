@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
+// GET /api/deals/[id] - Get deal with artist data and conversations
 export async function GET(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -18,7 +19,7 @@ export async function GET(
       .select(`
         *,
         artist:artists(*),
-        scout:profiles(*),
+        scout:profiles(id, full_name, avatar_url, email),
         conversations(*)
       `)
       .eq('id', params.id)
@@ -26,11 +27,8 @@ export async function GET(
 
     if (error) throw error
 
-    // Sort conversations by sent_at
-    if (deal.conversations) {
-      deal.conversations.sort((a: any, b: any) => 
-        new Date(a.sent_at).getTime() - new Date(b.sent_at).getTime()
-      )
+    if (!deal) {
+      return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
     }
 
     return NextResponse.json({ deal })
@@ -43,6 +41,7 @@ export async function GET(
   }
 }
 
+// PATCH /api/deals/[id] - Update deal fields
 export async function PATCH(
   request: NextRequest,
   { params }: { params: { id: string } }
@@ -55,20 +54,22 @@ export async function PATCH(
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    const body = await request.json()
+    const updates = await request.json()
+
+    // Remove fields that shouldn't be directly updated
+    delete updates.id
+    delete updates.created_at
+    delete updates.artist_id
+    delete updates.scout_id
 
     const { data: deal, error } = await supabase
       .from('deals')
       .update({
-        ...body,
+        ...updates,
         updated_at: new Date().toISOString(),
       })
       .eq('id', params.id)
-      .select(`
-        *,
-        artist:artists(*),
-        scout:profiles(*)
-      `)
+      .select()
       .single()
 
     if (error) throw error

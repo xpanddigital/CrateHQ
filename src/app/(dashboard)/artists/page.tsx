@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { TagBadge } from '@/components/shared/TagBadge'
-import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2 } from 'lucide-react'
+import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2, Briefcase } from 'lucide-react'
 import { Artist } from '@/types/database'
 import { formatNumber, formatDate, formatCurrency } from '@/lib/utils'
 import { ArtistAddModal } from '@/components/artists/ArtistAddModal'
@@ -37,6 +37,7 @@ export default function ArtistsPage() {
   const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false)
   const [valuating, setValuating] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [creatingDeals, setCreatingDeals] = useState(false)
 
   const fetchArtists = useCallback(async () => {
     setLoading(true)
@@ -187,6 +188,32 @@ export default function ArtistsPage() {
     }
   }
 
+  const handleBulkCreateDeals = async () => {
+    if (!confirm(`Create deals for ${selectedIds.size} selected artist(s)?`)) {
+      return
+    }
+
+    setCreatingDeals(true)
+    try {
+      const res = await fetch('/api/deals/bulk-create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artistIds: Array.from(selectedIds) }),
+      })
+
+      if (!res.ok) throw new Error('Failed to create deals')
+
+      const data = await res.json()
+      alert(`Created ${data.created} deal(s), skipped ${data.skipped} (already have active deals)`)
+      setSelectedIds(new Set())
+    } catch (error) {
+      console.error('Error creating deals:', error)
+      alert('Failed to create deals')
+    } finally {
+      setCreatingDeals(false)
+    }
+  }
+
   if (loading && artists.length === 0) {
     return (
       <div className="flex items-center justify-center h-full">
@@ -289,6 +316,15 @@ export default function ArtistsPage() {
               >
                 <DollarSign className="h-4 w-4 mr-1" />
                 Valuate ({selectedIds.size})
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkCreateDeals}
+                disabled={creatingDeals}
+              >
+                <Briefcase className="h-4 w-4 mr-1" />
+                Create Deals ({selectedIds.size})
               </Button>
               <Button
                 variant="destructive"
