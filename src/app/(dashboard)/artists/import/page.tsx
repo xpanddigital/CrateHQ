@@ -14,6 +14,7 @@ interface PreviewRow {
   name: string
   email?: string
   instagram_handle?: string
+  instagram_followers?: number
   website?: string
   spotify_monthly_listeners?: number
   streams_last_month?: number
@@ -39,6 +40,76 @@ export default function ArtistsImportPage() {
     }
   }
 
+  // Helper function to parse numbers and strip commas
+  const parseNumber = (val: string): number => {
+    if (!val) return 0
+    return parseInt(val.replace(/,/g, '').replace(/\s/g, '')) || 0
+  }
+
+  // Map CSV column to row field
+  const mapColumnToRow = (header: string, value: string, row: PreviewRow) => {
+    if (!value && ![
+      'monthly_listeners', 'spotify_monthly_listeners', 'spotify_monthly_listners', 'listeners', 'monthly listeners',
+      'streams', 'streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams',
+      'tracks', 'track_count', 'track count', 'number_of_tracks', 'total_tracks',
+      'instagram_followers', 'instagram followers', 'ig_followers'
+    ].includes(header)) return
+
+    switch (header) {
+      case 'name':
+      case 'artist_name':
+      case 'artist':
+        row.name = value
+        break
+      case 'email':
+        row.email = value
+        break
+      case 'instagram':
+      case 'instagram_handle':
+      case 'ig_handle':
+        row.instagram_handle = value.replace('@', '')
+        break
+      case 'instagram_followers':
+      case 'instagram followers':
+      case 'ig_followers':
+        row.instagram_followers = parseNumber(value)
+        break
+      case 'website':
+      case 'url':
+        row.website = value
+        break
+      case 'monthly_listeners':
+      case 'spotify_monthly_listeners':
+      case 'spotify_monthly_listners': // Common typo
+      case 'listeners':
+      case 'monthly listeners':
+        row.spotify_monthly_listeners = parseNumber(value)
+        break
+      case 'streams':
+      case 'streams_last_month':
+      case 'streams last month':
+      case 'last_month_streams':
+      case 'monthly_streams':
+        row.streams_last_month = parseNumber(value)
+        break
+      case 'tracks':
+      case 'track_count':
+      case 'track count':
+      case 'number_of_tracks':
+      case 'total_tracks':
+        row.track_count = parseNumber(value)
+        break
+      case 'genres':
+      case 'genre':
+        row.genres = value.split(';').map(g => g.trim()).filter(Boolean)
+        break
+      case 'country':
+      case 'country_name':
+        row.country = value.toUpperCase()
+        break
+    }
+  }
+
   const parseCSV = async (file: File) => {
     try {
       const text = await file.text()
@@ -57,60 +128,7 @@ export default function ArtistsImportPage() {
         const row: PreviewRow = { name: '' }
 
         headers.forEach((header, index) => {
-          const value = values[index]
-          
-          // Always process numeric fields even if empty (will be 0)
-          const isNumericField = ['monthly_listeners', 'spotify_monthly_listeners', 'listeners', 'monthly listeners',
-                                   'streams', 'streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams',
-                                   'tracks', 'track_count', 'track count', 'number_of_tracks', 'total_tracks'].includes(header)
-          
-          if (!value && !isNumericField) return
-
-          switch (header) {
-            case 'name':
-            case 'artist_name':
-            case 'artist':
-              row.name = value
-              break
-            case 'email':
-              row.email = value
-              break
-            case 'instagram':
-            case 'instagram_handle':
-              row.instagram_handle = value.replace('@', '')
-              break
-            case 'website':
-            case 'url':
-              row.website = value
-              break
-            case 'monthly_listeners':
-            case 'spotify_monthly_listeners':
-            case 'listeners':
-            case 'monthly listeners':
-              row.spotify_monthly_listeners = parseInt(value.replace(/,/g, '')) || 0
-              break
-            case 'streams':
-            case 'streams_last_month':
-            case 'streams last month':
-            case 'last_month_streams':
-            case 'monthly_streams':
-              row.streams_last_month = parseInt(value.replace(/,/g, '')) || 0
-              break
-            case 'tracks':
-            case 'track_count':
-            case 'track count':
-            case 'number_of_tracks':
-            case 'total_tracks':
-              row.track_count = parseInt(value.replace(/,/g, '')) || 0
-              break
-            case 'genres':
-            case 'genre':
-              row.genres = value.split(';').map(g => g.trim()).filter(Boolean)
-              break
-            case 'country':
-              row.country = value.toUpperCase()
-              break
-          }
+          mapColumnToRow(header, values[index], row)
         })
 
         if (row.name) {
@@ -142,60 +160,7 @@ export default function ArtistsImportPage() {
         const row: PreviewRow = { name: '' }
 
         headers.forEach((header, index) => {
-          const value = values[index]
-          
-          // Always process numeric fields even if empty (will be 0)
-          const isNumericField = ['monthly_listeners', 'spotify_monthly_listeners', 'listeners', 'monthly listeners',
-                                   'streams', 'streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams',
-                                   'tracks', 'track_count', 'track count', 'number_of_tracks', 'total_tracks'].includes(header)
-          
-          if (!value && !isNumericField) return
-
-          switch (header) {
-            case 'name':
-            case 'artist_name':
-            case 'artist':
-              row.name = value
-              break
-            case 'email':
-              row.email = value
-              break
-            case 'instagram':
-            case 'instagram_handle':
-              row.instagram_handle = value.replace('@', '')
-              break
-            case 'website':
-            case 'url':
-              row.website = value
-              break
-            case 'monthly_listeners':
-            case 'spotify_monthly_listeners':
-            case 'listeners':
-            case 'monthly listeners':
-              row.spotify_monthly_listeners = parseInt(value.replace(/,/g, '')) || 0
-              break
-            case 'streams':
-            case 'streams_last_month':
-            case 'streams last month':
-            case 'last_month_streams':
-            case 'monthly_streams':
-              row.streams_last_month = parseInt(value.replace(/,/g, '')) || 0
-              break
-            case 'tracks':
-            case 'track_count':
-            case 'track count':
-            case 'number_of_tracks':
-            case 'total_tracks':
-              row.track_count = parseInt(value.replace(/,/g, '')) || 0
-              break
-            case 'genres':
-            case 'genre':
-              row.genres = value.split(';').map(g => g.trim()).filter(Boolean)
-              break
-            case 'country':
-              row.country = value.toUpperCase()
-              break
-          }
+          mapColumnToRow(header, values[index], row)
         })
 
         if (row.name) {
@@ -283,27 +248,37 @@ export default function ArtistsImportPage() {
                     <h3 className="font-semibold mb-2">
                       Preview (showing first 10 rows)
                     </h3>
-                    <div className="border rounded-lg overflow-hidden">
+                    <div className="border rounded-lg overflow-x-auto">
                       <Table>
                         <TableHeader>
                           <TableRow>
                             <TableHead>Name</TableHead>
+                            <TableHead>Listeners</TableHead>
+                            <TableHead>Streams/Mo</TableHead>
+                            <TableHead>Tracks</TableHead>
+                            <TableHead>Country</TableHead>
                             <TableHead>Email</TableHead>
                             <TableHead>Instagram</TableHead>
-                            <TableHead>Listeners</TableHead>
                             <TableHead>Genres</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {preview.map((row, index) => (
                             <TableRow key={index}>
-                              <TableCell>{row.name}</TableCell>
-                              <TableCell>{row.email || '—'}</TableCell>
-                              <TableCell>{row.instagram_handle || '—'}</TableCell>
+                              <TableCell className="font-medium">{row.name}</TableCell>
                               <TableCell>
                                 {row.spotify_monthly_listeners?.toLocaleString() || '—'}
                               </TableCell>
                               <TableCell>
+                                {row.streams_last_month?.toLocaleString() || '—'}
+                              </TableCell>
+                              <TableCell>
+                                {row.track_count?.toLocaleString() || '—'}
+                              </TableCell>
+                              <TableCell>{row.country || '—'}</TableCell>
+                              <TableCell className="text-sm">{row.email || '—'}</TableCell>
+                              <TableCell>{row.instagram_handle || '—'}</TableCell>
+                              <TableCell className="text-sm">
                                 {row.genres?.join(', ') || '—'}
                               </TableCell>
                             </TableRow>

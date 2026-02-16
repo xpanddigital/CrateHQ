@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       name: artist.name,
       email: artist.email || null,
       instagram_handle: artist.instagram_handle || null,
+      instagram_followers: artist.instagram_followers || 0,
       website: artist.website || null,
       spotify_monthly_listeners: artist.spotify_monthly_listeners || 0,
       streams_last_month: artist.streams_last_month || 0,
