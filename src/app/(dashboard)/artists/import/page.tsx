@@ -80,15 +80,22 @@ export default function ArtistsImportPage() {
             case 'monthly_listeners':
             case 'spotify_monthly_listeners':
             case 'listeners':
-              row.spotify_monthly_listeners = parseInt(value) || 0
+            case 'monthly listeners':
+              row.spotify_monthly_listeners = parseInt(value.replace(/,/g, '')) || 0
               break
             case 'streams':
             case 'streams_last_month':
-              row.streams_last_month = parseInt(value) || 0
+            case 'streams last month':
+            case 'last_month_streams':
+            case 'monthly_streams':
+              row.streams_last_month = parseInt(value.replace(/,/g, '')) || 0
               break
             case 'tracks':
             case 'track_count':
-              row.track_count = parseInt(value) || 0
+            case 'track count':
+            case 'number_of_tracks':
+            case 'total_tracks':
+              row.track_count = parseInt(value.replace(/,/g, '')) || 0
               break
             case 'genres':
             case 'genre':
@@ -152,15 +159,22 @@ export default function ArtistsImportPage() {
             case 'monthly_listeners':
             case 'spotify_monthly_listeners':
             case 'listeners':
-              row.spotify_monthly_listeners = parseInt(value) || 0
+            case 'monthly listeners':
+              row.spotify_monthly_listeners = parseInt(value.replace(/,/g, '')) || 0
               break
             case 'streams':
             case 'streams_last_month':
-              row.streams_last_month = parseInt(value) || 0
+            case 'streams last month':
+            case 'last_month_streams':
+            case 'monthly_streams':
+              row.streams_last_month = parseInt(value.replace(/,/g, '')) || 0
               break
             case 'tracks':
             case 'track_count':
-              row.track_count = parseInt(value) || 0
+            case 'track count':
+            case 'number_of_tracks':
+            case 'total_tracks':
+              row.track_count = parseInt(value.replace(/,/g, '')) || 0
               break
             case 'genres':
             case 'genre':
