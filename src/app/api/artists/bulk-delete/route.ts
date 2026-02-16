@@ -27,7 +27,40 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'No artist IDs provided' }, { status: 400 })
     }
 
-    // Delete artist_tags first (foreign key constraint)
+    // Delete related records first to handle foreign key constraints
+    // Note: artist_tags has ON DELETE CASCADE, but we'll delete explicitly for clarity
+    
+    // 1. Delete conversations (references both artist_id and deal_id)
+    const { error: conversationsError } = await supabase
+      .from('conversations')
+      .delete()
+      .in('artist_id', artistIds)
+
+    if (conversationsError) {
+      console.error('Error deleting conversations:', conversationsError)
+    }
+
+    // 2. Delete deals (has conversations that reference it)
+    const { error: dealsError } = await supabase
+      .from('deals')
+      .delete()
+      .in('artist_id', artistIds)
+
+    if (dealsError) {
+      console.error('Error deleting deals:', dealsError)
+    }
+
+    // 3. Delete enrichment jobs
+    const { error: enrichmentError } = await supabase
+      .from('enrichment_jobs')
+      .delete()
+      .in('artist_id', artistIds)
+
+    if (enrichmentError) {
+      console.error('Error deleting enrichment jobs:', enrichmentError)
+    }
+
+    // 4. Delete artist_tags (has ON DELETE CASCADE but delete explicitly)
     const { error: tagsError } = await supabase
       .from('artist_tags')
       .delete()
@@ -35,10 +68,9 @@ export async function POST(request: NextRequest) {
 
     if (tagsError) {
       console.error('Error deleting artist tags:', tagsError)
-      // Continue anyway, tags might not exist
     }
 
-    // Delete artists
+    // 5. Finally, delete artists
     const { error: deleteError } = await supabase
       .from('artists')
       .delete()
