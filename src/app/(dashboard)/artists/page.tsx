@@ -39,6 +39,8 @@ export default function ArtistsPage() {
   const [valuating, setValuating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [creatingDeals, setCreatingDeals] = useState(false)
+  const [loadingUnenriched, setLoadingUnenriched] = useState(false)
+  const [unenrichedCount, setUnenrichedCount] = useState(0)
 
   const fetchArtists = useCallback(async () => {
     setLoading(true)
@@ -66,6 +68,38 @@ export default function ArtistsPage() {
   useEffect(() => {
     fetchArtists()
   }, [fetchArtists])
+
+  // Fetch count of unenriched artists on mount
+  useEffect(() => {
+    const fetchUnenrichedCount = async () => {
+      try {
+        const res = await fetch('/api/artists/unenriched-count')
+        const data = await res.json()
+        setUnenrichedCount(data.count || 0)
+      } catch (error) {
+        console.error('Error fetching unenriched count:', error)
+      }
+    }
+    fetchUnenrichedCount()
+  }, [])
+
+  const handleEnrichAllUnenriched = async () => {
+    setLoadingUnenriched(true)
+    try {
+      // Fetch all unenriched artist IDs
+      const res = await fetch('/api/artists/unenriched-ids')
+      const data = await res.json()
+      
+      if (data.ids && data.ids.length > 0) {
+        setSelectedIds(new Set(data.ids))
+        setShowEnrichUnenrichedModal(true)
+      }
+    } catch (error) {
+      console.error('Error fetching unenriched artists:', error)
+    } finally {
+      setLoadingUnenriched(false)
+    }
+  }
 
   const toggleSelect = (id: string) => {
     const newSelected = new Set(selectedIds)
@@ -283,9 +317,17 @@ export default function ArtistsPage() {
         open={showEnrichUnenrichedModal}
         onOpenChange={setShowEnrichUnenrichedModal}
         artistIds={Array.from(selectedIds)}
-        onComplete={() => {
+        onComplete={async () => {
           setSelectedIds(new Set())
           fetchArtists()
+          // Refresh unenriched count
+          try {
+            const res = await fetch('/api/artists/unenriched-count')
+            const data = await res.json()
+            setUnenrichedCount(data.count || 0)
+          } catch (error) {
+            console.error('Error refreshing unenriched count:', error)
+          }
         }}
       />
 
@@ -369,19 +411,11 @@ export default function ArtistsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => {
-              // Get all unenriched artist IDs (no email)
-              const unenrichedIds = artists
-                .filter(a => !a.email || a.email.trim() === '')
-                .map(a => a.id)
-              if (unenrichedIds.length > 0) {
-                setSelectedIds(new Set(unenrichedIds))
-                setShowEnrichUnenrichedModal(true)
-              }
-            }}
+            onClick={handleEnrichAllUnenriched}
+            disabled={loadingUnenriched || unenrichedCount === 0}
           >
             <CheckCircle className="h-4 w-4 mr-1" />
-            Enrich Unenriched ({artists.filter(a => !a.email || a.email.trim() === '').length})
+            {loadingUnenriched ? 'Loading...' : `Enrich All Unenriched (${unenrichedCount})`}
           </Button>
         </div>
       </Card>
