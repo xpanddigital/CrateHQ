@@ -82,6 +82,15 @@ export async function POST(
       updateData.booking_agency = result.discovered_booking_agent
       console.log(`[Single Enrich] Saving discovered booking agent: ${result.discovered_booking_agent}`)
     }
+    if (result.discovered_linktree_url) {
+      const existingLinktree = currentLinks.linktree || currentLinks.linktree_url || ''
+      if (!existingLinktree) {
+        currentLinks.linktree = result.discovered_linktree_url
+        linksUpdated = true
+        updateData.social_links = currentLinks
+        console.log(`[Single Enrich] Saving discovered Linktree URL: ${result.discovered_linktree_url}`)
+      }
+    }
 
     const { error: updateError } = await supabase
       .from('artists')

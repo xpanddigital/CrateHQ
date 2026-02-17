@@ -5,14 +5,18 @@
  * The generic website-content-crawler only handles Linktree pages and artist websites.
  *
  * Pipeline flow (stops on first validated email):
+ *   Step 0: YouTube Discovery (YouTube Data API + Haiku verify)
  *   Step 1: YouTube  (streamers~youtube-scraper)       — ~45% hit rate
  *   Step 2: Instagram (apify~instagram-profile-scraper) — bio + businessEmail
  *   Step 3: Link-in-Bio (direct fetch → apify~website-content-crawler fallback)
  *   Step 4: Artist Website (direct fetch → apify~website-content-crawler fallback)
  *   Step 5: Facebook — SKIPPED (requires login, unreliable)
  *   Step 6: Remaining socials — SKIPPED (Twitter/Spotify/TikTok block scraping)
+ *   Step 7: Perplexity YouTube Deep Dive — focused YT channel email extraction
+ *   Step 8: Perplexity Instagram Deep Dive — focused IG profile email extraction
+ *   Step 9: Perplexity Generic Web Search — last-resort catch-all
  *
- * Cost: ~$0.013 per artist (~$13 per 1,000 artists)
+ * Cost: ~$0.013 per artist (scraping) + ~$0.019 per Perplexity step
  */
 
 import Anthropic from '@anthropic-ai/sdk'
@@ -66,6 +70,7 @@ export interface EnrichmentSummary {
   error_details?: string
   discovered_youtube_url?: string
   discovered_website?: string
+  discovered_linktree_url?: string
   discovered_management?: string
   discovered_booking_agent?: string
 }
@@ -1010,7 +1015,210 @@ Start by visiting their YouTube channel and extract all available contact inform
 }
 
 // ============================================================
-// STEP 8: Perplexity Sonar Pro — Last-Resort Generic Web Search
+// STEP 8: Perplexity Instagram Deep Dive (Focused Extraction)
+// ============================================================
+
+const INSTAGRAM_DEEP_DIVE_SYSTEM_PROMPT = `You are a music industry research assistant. Your job is to extract business contact information from a music artist's Instagram presence and any linked pages.
+
+You will be given a specific Instagram profile URL. Your task:
+
+1. GO TO the Instagram profile URL provided
+2. Read the bio text — artists sometimes put their booking email directly in their bio, or mention their management company
+3. Find the link in their bio — this is CRITICAL. Artists almost always have a link-in-bio that leads to:
+   - A Linktree, Beacons, Solo.to, or similar link aggregator page
+   - Their personal website
+   - A Spotify pre-save page (less useful, but check for other links on it)
+4. If you find a link-in-bio, GO TO that page:
+   - If it's a Linktree/Beacons/link aggregator: read ALL the links listed. Look for "Booking", "Contact", "Management", "Press", "Business" links and follow them
+   - If it's a personal website: look for a Contact, Booking, or About page
+5. Follow any booking/contact/management links you find and extract email addresses from those pages
+6. Also search for "{artist_name} booking email" or "{artist_name} management contact" to catch info from third-party sources
+
+WHAT TO RETURN:
+Return a JSON object with the following fields (and nothing else — no markdown, no backticks, no explanation):
+
+{
+  "email": "the best business email found, or null",
+  "email_source": "where you found it (e.g. 'Linktree booking link', 'Instagram bio', 'personal website contact page', 'management company site')",
+  "website": "the artist's website URL if found, or null",
+  "linktree_url": "the link-in-bio URL if found, or null",
+  "additional_emails": ["any other emails found, as an array"],
+  "management": "management company name if visible, or null",
+  "booking_agent": "booking agent or agency name if visible, or null"
+}
+
+PRIORITY ORDER FOR EMAILS:
+1. Booking agent email (e.g. agent@caa.com, name@paradigmagency.com)
+2. Management email (e.g. name@redlightmanagement.com)
+3. Email from Linktree/link-in-bio booking link
+4. Email directly in Instagram bio
+5. Email found on linked website contact page
+6. Any other email found via web search
+
+RULES:
+- Only return emails you actually find — do NOT guess or fabricate
+- If you find no email at all, set "email" to null
+- Do NOT return fan mail addresses unless absolutely nothing else exists
+- Do NOT return emails for a different artist
+- Instagram may block or limit access — if you can't read the profile, try searching for the same information via web search instead of giving up
+- Many Instagram bios say "For bookings: [email]" or "Mgmt: @managementcompany" — capture these
+- If the bio mentions a management company by name but no email, search for that management company's website and find the artist's email on their roster page`
+
+interface InstagramDeepDiveResult {
+  email: string | null
+  emailSource: string | null
+  website: string | null
+  linktreeUrl: string | null
+  additionalEmails: string[]
+  management: string | null
+  bookingAgent: string | null
+}
+
+function parseInstagramDeepDiveResponse(content: string): InstagramDeepDiveResult {
+  const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+
+  try {
+    const parsed = JSON.parse(cleaned)
+    return {
+      email: parsed.email || null,
+      emailSource: parsed.email_source || null,
+      website: parsed.website || null,
+      linktreeUrl: parsed.linktree_url || null,
+      additionalEmails: parsed.additional_emails || [],
+      management: parsed.management || null,
+      bookingAgent: parsed.booking_agent || null,
+    }
+  } catch {
+    const emailMatch = cleaned.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+    return {
+      email: emailMatch ? emailMatch[0].toLowerCase() : null,
+      emailSource: 'regex_fallback',
+      website: null,
+      linktreeUrl: null,
+      additionalEmails: [],
+      management: null,
+      bookingAgent: null,
+    }
+  }
+}
+
+function findInstagramUrl(artist: Artist): string {
+  const handle = findInstagramHandle(artist)
+  if (handle) return `https://www.instagram.com/${handle}/`
+
+  const sl = artist.social_links || {}
+  const igUrl = sl.instagram_url || sl.instagram || ''
+  if (igUrl && igUrl.includes('instagram.com')) return igUrl
+
+  return ''
+}
+
+async function step8_PerplexityInstagramDeepDive(
+  artist: Artist
+): Promise<{
+  emails: string[]; confidence: number; url: string; rawContent: string;
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string;
+  igDeepDiveResult?: InstagramDeepDiveResult
+}> {
+  const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: 'perplexity-ig-deep-dive', wasBlocked: false }
+
+  const perplexityKey = process.env.PERPLEXITY_API_KEY
+  if (!perplexityKey) {
+    console.log('[Step 8] No PERPLEXITY_API_KEY configured, skipping Instagram deep dive')
+    return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
+  }
+
+  const instagramUrl = findInstagramUrl(artist)
+  if (!instagramUrl) {
+    console.log('[Step 8] No Instagram URL available, skipping deep dive')
+    return { ...empty, errorDetails: 'No Instagram URL available for deep dive' }
+  }
+
+  console.log(`[Step 8] Perplexity Instagram Deep Dive — "${artist.name}" → ${instagramUrl}`)
+
+  let userPrompt = `Find business contact information for the music artist "${artist.name}".
+
+Instagram: ${instagramUrl}`
+
+  const ytUrl = findYouTubeUrl(artist)
+  if (ytUrl) userPrompt += `\nYouTube: ${ytUrl}`
+  if (artist.spotify_url) userPrompt += `\nSpotify: ${artist.spotify_url}`
+
+  userPrompt += `\n\nStart by visiting their Instagram profile. Read their bio, follow their link-in-bio, and extract all available contact information.`
+
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${perplexityKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sonar-pro',
+        messages: [
+          { role: 'system', content: INSTAGRAM_DEEP_DIVE_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 500,
+        temperature: 0.1,
+        web_search_options: { search_context_size: 'high' },
+      }),
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
+      console.error(`[Step 8] API error: ${errorDetail}`)
+      return { ...empty, url: instagramUrl, errorDetails: errorDetail }
+    }
+
+    const data = await res.json()
+    const content = data.choices?.[0]?.message?.content || ''
+    const citations: string[] = data.citations || []
+
+    console.log(`[Step 8] Perplexity IG deep dive response: "${content.slice(0, 300)}"`)
+    if (citations.length > 0) {
+      console.log(`[Step 8] Citations: ${citations.slice(0, 3).join(', ')}`)
+    }
+
+    const igResult = parseInstagramDeepDiveResponse(content)
+    console.log(`[Step 8] Parsed: email=${igResult.email}, source=${igResult.emailSource}, website=${igResult.website}, linktree=${igResult.linktreeUrl}, mgmt=${igResult.management}, agent=${igResult.bookingAgent}`)
+
+    const allFoundEmails: string[] = []
+    if (igResult.email && validatePerplexityEmail(igResult.email)) {
+      allFoundEmails.push(igResult.email)
+    }
+    for (const extra of igResult.additionalEmails) {
+      const cleaned = extra.toLowerCase().trim()
+      if (cleaned && validatePerplexityEmail(cleaned) && !allFoundEmails.includes(cleaned)) {
+        allFoundEmails.push(cleaned)
+      }
+    }
+
+    if (allFoundEmails.length > 0) {
+      console.log(`[Step 8] Instagram deep dive found emails: ${allFoundEmails.join(', ')}`)
+      return {
+        emails: allFoundEmails,
+        confidence: 0.75,
+        url: citations[0] || instagramUrl,
+        rawContent: content,
+        apifyUsed: false,
+        apifyActor: 'perplexity-ig-deep-dive',
+        wasBlocked: false,
+        igDeepDiveResult: igResult,
+      }
+    }
+
+    console.log('[Step 8] Instagram deep dive: no valid email found')
+    return { ...empty, url: instagramUrl, rawContent: content, igDeepDiveResult: igResult }
+  } catch (error: any) {
+    console.error(`[Step 8] Perplexity Instagram deep dive error:`, error.message)
+    return { ...empty, url: instagramUrl, errorDetails: error.message }
+  }
+}
+
+// ============================================================
+// STEP 9: Perplexity Sonar Pro — Last-Resort Generic Web Search
 // ============================================================
 
 const PERPLEXITY_SYSTEM_PROMPT = `You are an email research assistant for a music industry catalog fund.
@@ -1067,7 +1275,7 @@ function validatePerplexityEmail(email: string): boolean {
   return true
 }
 
-async function step8_PerplexityGeneric(
+async function step9_PerplexityGeneric(
   artist: Artist
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
@@ -1078,11 +1286,11 @@ async function step8_PerplexityGeneric(
 
   const perplexityKey = process.env.PERPLEXITY_API_KEY
   if (!perplexityKey) {
-    console.log('[Step 8] No PERPLEXITY_API_KEY configured, skipping')
+    console.log('[Step 9] No PERPLEXITY_API_KEY configured, skipping')
     return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
   }
 
-  console.log(`[Step 8] Perplexity Sonar Pro — generic web search for "${artist.name}" email`)
+  console.log(`[Step 9] Perplexity Sonar Pro — generic web search for "${artist.name}" email`)
 
   try {
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
@@ -1106,7 +1314,7 @@ async function step8_PerplexityGeneric(
     if (!res.ok) {
       const errorText = await res.text()
       const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
-      console.error(`[Step 8] API error: ${errorDetail}`)
+      console.error(`[Step 9] API error: ${errorDetail}`)
       return { ...empty, errorDetails: errorDetail }
     }
 
@@ -1114,21 +1322,21 @@ async function step8_PerplexityGeneric(
     const content = data.choices?.[0]?.message?.content || ''
     const citations: string[] = data.citations || []
 
-    console.log(`[Step 8] Perplexity response: "${content.slice(0, 200)}"`)
+    console.log(`[Step 9] Perplexity response: "${content.slice(0, 200)}"`)
     if (citations.length > 0) {
-      console.log(`[Step 8] Citations: ${citations.slice(0, 3).join(', ')}`)
+      console.log(`[Step 9] Citations: ${citations.slice(0, 3).join(', ')}`)
     }
 
     // Check for NO_EMAIL_FOUND
     if (content.includes('NO_EMAIL_FOUND') || !content.includes('@')) {
-      console.log('[Step 8] Perplexity generic: no email found')
+      console.log('[Step 9] Perplexity generic: no email found')
       return { ...empty, rawContent: content, citations }
     }
 
     // Extract and validate email
     const email = extractPerplexityEmail(content)
     if (email && validatePerplexityEmail(email)) {
-      console.log(`[Step 8] Perplexity generic found email: ${email}`)
+      console.log(`[Step 9] Perplexity generic found email: ${email}`)
       return {
         emails: [email],
         confidence: 0.65,
@@ -1141,10 +1349,10 @@ async function step8_PerplexityGeneric(
       }
     }
 
-    console.log(`[Step 8] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
+    console.log(`[Step 9] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
     return { ...empty, rawContent: content, errorDetails: `Invalid email extracted: ${email || 'none'}`, citations }
   } catch (error: any) {
-    console.error(`[Step 8] Perplexity error:`, error.message)
+    console.error(`[Step 9] Perplexity error:`, error.message)
     return { ...empty, errorDetails: error.message }
   }
 }
@@ -1173,6 +1381,7 @@ export async function enrichArtist(
     { method: 'facebook_about', label: 'Facebook (skipped — requires login)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'remaining_socials', label: 'Remaining Socials (skipped — blocked)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'perplexity_yt_deep_dive', label: 'Perplexity YouTube Deep Dive', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'perplexity_ig_deep_dive', label: 'Perplexity Instagram Deep Dive', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'perplexity_search', label: 'Perplexity Generic Web Search (last resort)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
   ]
 
@@ -1183,6 +1392,7 @@ export async function enrichArtist(
   let instagramExternalUrl: string | null = null
   let discoveredYouTubeUrl: string | undefined = undefined
   let discoveredWebsite: string | undefined = undefined
+  let discoveredLinktreeUrl: string | undefined = undefined
   let discoveredManagement: string | undefined = undefined
   let discoveredBookingAgent: string | undefined = undefined
 
@@ -1212,6 +1422,7 @@ export async function enrichArtist(
         errorDetails?: string
         discoveredYouTubeUrl?: string
         deepDiveResult?: DeepDiveResult
+        igDeepDiveResult?: InstagramDeepDiveResult
       }
 
       switch (step.method) {
@@ -1247,8 +1458,17 @@ export async function enrichArtist(
             if (result.deepDiveResult.bookingAgent) discoveredBookingAgent = result.deepDiveResult.bookingAgent
           }
           break
+        case 'perplexity_ig_deep_dive':
+          result = await step8_PerplexityInstagramDeepDive(artist)
+          if (result.igDeepDiveResult) {
+            if (result.igDeepDiveResult.website && !discoveredWebsite) discoveredWebsite = result.igDeepDiveResult.website
+            if (result.igDeepDiveResult.linktreeUrl && !discoveredLinktreeUrl) discoveredLinktreeUrl = result.igDeepDiveResult.linktreeUrl
+            if (result.igDeepDiveResult.management && !discoveredManagement) discoveredManagement = result.igDeepDiveResult.management
+            if (result.igDeepDiveResult.bookingAgent && !discoveredBookingAgent) discoveredBookingAgent = result.igDeepDiveResult.bookingAgent
+          }
+          break
         case 'perplexity_search':
-          result = await step8_PerplexityGeneric(artist)
+          result = await step9_PerplexityGeneric(artist)
           break
         default:
           result = { emails: [], confidence: 0, url: '', rawContent: '' }
@@ -1378,6 +1598,7 @@ export async function enrichArtist(
     error_details: allErrorDetails || undefined,
     discovered_youtube_url: discoveredYouTubeUrl,
     discovered_website: discoveredWebsite,
+    discovered_linktree_url: discoveredLinktreeUrl,
     discovered_management: discoveredManagement,
     discovered_booking_agent: discoveredBookingAgent,
   }

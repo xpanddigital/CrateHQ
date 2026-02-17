@@ -166,13 +166,20 @@ export default function EnrichmentLogsPage() {
       'Step 7: Emails Found',
       'Step 7: Actor',
       'Step 7: Error',
-      'Step 8: Method (Perplexity Generic)',
+      'Step 8: Method (Perplexity IG Deep Dive)',
       'Step 8: Status',
       'Step 8: Duration (ms)',
       'Step 8: URL',
       'Step 8: Emails Found',
       'Step 8: Actor',
       'Step 8: Error',
+      'Step 9: Method (Perplexity Generic)',
+      'Step 9: Status',
+      'Step 9: Duration (ms)',
+      'Step 9: URL',
+      'Step 9: Emails Found',
+      'Step 9: Actor',
+      'Step 9: Error',
       'Error Details',
       'Run By',
       'Created At',
@@ -192,8 +199,8 @@ export default function EnrichmentLogsPage() {
         log.total_duration_ms,
       ]
 
-      // Add step details (up to 9 steps: Step 0 discovery + Steps 1-8) with actor and error info
-      for (let i = 0; i < 9; i++) {
+      // Add step details (up to 10 steps: Step 0 discovery + Steps 1-9) with actor and error info
+      for (let i = 0; i < 10; i++) {
         const step = steps[i]
         if (step) {
           row.push(
