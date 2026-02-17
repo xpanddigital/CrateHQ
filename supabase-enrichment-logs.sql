@@ -16,15 +16,18 @@ CREATE TABLE IF NOT EXISTS public.enrichment_logs (
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_enrichment_logs_artist ON enrichment_logs(artist_id, created_at DESC);
-CREATE INDEX idx_enrichment_logs_run_by ON enrichment_logs(run_by, created_at DESC);
-CREATE INDEX idx_enrichment_logs_contactable ON enrichment_logs(is_contactable, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_enrichment_logs_artist ON enrichment_logs(artist_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_enrichment_logs_run_by ON enrichment_logs(run_by, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_enrichment_logs_contactable ON enrichment_logs(is_contactable, created_at DESC);
 
 -- Enable RLS
 ALTER TABLE enrichment_logs ENABLE ROW LEVEL SECURITY;
 
--- Policy: Users can view all logs
-CREATE POLICY "auth_all" ON enrichment_logs 
-    FOR ALL TO authenticated 
-    USING (true) 
-    WITH CHECK (true);
+-- Policy: Users can view all logs (use DO block to avoid error if already exists)
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_policies WHERE tablename = 'enrichment_logs' AND policyname = 'auth_all') THEN
+        CREATE POLICY "auth_all" ON enrichment_logs FOR ALL TO authenticated USING (true) WITH CHECK (true);
+    END IF;
+END
+$$;
