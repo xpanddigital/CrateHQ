@@ -565,7 +565,7 @@ export default function ArtistDetailPage() {
                     <div className="flex items-center gap-3">
                       <Globe className="h-4 w-4 text-muted-foreground" />
                       <a
-                        href={artist.social_links?.website || artist.website}
+                        href={artist.social_links?.website || artist.website || ''}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm hover:text-primary"
@@ -579,7 +579,7 @@ export default function ArtistDetailPage() {
                     <div className="flex items-center gap-3">
                       <Music className="h-4 w-4 text-muted-foreground" />
                       <a
-                        href={artist.social_links?.spotify || artist.spotify_url}
+                        href={artist.social_links?.spotify || artist.spotify_url || ''}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm hover:text-primary"
