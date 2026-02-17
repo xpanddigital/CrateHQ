@@ -48,7 +48,7 @@ interface Deal {
     estimated_offer_high: number | null
     email: string | null
     instagram_handle: string | null
-    tags?: Array<{ id: string; name: string; color: string }>
+    tags?: Array<{ id: string; name: string; color: string; description?: string | null; created_by?: string | null; created_at?: string }>
   }
   scout: {
     id: string
