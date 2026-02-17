@@ -17,21 +17,40 @@ export async function POST(request: NextRequest) {
     }
 
     // Transform and insert artists
-    const artistsToInsert = artists.map((artist: any) => ({
-      name: artist.name,
-      email: artist.email || null,
-      instagram_handle: artist.instagram_handle || null,
-      instagram_followers: artist.instagram_followers || 0,
-      website: artist.website || null,
-      spotify_monthly_listeners: artist.spotify_monthly_listeners || 0,
-      streams_last_month: artist.streams_last_month || 0,
-      track_count: artist.track_count || 0,
-      genres: artist.genres || [],
-      country: artist.country || null,
-      source: 'csv_import',
-      source_batch: new Date().toISOString(),
-      is_contactable: !!artist.email,
-    }))
+    const artistsToInsert = artists.map((artist: any) => {
+      // Extract Instagram handle from URL if provided
+      let instagram_handle = artist.instagram_handle
+      if (artist.instagram_url) {
+        const match = artist.instagram_url.match(/instagram\.com\/([^/?]+)/)
+        if (match) instagram_handle = match[1]
+      }
+
+      // Build social_links object from all available URLs
+      const social_links: Record<string, string> = {}
+      if (artist.instagram_url) social_links.instagram = artist.instagram_url
+      if (artist.facebook_url) social_links.facebook = artist.facebook_url
+      if (artist.twitter_url) social_links.twitter = artist.twitter_url
+      if (artist.spotify_url) social_links.spotify = artist.spotify_url
+      if (artist.website) social_links.website = artist.website
+
+      return {
+        name: artist.name,
+        email: artist.email || null,
+        instagram_handle: instagram_handle || null,
+        instagram_followers: artist.instagram_followers || artist.followers || 0,
+        website: artist.website || null,
+        spotify_url: artist.spotify_url || null,
+        spotify_monthly_listeners: artist.spotify_monthly_listeners || artist.monthly_listeners || 0,
+        streams_last_month: artist.streams_last_month || artist.est_streams_month || 0,
+        track_count: artist.track_count || (artist.album_count || 0) + (artist.single_count || 0),
+        genres: artist.genres || [],
+        country: artist.country || null,
+        social_links,
+        source: 'csv_import',
+        source_batch: new Date().toISOString(),
+        is_contactable: !!artist.email,
+      }
+    })
 
     const { data, error } = await supabase
       .from('artists')
