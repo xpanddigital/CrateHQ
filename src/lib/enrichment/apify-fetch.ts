@@ -205,35 +205,44 @@ export function collectArtistUrls(artist: any): string[] {
   const urls: string[] = []
   const socialLinks = artist.social_links || {}
 
-  // YouTube
-  if (socialLinks.youtube) {
-    let youtubeUrl = socialLinks.youtube
+  // YouTube - check both social_links and direct properties
+  const youtubeUrl = socialLinks.youtube_url || socialLinks.youtube || artist.youtube_url
+  if (youtubeUrl) {
+    let aboutUrl = youtubeUrl
     if (youtubeUrl.includes('/channel/') || youtubeUrl.includes('/@')) {
-      youtubeUrl = youtubeUrl.replace(/\/$/, '') + '/about'
+      aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
     } else if (youtubeUrl.includes('/c/')) {
-      youtubeUrl = youtubeUrl.replace(/\/$/, '') + '/about'
+      aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
     }
-    urls.push(youtubeUrl)
+    urls.push(aboutUrl)
   }
 
-  // Instagram
-  if (artist.instagram_handle) {
+  // Instagram - check both handle and URL formats
+  const instagramUrl = socialLinks.instagram_url || socialLinks.instagram || artist.instagram_url
+  if (instagramUrl) {
+    urls.push(instagramUrl)
+  } else if (artist.instagram_handle) {
     urls.push(`https://www.instagram.com/${artist.instagram_handle}/`)
   }
 
   // Facebook
-  if (socialLinks.facebook) {
-    urls.push(socialLinks.facebook.replace(/\/$/, '') + '/about')
+  const facebookUrl = socialLinks.facebook_url || socialLinks.facebook || artist.facebook_url
+  if (facebookUrl) {
+    urls.push(facebookUrl.replace(/\/$/, '') + '/about')
   }
 
   // Website (homepage + common contact pages)
-  if (socialLinks.website || artist.website) {
-    const website = socialLinks.website || artist.website
-    urls.push(website)
+  const website = socialLinks.website || artist.website
+  if (website) {
+    let fullWebsite = website
+    if (!fullWebsite.startsWith('http')) {
+      fullWebsite = 'https://' + fullWebsite
+    }
+    urls.push(fullWebsite)
     
     // Also try common contact pages
     try {
-      const baseUrl = new URL(website)
+      const baseUrl = new URL(fullWebsite)
       const domain = `${baseUrl.protocol}//${baseUrl.host}`
       urls.push(`${domain}/contact`)
       urls.push(`${domain}/booking`)
@@ -243,14 +252,24 @@ export function collectArtistUrls(artist: any): string[] {
   }
 
   // Twitter/X
-  if (socialLinks.twitter) {
-    urls.push(socialLinks.twitter)
+  const twitterUrl = socialLinks.twitter_url || socialLinks.twitter || artist.twitter_url
+  if (twitterUrl) {
+    urls.push(twitterUrl)
   }
 
   // TikTok
-  if (socialLinks.tiktok) {
-    urls.push(socialLinks.tiktok)
+  const tiktokUrl = socialLinks.tiktok_url || socialLinks.tiktok || artist.tiktok_url
+  if (tiktokUrl) {
+    urls.push(tiktokUrl)
   }
+
+  // Spotify
+  const spotifyUrl = socialLinks.spotify_url || socialLinks.spotify || artist.spotify_url
+  if (spotifyUrl) {
+    urls.push(spotifyUrl)
+  }
+
+  console.log(`[collectArtistUrls] Collected ${urls.length} URLs for ${artist.name}:`, urls)
 
   return urls
 }

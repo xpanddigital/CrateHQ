@@ -248,13 +248,17 @@ async function step1_YouTubeAbout(
   preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
-  let youtubeUrl = ''
-
-  // Find YouTube URL
-  for (const [key, value] of Object.entries(socialLinks)) {
-    if (typeof value === 'string' && (value.includes('youtube.com') || value.includes('youtu.be'))) {
-      youtubeUrl = value
-      break
+  
+  // Find YouTube URL - check both social_links and direct properties
+  let youtubeUrl = socialLinks.youtube_url || socialLinks.youtube || (artist as any).youtube_url || ''
+  
+  // Also search through all social_links entries for YouTube URLs
+  if (!youtubeUrl) {
+    for (const [key, value] of Object.entries(socialLinks)) {
+      if (typeof value === 'string' && (value.includes('youtube.com') || value.includes('youtu.be'))) {
+        youtubeUrl = value
+        break
+      }
     }
   }
 
@@ -270,6 +274,7 @@ async function step1_YouTubeAbout(
     aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
   }
 
+  console.log(`[Step 1] YouTube URL: ${youtubeUrl}`)
   console.log(`[Step 1] Fetching YouTube About: ${aboutUrl}`)
 
   let html = ''
@@ -370,12 +375,31 @@ async function step2_InstagramBio(
   apifyFallback?: ApifyEnrichmentFallback,
   preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls: string[]; apifyUsed: boolean; wasBlocked: boolean }> {
-  const handle = artist.instagram_handle
-  if (!handle) {
+  const socialLinks = artist.social_links || {}
+  
+  // Find Instagram URL - check both URL and handle formats
+  let instagramUrl = socialLinks.instagram_url || socialLinks.instagram || (artist as any).instagram_url || ''
+  
+  // If we have a handle but no URL, construct the URL
+  if (!instagramUrl && artist.instagram_handle) {
+    instagramUrl = `https://www.instagram.com/${artist.instagram_handle}/`
+  }
+  
+  // Also search through all social_links entries for Instagram URLs
+  if (!instagramUrl) {
+    for (const [key, value] of Object.entries(socialLinks)) {
+      if (typeof value === 'string' && value.includes('instagram.com')) {
+        instagramUrl = value
+        break
+      }
+    }
+  }
+  
+  if (!instagramUrl) {
     return { emails: [], confidence: 0, url: '', rawContent: '', linktreeUrls: [], apifyUsed: false, wasBlocked: false }
   }
 
-  const instagramUrl = `https://www.instagram.com/${handle}/`
+  console.log(`[Step 2] Instagram URL: ${instagramUrl}`)
   console.log(`[Step 2] Fetching Instagram: ${instagramUrl}`)
 
   let html = ''
@@ -398,6 +422,8 @@ async function step2_InstagramBio(
     // TIER 2: Apify fallback if blocked
     if (wasBlocked && apifyFallback) {
       console.log(`[Step 2] Instagram blocked, trying Apify fallback...`)
+      // Extract handle from URL if needed
+      const handle = artist.instagram_handle || instagramUrl.split('instagram.com/')[1]?.replace(/\//g, '') || ''
       const apifyResult = await apifyFallback.scrapeInstagram(handle)
       
       if (apifyResult.success) {
@@ -722,13 +748,17 @@ async function step5_FacebookAbout(
   preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
-  let facebookUrl = ''
-
-  // Find Facebook URL
-  for (const [key, value] of Object.entries(socialLinks)) {
-    if (typeof value === 'string' && (value.includes('facebook.com') || value.includes('fb.com'))) {
-      facebookUrl = value
-      break
+  
+  // Find Facebook URL - check both social_links and direct properties
+  let facebookUrl = socialLinks.facebook_url || socialLinks.facebook || (artist as any).facebook_url || ''
+  
+  // Also search through all social_links entries for Facebook URLs
+  if (!facebookUrl) {
+    for (const [key, value] of Object.entries(socialLinks)) {
+      if (typeof value === 'string' && (value.includes('facebook.com') || value.includes('fb.com'))) {
+        facebookUrl = value
+        break
+      }
     }
   }
 
@@ -739,6 +769,7 @@ async function step5_FacebookAbout(
   // Ensure we have the about page
   let aboutUrl = facebookUrl.replace(/\/$/, '') + '/about'
 
+  console.log(`[Step 5] Facebook URL: ${facebookUrl}`)
   console.log(`[Step 5] Fetching Facebook About: ${aboutUrl}`)
 
   let apifyUsed = false
@@ -809,14 +840,32 @@ async function step6_RemainingSocials(
 
   const socialUrls: { platform: string; url: string }[] = []
 
-  // Collect remaining social URLs
+  // Twitter/X - check both social_links and direct properties
+  const twitterUrl = socialLinks.twitter_url || socialLinks.twitter || (artist as any).twitter_url
+  if (twitterUrl) {
+    socialUrls.push({ platform: 'Twitter/X', url: twitterUrl })
+  }
+
+  // TikTok
+  const tiktokUrl = socialLinks.tiktok_url || socialLinks.tiktok || (artist as any).tiktok_url
+  if (tiktokUrl) {
+    socialUrls.push({ platform: 'TikTok', url: tiktokUrl })
+  }
+
+  // Spotify
+  const spotifyUrl = socialLinks.spotify_url || socialLinks.spotify || (artist as any).spotify_url
+  if (spotifyUrl) {
+    socialUrls.push({ platform: 'Spotify', url: spotifyUrl })
+  }
+
+  // Also collect any other social URLs from social_links
   for (const [key, value] of Object.entries(socialLinks)) {
     if (typeof value === 'string' && value.startsWith('http')) {
-      if (value.includes('twitter.com') || value.includes('x.com')) {
+      if ((value.includes('twitter.com') || value.includes('x.com')) && !twitterUrl) {
         socialUrls.push({ platform: 'Twitter/X', url: value })
-      } else if (value.includes('tiktok.com')) {
+      } else if (value.includes('tiktok.com') && !tiktokUrl) {
         socialUrls.push({ platform: 'TikTok', url: value })
-      } else if (value.includes('spotify.com')) {
+      } else if (value.includes('spotify.com') && !spotifyUrl) {
         socialUrls.push({ platform: 'Spotify', url: value })
       }
     }
@@ -825,6 +874,8 @@ async function step6_RemainingSocials(
   if (socialUrls.length === 0) {
     return { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
   }
+
+  console.log(`[Step 6] Collected social URLs:`, socialUrls.map(s => `${s.platform}: ${s.url}`))
 
   console.log(`[Step 6] Fetching remaining socials: ${socialUrls.map(s => s.platform).join(', ')}`)
 
