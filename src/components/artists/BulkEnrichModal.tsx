@@ -286,7 +286,7 @@ export function BulkEnrichModal({
                   Back to Summary
                 </Button>
               </div>
-              <EnrichmentLogViewer logs={results} />
+              <EnrichmentLogViewer logs={results.map((r, i) => ({ ...r, id: `bulk-${i}-${r.artist_id}` }))} />
             </div>
           )}
         </div>

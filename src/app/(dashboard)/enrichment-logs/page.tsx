@@ -91,7 +91,7 @@ export default function EnrichmentLogsPage() {
     total: logs.length,
     success: logs.filter(l => l.is_contactable).length,
     failed: logs.filter(l => !l.is_contactable).length,
-    successRate: logs.length > 0 ? (logs.filter(l => l.is_contactable).length / logs.length * 100).toFixed(1) : 0,
+    successRate: logs.length > 0 ? (logs.filter(l => l.is_contactable).length / logs.length * 100).toFixed(1) : '0',
   }
 
   const exportToCSV = () => {
@@ -115,61 +115,77 @@ export default function EnrichmentLogsPage() {
       'Step 1: Duration (ms)',
       'Step 1: URL',
       'Step 1: Emails Found',
+      'Step 1: Actor',
+      'Step 1: Error',
       'Step 2: Method',
       'Step 2: Status',
       'Step 2: Duration (ms)',
       'Step 2: URL',
       'Step 2: Emails Found',
+      'Step 2: Actor',
+      'Step 2: Error',
       'Step 3: Method',
       'Step 3: Status',
       'Step 3: Duration (ms)',
       'Step 3: URL',
       'Step 3: Emails Found',
+      'Step 3: Actor',
+      'Step 3: Error',
       'Step 4: Method',
       'Step 4: Status',
       'Step 4: Duration (ms)',
       'Step 4: URL',
       'Step 4: Emails Found',
+      'Step 4: Actor',
+      'Step 4: Error',
       'Step 5: Method',
       'Step 5: Status',
       'Step 5: Duration (ms)',
       'Step 5: URL',
       'Step 5: Emails Found',
+      'Step 5: Actor',
+      'Step 5: Error',
       'Step 6: Method',
       'Step 6: Status',
       'Step 6: Duration (ms)',
       'Step 6: URL',
       'Step 6: Emails Found',
+      'Step 6: Actor',
+      'Step 6: Error',
       'Error Details',
       'Run By',
       'Created At',
     ]
 
     const rows = filteredLogs.map(log => {
-      const row = [
+      const steps = log.steps || []
+      const allEmailsList = log.all_emails || []
+      const row: (string | number)[] = [
         log.artist_name,
         log.artist_id,
         log.email_found || '',
         log.email_confidence,
-        log.email_source,
-        log.all_emails.map(e => `${e.email} (${e.source})`).join('; '),
+        log.email_source || '',
+        allEmailsList.map(e => `${e.email} (${e.source})`).join('; '),
         log.is_contactable ? 'Yes' : 'No',
         log.total_duration_ms,
       ]
 
-      // Add step details (up to 6 steps)
+      // Add step details (up to 6 steps) with actor and error info
       for (let i = 0; i < 6; i++) {
-        const step = log.steps[i]
+        const step = steps[i]
         if (step) {
           row.push(
             step.label || step.method,
             step.status,
             step.duration_ms || 0,
             step.url_fetched || '',
-            step.emails_found?.join('; ') || ''
+            step.emails_found?.join('; ') || '',
+            step.apify_actor || '',
+            step.error_details || step.error || ''
           )
         } else {
-          row.push('', '', '', '', '')
+          row.push('', '', '', '', '', '', '')
         }
       }
 

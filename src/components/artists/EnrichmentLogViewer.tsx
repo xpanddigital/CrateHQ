@@ -24,6 +24,7 @@ interface EnrichmentStep {
 }
 
 interface EnrichmentLog {
+  id: string
   artist_id: string
   artist_name: string
   email_found: string | null
@@ -34,6 +35,7 @@ interface EnrichmentLog {
   total_duration_ms: number
   is_contactable: boolean
   error_details?: string
+  created_at?: string
 }
 
 interface EnrichmentLogViewerProps {
@@ -41,16 +43,16 @@ interface EnrichmentLogViewerProps {
 }
 
 export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
-  const [expandedArtists, setExpandedArtists] = useState<Set<string>>(new Set())
+  const [expandedLogs, setExpandedLogs] = useState<Set<string>>(new Set())
 
-  const toggleExpand = (artistId: string) => {
-    const newExpanded = new Set(expandedArtists)
-    if (newExpanded.has(artistId)) {
-      newExpanded.delete(artistId)
+  const toggleExpand = (logId: string) => {
+    const newExpanded = new Set(expandedLogs)
+    if (newExpanded.has(logId)) {
+      newExpanded.delete(logId)
     } else {
-      newExpanded.add(artistId)
+      newExpanded.add(logId)
     }
-    setExpandedArtists(newExpanded)
+    setExpandedLogs(newExpanded)
   }
 
   const getStatusIcon = (status: string) => {
@@ -97,15 +99,16 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
   return (
     <div className="space-y-3">
       {logs.map((log) => {
-        const isExpanded = expandedArtists.has(log.artist_id)
-        const successSteps = log.steps.filter(s => s.status === 'success').length
-        const failedSteps = log.steps.filter(s => s.status === 'failed').length
+        const logKey = log.id || log.artist_id
+        const isExpanded = expandedLogs.has(logKey)
+        const successSteps = (log.steps || []).filter(s => s.status === 'success').length
+        const failedSteps = (log.steps || []).filter(s => s.status === 'failed').length
 
         return (
-          <Card key={log.artist_id}>
+          <Card key={logKey}>
             <CardHeader 
               className="cursor-pointer hover:bg-accent/50 transition-colors"
-              onClick={() => toggleExpand(log.artist_id)}
+              onClick={() => toggleExpand(logKey)}
             >
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-3">
@@ -191,10 +194,10 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                 )}
 
                 {/* All Emails Found */}
-                {log.all_emails.length > 0 && (
+                {(log.all_emails || []).length > 0 && (
                   <div className="space-y-2">
                     <p className="text-xs font-medium text-muted-foreground">All Emails Found:</p>
-                    {log.all_emails.map((email, idx) => (
+                    {(log.all_emails || []).map((email, idx) => (
                       <div key={idx} className="flex items-center justify-between text-xs bg-muted/30 rounded px-2 py-1.5">
                         <span className="font-mono">{email.email}</span>
                         <div className="flex items-center gap-2">
@@ -211,7 +214,7 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                 {/* Step-by-Step Results */}
                 <div className="space-y-2">
                   <p className="text-xs font-medium text-muted-foreground">Enrichment Steps:</p>
-                  {log.steps.map((step, idx) => (
+                  {(log.steps || []).map((step, idx) => (
                     <div
                       key={idx}
                       className={cn(

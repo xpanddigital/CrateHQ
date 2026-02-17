@@ -98,21 +98,25 @@ export async function POST(request: NextRequest) {
         detailedLogs.push(result)
 
         // Save enrichment log to database
-        await supabase
+        const { error: logError } = await supabase
           .from('enrichment_logs')
           .insert({
             artist_id: artist.id,
             artist_name: artist.name,
             email_found: result.email_found,
             email_confidence: result.email_confidence,
-            email_source: result.email_source,
-            all_emails: result.all_emails,
-            steps: result.steps,
+            email_source: result.email_source || '',
+            all_emails: result.all_emails || [],
+            steps: result.steps || [],
             total_duration_ms: result.total_duration_ms,
             is_contactable: result.is_contactable,
             run_by: user.id,
             error_details: result.error_details || null,
           })
+
+        if (logError) {
+          console.error(`[Bulk Enrich] Failed to save log for ${artist.name}:`, logError.message, logError.details, logError.hint)
+        }
 
         // Delay between requests (1 second)
         if (i < artists.length - 1) {
