@@ -102,7 +102,7 @@ export async function GET(request: NextRequest) {
             created_at,
             updated_at,
             stage_changed_at,
-            artist:artists(id, name),
+            artist:artists!artist_id(id, name),
             scout:profiles!scout_id(full_name)
           `)
           .order('created_at', { ascending: false })
@@ -115,7 +115,7 @@ export async function GET(request: NextRequest) {
             created_at,
             updated_at,
             stage_changed_at,
-            artist:artists(id, name),
+            artist:artists!artist_id(id, name),
             scout:profiles!scout_id(full_name)
           `)
           .eq('scout_id', user.id)
@@ -132,7 +132,7 @@ export async function GET(request: NextRequest) {
             direction,
             subject,
             sent_at,
-            artist:artists(id, name),
+            artist:artists!artist_id(id, name),
             scout:profiles!scout_id(full_name)
           `)
           .order('sent_at', { ascending: false })
@@ -145,7 +145,7 @@ export async function GET(request: NextRequest) {
             direction,
             subject,
             sent_at,
-            artist:artists(id, name),
+            artist:artists!artist_id(id, name),
             scout:profiles!scout_id(full_name)
           `)
           .eq('scout_id', user.id)
