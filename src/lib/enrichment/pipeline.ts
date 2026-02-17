@@ -984,6 +984,8 @@ export async function enrichArtist(
   let linktreeUrls: string[] = []
 
   console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
+  console.log(`[Enrichment] APIFY_TOKEN present: ${!!process.env.APIFY_TOKEN}`)
+  console.log(`[Enrichment] Social links:`, JSON.stringify(artist.social_links || {}))
 
   // OPTIMIZATION: Batch fetch all URLs upfront using Apify
   // This turns 6 separate Apify runs into 1, saving time and cost
@@ -993,10 +995,16 @@ export async function enrichArtist(
   if (useApifyBatch) {
     console.log(`[Enrichment] Using batched Apify fetch for all URLs...`)
     const urls = collectArtistUrls(artist)
+    console.log(`[Enrichment] Collected ${urls.length} URLs:`, urls)
     if (urls.length > 0) {
+      console.log(`[Enrichment] Calling apifyFetchMultiple...`)
       pageContents = await apifyFetchMultiple(urls)
       console.log(`[Enrichment] Batched fetch complete: ${pageContents.size} pages loaded`)
+    } else {
+      console.log(`[Enrichment] No URLs collected, skipping Apify batch fetch`)
     }
+  } else {
+    console.log(`[Enrichment] Apify batch fetch disabled (no APIFY_TOKEN)`)
   }
 
   for (let i = 0; i < steps.length; i++) {

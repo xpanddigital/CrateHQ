@@ -41,13 +41,16 @@ export async function POST(request: NextRequest) {
       const artist = artists[i]
 
       console.log(`\n[Enrichment ${i + 1}/${artists.length}] Processing: ${artist.name}`)
-      console.log('- Social links:', Object.keys(artist.social_links || {}).length > 0 ? 'Yes' : 'No')
+      console.log('- Social links:', JSON.stringify(artist.social_links || {}))
       console.log('- Instagram:', artist.instagram_handle || 'None')
       console.log('- Website:', artist.website || 'None')
       console.log('- Biography:', artist.biography ? 'Yes' : 'No')
+      console.log('- APIFY_TOKEN present:', !!process.env.APIFY_TOKEN)
 
       try {
+        console.log('[Bulk Enrich] About to call enrichArtist...')
         const result = await enrichArtist(artist, apiKeys)
+        console.log('[Bulk Enrich] enrichArtist returned')
 
         console.log('- Result:', {
           email_found: result.email_found || 'None',
