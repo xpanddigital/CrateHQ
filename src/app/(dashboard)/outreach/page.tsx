@@ -15,9 +15,9 @@ import {
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { Mail, Send, Plus, CheckCircle, TrendingUp, Eye, Reply } from 'lucide-react'
+import { Mail, Send, Plus, CheckCircle, TrendingUp, Eye, Reply, History, User } from 'lucide-react'
 import { Artist, Tag } from '@/types/database'
-import { formatNumber, formatCurrency } from '@/lib/utils'
+import { formatNumber, formatCurrency, formatDate } from '@/lib/utils'
 
 export default function OutreachPage() {
   const [tags, setTags] = useState<Tag[]>([])
@@ -30,6 +30,7 @@ export default function OutreachPage() {
   const [pushing, setPushing] = useState(false)
   const [result, setResult] = useState<any>(null)
   const [analytics, setAnalytics] = useState<any[]>([])
+  const [outreachHistory, setOutreachHistory] = useState<any[]>([])
 
   const fetchFilteredArtists = useCallback(async () => {
     try {
@@ -64,6 +65,13 @@ export default function OutreachPage() {
         
         // Fetch analytics for each campaign
         fetchAnalytics(campaignsData.campaigns)
+      }
+
+      // Fetch outreach history
+      const historyRes = await fetch('/api/outreach/history')
+      const historyData = await historyRes.json()
+      if (historyData.logs) {
+        setOutreachHistory(historyData.logs)
       }
     } catch (error) {
       console.error('Error fetching data:', error)
@@ -144,6 +152,15 @@ export default function OutreachPage() {
 
       const data = await res.json()
       setResult(data)
+      
+      // Refresh history after successful push
+      if (data.success) {
+        const historyRes = await fetch('/api/outreach/history')
+        const historyData = await historyRes.json()
+        if (historyData.logs) {
+          setOutreachHistory(historyData.logs)
+        }
+      }
     } catch (error: any) {
       console.error('Error pushing leads:', error)
       setResult({ error: error.message })
@@ -412,6 +429,66 @@ export default function OutreachPage() {
                     )
                   })}
                 </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {outreachHistory.length > 0 && (
+            <Card>
+              <CardHeader>
+                <div className="flex items-center gap-2">
+                  <History className="h-5 w-5" />
+                  <CardTitle>Outreach History</CardTitle>
+                </div>
+                <CardDescription>
+                  Recent lead pushes to Instantly campaigns
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Date</TableHead>
+                      <TableHead>Campaign</TableHead>
+                      <TableHead>Leads Pushed</TableHead>
+                      <TableHead>Added</TableHead>
+                      <TableHead>Skipped</TableHead>
+                      <TableHead>Deals Created</TableHead>
+                      <TableHead>Scout</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {outreachHistory.map((log) => (
+                      <TableRow key={log.id}>
+                        <TableCell className="text-sm">
+                          {formatDate(log.created_at)}
+                        </TableCell>
+                        <TableCell className="font-medium">
+                          {log.campaign_name}
+                        </TableCell>
+                        <TableCell>{log.leads_pushed}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="bg-green-500/10 text-green-500">
+                            {log.leads_added}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="text-muted-foreground">
+                            {log.leads_skipped}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className="bg-blue-500/10 text-blue-500">
+                            {log.deals_created}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground">
+                          {log.scout?.full_name || 'Unknown'}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
           )}

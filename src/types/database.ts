@@ -155,3 +155,17 @@ export interface Integration {
   is_active: boolean
   created_at: string
 }
+
+export interface OutreachLog {
+  id: string
+  scout_id: string
+  campaign_id: string
+  campaign_name: string
+  leads_pushed: number
+  leads_added: number
+  leads_skipped: number
+  deals_created: number
+  artist_ids: string[]
+  created_at: string
+  scout?: Profile
+}

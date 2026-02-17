@@ -91,6 +91,45 @@ export async function POST(request: NextRequest) {
       // Don't fail the request, leads were still pushed
     }
 
+    // Get campaign name for logging
+    const { data: integration: integrationData } = await supabase
+      .from('integrations')
+      .select('api_key')
+      .eq('user_id', user.id)
+      .eq('service', 'instantly')
+      .single()
+
+    let campaignName = 'Unknown Campaign'
+    if (integrationData?.api_key) {
+      try {
+        const clientForName = new InstantlyClient(integrationData.api_key)
+        const campaigns = await clientForName.listCampaigns()
+        const campaign = campaigns.find((c: any) => c.id === campaignId)
+        if (campaign) campaignName = campaign.name
+      } catch (error) {
+        console.error('Error fetching campaign name:', error)
+      }
+    }
+
+    // Log the outreach activity
+    const { error: logError } = await supabase
+      .from('outreach_logs')
+      .insert({
+        scout_id: user.id,
+        campaign_id: campaignId,
+        campaign_name: campaignName,
+        leads_pushed: leads.length,
+        leads_added: result.added,
+        leads_skipped: result.skipped,
+        deals_created: deals?.length || 0,
+        artist_ids: artistIds,
+      })
+
+    if (logError) {
+      console.error('Error logging outreach:', logError)
+      // Don't fail the request, just log the error
+    }
+
     return NextResponse.json({
       success: true,
       added: result.added,

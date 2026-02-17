@@ -24,6 +24,14 @@ export type ScoutPersona =
   | 'educator'
   | 'peer'
 
+export const SCOUT_PERSONAS: Record<ScoutPersona, string> = {
+  professional: 'Formal, structured communication with clear next steps',
+  relationship_builder: 'Warm, personal approach focused on building trust',
+  direct: 'Concise, to-the-point messaging without fluff',
+  educator: 'Informative style that explains concepts clearly',
+  peer: 'Casual, friendly tone like talking to a colleague',
+}
+
 interface ClassifyResult {
   classification: ReplyClassification
   confidence: number

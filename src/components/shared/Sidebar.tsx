@@ -16,6 +16,8 @@ import {
   Download,
   Menu,
   X,
+  FileText,
+  ClipboardList,
 } from 'lucide-react'
 import { Profile } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -29,7 +31,9 @@ const navigation = [
   { name: 'Artists', href: '/artists', icon: Users, roles: ['admin', 'scout'] },
   { name: 'Pipeline', href: '/pipeline', icon: Briefcase, roles: ['admin', 'scout'] },
   { name: 'Outreach', href: '/outreach', icon: Mail, roles: ['admin', 'scout'] },
+  { name: 'Templates', href: '/templates', icon: FileText, roles: ['admin', 'scout'] },
   { name: 'Inbox', href: '/inbox', icon: Inbox, roles: ['admin', 'scout'] },
+  { name: 'Enrichment Logs', href: '/enrichment-logs', icon: ClipboardList, roles: ['admin', 'scout'] },
   { name: 'Scraping', href: '/scraping', icon: Download, roles: ['admin'] },
   { name: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['admin'] },
   { name: 'Scouts', href: '/scouts', icon: Users, roles: ['admin'] },

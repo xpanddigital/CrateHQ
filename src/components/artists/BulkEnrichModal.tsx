@@ -10,7 +10,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Loader2, CheckCircle, XCircle, Sparkles } from 'lucide-react'
+import { Loader2, CheckCircle, XCircle, Sparkles, FileText } from 'lucide-react'
+import { EnrichmentLogViewer } from './EnrichmentLogViewer'
 
 interface BulkEnrichModalProps {
   open: boolean
@@ -29,6 +30,7 @@ export function BulkEnrichModal({
   const [progress, setProgress] = useState({ current: 0, total: 0, emailsFound: 0 })
   const [results, setResults] = useState<any>(null)
   const [error, setError] = useState('')
+  const [showDetailedLogs, setShowDetailedLogs] = useState(false)
 
   const handleEnrich = async () => {
     setEnriching(true)
@@ -65,7 +67,7 @@ export function BulkEnrichModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+      <DialogContent className={showDetailedLogs ? "max-w-5xl max-h-[90vh] overflow-y-auto" : ""}>
         <DialogHeader>
           <DialogTitle>Enrich {artistIds.length} Artists</DialogTitle>
           <DialogDescription>
@@ -115,7 +117,7 @@ export function BulkEnrichModal({
             </div>
           )}
 
-          {results && (
+          {results && !showDetailedLogs && (
             <div className="space-y-3">
               <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
                 <div className="flex items-center gap-3 mb-3">
@@ -133,6 +135,20 @@ export function BulkEnrichModal({
                       {results.found_emails}
                     </p>
                   </div>
+                </div>
+                <div className="mt-3 pt-3 border-t border-green-500/20">
+                  <p className="text-xs text-muted-foreground mb-2">
+                    Success Rate: {results.total > 0 ? ((results.found_emails / results.total) * 100).toFixed(1) : 0}%
+                  </p>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowDetailedLogs(true)}
+                    className="w-full"
+                  >
+                    <FileText className="h-4 w-4 mr-2" />
+                    View Detailed Logs
+                  </Button>
                 </div>
               </div>
 
@@ -153,6 +169,22 @@ export function BulkEnrichModal({
                   </div>
                 </div>
               )}
+            </div>
+          )}
+
+          {results && showDetailedLogs && results.detailed_logs && (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold">Detailed Enrichment Logs</h3>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setShowDetailedLogs(false)}
+                >
+                  Back to Summary
+                </Button>
+              </div>
+              <EnrichmentLogViewer logs={results.detailed_logs} />
             </div>
           )}
         </div>
