@@ -27,8 +27,9 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
   const [formData, setFormData] = useState({
     name: '',
     email: '',
-    instagram_handle: '',
+    instagram_url: '',
     website: '',
+    spotify_url: '',
     spotify_monthly_listeners: '',
     streams_last_month: '',
     track_count: '',
@@ -48,11 +49,28 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
         .map(g => g.trim())
         .filter(Boolean)
 
+      // Extract Instagram handle from URL
+      let instagram_handle = null
+      if (formData.instagram_url) {
+        const instagramMatch = formData.instagram_url.match(/instagram\.com\/([^/?]+)/)
+        if (instagramMatch) {
+          instagram_handle = instagramMatch[1]
+        }
+      }
+
+      // Build social_links object
+      const social_links: Record<string, string> = {}
+      if (formData.instagram_url) social_links.instagram = formData.instagram_url
+      if (formData.spotify_url) social_links.spotify = formData.spotify_url
+      if (formData.website) social_links.website = formData.website
+
       const payload = {
         name: formData.name,
         email: formData.email || null,
-        instagram_handle: formData.instagram_handle || null,
+        instagram_handle,
         website: formData.website || null,
+        spotify_url: formData.spotify_url || null,
+        social_links,
         spotify_monthly_listeners: formData.spotify_monthly_listeners
           ? parseInt(formData.spotify_monthly_listeners)
           : 0,
@@ -80,8 +98,9 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
       setFormData({
         name: '',
         email: '',
-        instagram_handle: '',
+        instagram_url: '',
         website: '',
+        spotify_url: '',
         spotify_monthly_listeners: '',
         streams_last_month: '',
         track_count: '',
@@ -147,13 +166,28 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
               </div>
 
               <div className="space-y-2">
-                <Label htmlFor="instagram">Instagram Handle</Label>
+                <Label htmlFor="instagram">Instagram URL</Label>
                 <Input
                   id="instagram"
-                  placeholder="champagnepapi"
-                  value={formData.instagram_handle}
+                  type="url"
+                  placeholder="https://instagram.com/poolside"
+                  value={formData.instagram_url}
                   onChange={(e) =>
-                    setFormData({ ...formData, instagram_handle: e.target.value })
+                    setFormData({ ...formData, instagram_url: e.target.value })
+                  }
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="spotify">Spotify URL</Label>
+                <Input
+                  id="spotify"
+                  type="url"
+                  placeholder="https://open.spotify.com/artist/..."
+                  value={formData.spotify_url}
+                  onChange={(e) =>
+                    setFormData({ ...formData, spotify_url: e.target.value })
                   }
                   disabled={loading}
                 />
