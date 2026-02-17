@@ -24,6 +24,7 @@ interface EnrichmentLog {
   steps: any[]
   total_duration_ms: number
   is_contactable: boolean
+  error_details?: string
   created_at: string
   run_by: string
   scout?: { full_name: string }
@@ -139,6 +140,7 @@ export default function EnrichmentLogsPage() {
       'Step 6: Duration (ms)',
       'Step 6: URL',
       'Step 6: Emails Found',
+      'Error Details',
       'Run By',
       'Created At',
     ]
@@ -172,6 +174,7 @@ export default function EnrichmentLogsPage() {
       }
 
       row.push(
+        log.error_details || '',
         log.scout?.full_name || 'Unknown',
         log.created_at
       )

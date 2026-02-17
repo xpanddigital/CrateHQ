@@ -49,7 +49,7 @@ async function startActorRun(
   token: string,
   input: object,
   label: string
-): Promise<{ runId: string; success: boolean; error?: string }> {
+): Promise<{ runId: string; success: boolean; error?: string; errorDetails?: string }> {
   for (let attempt = 0; attempt < 2; attempt++) {
     const url = `${APIFY_BASE}/acts/${actorId}/runs?token=${token}`
     console.log(`[${label}] POST ${url.replace(token, '***')} (attempt ${attempt + 1})`)
@@ -69,33 +69,35 @@ async function startActorRun(
       continue
     }
 
+    const errorDetail = `startActorRun(${actorId}) Status: ${res.status}, Body: ${bodyText.slice(0, 500)}`
+
     const skipReason = isSkippableStatus(res.status)
     if (skipReason) {
       console.error(`[${label}] ${skipReason}`)
-      return { runId: '', success: false, error: skipReason }
+      return { runId: '', success: false, error: skipReason, errorDetails: errorDetail }
     }
 
     if (!res.ok) {
       console.error(`[${label}] Start failed: HTTP ${res.status} — ${bodyText.slice(0, 300)}`)
-      return { runId: '', success: false, error: `HTTP ${res.status}: ${bodyText.slice(0, 100)}` }
+      return { runId: '', success: false, error: `HTTP ${res.status}: ${bodyText.slice(0, 100)}`, errorDetails: errorDetail }
     }
 
     const parsed = safeJsonParse(bodyText)
     if (parsed.error) {
       console.error(`[${label}] Start response not JSON: ${parsed.error}`)
-      return { runId: '', success: false, error: parsed.error }
+      return { runId: '', success: false, error: parsed.error, errorDetails: errorDetail }
     }
 
     const runId = parsed.data?.data?.id
     if (!runId) {
       console.error(`[${label}] No run ID in response: ${bodyText.slice(0, 200)}`)
-      return { runId: '', success: false, error: 'No run ID in response' }
+      return { runId: '', success: false, error: 'No run ID in response', errorDetails: errorDetail }
     }
 
     return { runId, success: true }
   }
 
-  return { runId: '', success: false, error: 'Rate limited after retry' }
+  return { runId: '', success: false, error: 'Rate limited after retry', errorDetails: 'startActorRun: 429 after retry' }
 }
 
 // ============================================================
@@ -106,9 +108,10 @@ async function pollForCompletion(
   runId: string,
   token: string,
   label: string
-): Promise<{ datasetId: string; success: boolean; error?: string }> {
+): Promise<{ datasetId: string; success: boolean; error?: string; errorDetails?: string }> {
   const startTime = Date.now()
   let pollCount = 0
+  let lastBody = ''
 
   while (Date.now() - startTime < MAX_WAIT_MS) {
     await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
@@ -116,14 +119,16 @@ async function pollForCompletion(
 
     const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
     const bodyText = await res.text()
+    lastBody = bodyText
     console.log(`[Apify Raw Response] pollForCompletion #${pollCount} Status: ${res.status}, Body: ${bodyText.slice(0, 500)}`)
 
     if (!res.ok) {
+      const errorDetail = `pollForCompletion(${runId}) #${pollCount} Status: ${res.status}, Body: ${bodyText.slice(0, 500)}`
       const skipReason = isSkippableStatus(res.status)
       if (skipReason) {
-        return { datasetId: '', success: false, error: skipReason }
+        return { datasetId: '', success: false, error: skipReason, errorDetails: errorDetail }
       }
-      return { datasetId: '', success: false, error: `Poll HTTP ${res.status}` }
+      return { datasetId: '', success: false, error: `Poll HTTP ${res.status}`, errorDetails: errorDetail }
     }
 
     const parsed = safeJsonParse(bodyText)
@@ -141,11 +146,20 @@ async function pollForCompletion(
       return { datasetId: parsed.data.data.defaultDatasetId, success: true }
     }
     if (status === 'FAILED' || status === 'ABORTED') {
-      return { datasetId: '', success: false, error: `Run ${status}: ${parsed.data.data.statusMessage || 'unknown'}` }
+      const msg = parsed.data.data.statusMessage || 'unknown'
+      return {
+        datasetId: '', success: false,
+        error: `Run ${status}: ${msg}`,
+        errorDetails: `pollForCompletion(${runId}) Run ${status}: ${msg}. Last body: ${bodyText.slice(0, 500)}`,
+      }
     }
   }
 
-  return { datasetId: '', success: false, error: `Timeout after ${MAX_WAIT_MS}ms (${pollCount} polls)` }
+  return {
+    datasetId: '', success: false,
+    error: `Timeout after ${MAX_WAIT_MS}ms (${pollCount} polls)`,
+    errorDetails: `pollForCompletion(${runId}) Timeout. Last body: ${lastBody.slice(0, 500)}`,
+  }
 }
 
 async function fetchDatasetItems(datasetId: string, token: string): Promise<any[]> {
@@ -183,6 +197,7 @@ export interface YouTubeResult {
   allText: string
   success: boolean
   error?: string
+  errorDetails?: string
   actorUsed: string
 }
 
@@ -206,14 +221,14 @@ export async function apifyFetchYouTube(channelUrl: string): Promise<YouTubeResu
     }, label)
 
     if (!start.success) {
-      return { ...empty, error: start.error }
+      return { ...empty, error: start.error, errorDetails: start.errorDetails }
     }
 
     console.log(`[${label}] Run started: ${start.runId}`)
 
     const poll = await pollForCompletion(start.runId, token, label)
     if (!poll.success) {
-      return { ...empty, error: poll.error }
+      return { ...empty, error: poll.error, errorDetails: poll.errorDetails }
     }
 
     const items = await fetchDatasetItems(poll.datasetId, token)
@@ -269,6 +284,7 @@ export interface InstagramResult {
   allText: string
   success: boolean
   error?: string
+  errorDetails?: string
   actorUsed: string
 }
 
@@ -303,14 +319,14 @@ export async function apifyFetchInstagram(handle: string): Promise<InstagramResu
     }, label)
 
     if (!start.success) {
-      return { ...empty, error: start.error }
+      return { ...empty, error: start.error, errorDetails: start.errorDetails }
     }
 
     console.log(`[${label}] Run started: ${start.runId}`)
 
     const poll = await pollForCompletion(start.runId, token, label)
     if (!poll.success) {
-      return { ...empty, error: poll.error }
+      return { ...empty, error: poll.error, errorDetails: poll.errorDetails }
     }
 
     const items = await fetchDatasetItems(poll.datasetId, token)
@@ -363,6 +379,7 @@ export interface WebPageResult {
   html: string
   success: boolean
   error?: string
+  errorDetails?: string
   actorUsed: string
 }
 
@@ -387,14 +404,14 @@ export async function apifyFetchWebPage(url: string, maxPages: number = 3): Prom
     }, label)
 
     if (!start.success) {
-      return { ...empty, error: start.error }
+      return { ...empty, error: start.error, errorDetails: start.errorDetails }
     }
 
     console.log(`[${label}] Run started: ${start.runId}`)
 
     const poll = await pollForCompletion(start.runId, token, label)
     if (!poll.success) {
-      return { ...empty, error: poll.error }
+      return { ...empty, error: poll.error, errorDetails: poll.errorDetails }
     }
 
     const items = await fetchDatasetItems(poll.datasetId, token)

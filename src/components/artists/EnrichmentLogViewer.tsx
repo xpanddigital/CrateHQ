@@ -14,6 +14,7 @@ interface EnrichmentStep {
   best_email: string
   confidence: number
   error?: string
+  error_details?: string
   duration_ms?: number
   url_fetched?: string
   apify_used?: boolean
@@ -32,6 +33,7 @@ interface EnrichmentLog {
   steps: EnrichmentStep[]
   total_duration_ms: number
   is_contactable: boolean
+  error_details?: string
 }
 
 interface EnrichmentLogViewerProps {
@@ -176,6 +178,18 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                   </div>
                 </div>
 
+                {/* Error Details (top-level) */}
+                {log.error_details && (
+                  <details className="text-xs">
+                    <summary className="text-destructive cursor-pointer font-medium">
+                      Apify Error Details (all steps)
+                    </summary>
+                    <pre className="mt-1 p-2 bg-destructive/5 border border-destructive/20 rounded text-[10px] leading-tight overflow-x-auto whitespace-pre-wrap break-all max-h-48 overflow-y-auto">
+                      {log.error_details}
+                    </pre>
+                  </details>
+                )}
+
                 {/* All Emails Found */}
                 {log.all_emails.length > 0 && (
                   <div className="space-y-2">
@@ -259,6 +273,17 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                         <div className="text-xs text-muted-foreground">
                           {step.error || 'No emails found in this step'}
                         </div>
+                      )}
+
+                      {step.error_details && (
+                        <details className="text-xs">
+                          <summary className="text-destructive cursor-pointer font-medium">
+                            Apify Raw Error Details
+                          </summary>
+                          <pre className="mt-1 p-2 bg-muted rounded text-[10px] leading-tight overflow-x-auto whitespace-pre-wrap break-all max-h-32 overflow-y-auto">
+                            {step.error_details}
+                          </pre>
+                        </details>
                       )}
 
                       {step.status === 'skipped' && (

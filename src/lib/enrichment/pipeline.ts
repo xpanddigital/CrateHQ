@@ -43,6 +43,7 @@ export interface EnrichmentStep {
   best_email: string
   confidence: number
   error?: string
+  error_details?: string
   duration_ms?: number
   url_fetched?: string
   apify_used?: boolean
@@ -61,6 +62,7 @@ export interface EnrichmentSummary {
   steps: EnrichmentStep[]
   total_duration_ms: number
   is_contactable: boolean
+  error_details?: string
 }
 
 export type ProgressCallback = (step: EnrichmentStep, stepIndex: number) => void
@@ -209,7 +211,7 @@ async function step1_YouTube(
   anthropicKey: string
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
-  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string
 }> {
   const youtubeUrl = findYouTubeUrl(artist)
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: '', wasBlocked: false }
@@ -225,7 +227,7 @@ async function step1_YouTube(
 
   if (!result.success) {
     console.log(`[Step 1] Apify YouTube scraper failed: ${result.error}`)
-    return { ...empty, url: youtubeUrl, apifyUsed: false, apifyActor: result.actorUsed }
+    return { ...empty, url: youtubeUrl, apifyUsed: false, apifyActor: result.actorUsed, errorDetails: result.errorDetails }
   }
 
   // Check for direct email from structured fields
@@ -282,7 +284,7 @@ async function step2_Instagram(
   anthropicKey: string
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
-  externalUrl: string | null; apifyUsed: boolean; apifyActor: string; wasBlocked: boolean
+  externalUrl: string | null; apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string
 }> {
   const handle = findInstagramHandle(artist)
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', externalUrl: null, apifyUsed: false, apifyActor: '', wasBlocked: false }
@@ -299,7 +301,7 @@ async function step2_Instagram(
 
   if (!result.success) {
     console.log(`[Step 2] Apify Instagram scraper failed: ${result.error}`)
-    return { ...empty, url: igUrl, apifyActor: result.actorUsed }
+    return { ...empty, url: igUrl, apifyActor: result.actorUsed, errorDetails: result.errorDetails }
   }
 
   // Check businessEmail field first (structured data, highest confidence)
@@ -363,7 +365,7 @@ async function step3_LinkInBio(
   anthropicKey: string
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
-  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string
 }> {
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: '', wasBlocked: false }
 
@@ -401,7 +403,7 @@ async function step3_LinkInBio(
         console.log(`[Step 3] Apify success: ${allContent.length} chars`)
       } else {
         console.log(`[Step 3] Apify failed: ${apifyResult.error}`)
-        return { ...empty, url: linktreeUrl, apifyActor: apifyResult.actorUsed }
+        return { ...empty, url: linktreeUrl, apifyActor: apifyResult.actorUsed, errorDetails: apifyResult.errorDetails }
       }
     }
 
@@ -509,7 +511,7 @@ async function step4_Website(
   anthropicKey: string
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
-  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string
 }> {
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: '', wasBlocked: false }
 
@@ -558,7 +560,7 @@ async function step4_Website(
         console.log(`[Step 4] Apify success: ${html.length} chars`)
       } else {
         console.log(`[Step 4] Apify failed: ${apifyResult.error}`)
-        return { ...empty, url: websiteUrl, apifyActor: apifyResult.actorUsed }
+        return { ...empty, url: websiteUrl, apifyActor: apifyResult.actorUsed, errorDetails: apifyResult.errorDetails }
       }
     }
 
@@ -773,6 +775,7 @@ export async function enrichArtist(
         apifyUsed?: boolean
         apifyActor?: string
         wasBlocked?: boolean
+        errorDetails?: string
       }
 
       switch (step.method) {
@@ -807,6 +810,7 @@ export async function enrichArtist(
       step.apify_actor = result.apifyActor || ''
       step.was_blocked = result.wasBlocked || false
       step.content_length = result.rawContent?.length || 0
+      step.error_details = result.errorDetails
 
       // Steps 5 and 6 are always skipped
       if (step.method === 'facebook_about' || step.method === 'remaining_socials') {
@@ -858,6 +862,12 @@ export async function enrichArtist(
     }
   }
 
+  // Collect all error_details from failed steps into a single string
+  const allErrorDetails = steps
+    .filter(s => s.error_details)
+    .map(s => `[${s.method}] ${s.error_details}`)
+    .join('\n')
+
   const summary: EnrichmentSummary = {
     artist_id: artist.id,
     artist_name: artist.name,
@@ -868,6 +878,7 @@ export async function enrichArtist(
     steps,
     total_duration_ms: Date.now() - startTime,
     is_contactable: !!bestEmail,
+    error_details: allErrorDetails || undefined,
   }
 
   console.log(`[Enrichment Complete] ${bestEmail ? `Found: ${bestEmail}` : 'No email found'} (${summary.total_duration_ms}ms)\n`)

@@ -111,6 +111,7 @@ export async function POST(request: NextRequest) {
             total_duration_ms: result.total_duration_ms,
             is_contactable: result.is_contactable,
             run_by: user.id,
+            error_details: result.error_details || null,
           })
 
         // Delay between requests (1 second)
