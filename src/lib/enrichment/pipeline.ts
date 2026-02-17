@@ -917,7 +917,7 @@ async function step7_Perplexity(
         ],
         max_tokens: 300,
         temperature: 0.1,
-        web_search_options: { search_context_size: 'low' },
+        web_search_options: { search_context_size: 'high' },
       }),
     })
 

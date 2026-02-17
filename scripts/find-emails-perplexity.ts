@@ -168,7 +168,7 @@ async function queryPerplexity(
     max_tokens: MAX_TOKENS,
     temperature: TEMPERATURE,
     web_search_options: {
-      search_context_size: 'low',
+      search_context_size: 'high',
     },
   }
 
