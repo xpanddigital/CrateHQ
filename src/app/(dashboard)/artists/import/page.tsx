@@ -258,7 +258,7 @@ export default function ArtistsImportPage() {
             <CardHeader>
               <CardTitle>Upload CSV File</CardTitle>
               <CardDescription>
-                Upload a CSV file with columns: name, email, instagram_url, spotify_url, website, monthly_listeners, est_streams_month, album_count, single_count, genres, country
+                Upload a CSV file with artist data. Supported columns listed below.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
@@ -276,17 +276,92 @@ export default function ArtistsImportPage() {
                 </div>
               )}
 
-              <div className="border-2 border-dashed rounded-lg p-12 text-center">
-                <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                <Input
-                  type="file"
-                  accept=".csv"
-                  onChange={handleFileChange}
-                  className="max-w-xs mx-auto"
-                />
-                <p className="text-sm text-muted-foreground mt-4">
-                  {file ? `Selected: ${file.name}` : 'Select a CSV file to upload'}
-                </p>
+              <div className="space-y-4">
+                <div className="border-2 border-dashed rounded-lg p-12 text-center">
+                  <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                  <Input
+                    type="file"
+                    accept=".csv"
+                    onChange={handleFileChange}
+                    className="max-w-xs mx-auto"
+                  />
+                  <p className="text-sm text-muted-foreground mt-4">
+                    {file ? `Selected: ${file.name}` : 'Select a CSV file to upload'}
+                  </p>
+                </div>
+
+                <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                  <h4 className="font-semibold mb-3">Supported CSV Columns</h4>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">REQUIRED</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">name</code> or <code className="bg-background px-1 rounded">artist_name</code></li>
+                      </ul>
+                    </div>
+                    
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">CONTACT INFO</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">email</code></li>
+                        <li>• <code className="bg-background px-1 rounded">website</code> or <code className="bg-background px-1 rounded">url</code></li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">SOCIAL MEDIA URLs</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">instagram_url</code></li>
+                        <li>• <code className="bg-background px-1 rounded">youtube_url</code> <span className="text-green-500">★</span></li>
+                        <li>• <code className="bg-background px-1 rounded">spotify_url</code></li>
+                        <li>• <code className="bg-background px-1 rounded">facebook_url</code></li>
+                        <li>• <code className="bg-background px-1 rounded">twitter_url</code> or <code className="bg-background px-1 rounded">x_url</code></li>
+                        <li>• <code className="bg-background px-1 rounded">tiktok_url</code></li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">SPOTIFY STATS</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">monthly_listeners</code></li>
+                        <li>• <code className="bg-background px-1 rounded">spotify_monthly_listeners</code></li>
+                        <li>• <code className="bg-background px-1 rounded">streams</code></li>
+                        <li>• <code className="bg-background px-1 rounded">streams_last_month</code></li>
+                        <li>• <code className="bg-background px-1 rounded">est_streams_month</code></li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">INSTAGRAM STATS</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">instagram_followers</code></li>
+                        <li>• <code className="bg-background px-1 rounded">ig_followers</code></li>
+                        <li>• <code className="bg-background px-1 rounded">instagram_handle</code></li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">MUSIC DATA</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">track_count</code></li>
+                        <li>• <code className="bg-background px-1 rounded">album_count</code></li>
+                        <li>• <code className="bg-background px-1 rounded">single_count</code></li>
+                        <li>• <code className="bg-background px-1 rounded">genres</code> (comma-separated)</li>
+                      </ul>
+                    </div>
+
+                    <div>
+                      <p className="font-medium text-xs text-muted-foreground mb-1">OTHER</p>
+                      <ul className="space-y-1 text-xs">
+                        <li>• <code className="bg-background px-1 rounded">country</code> (2-letter code)</li>
+                        <li>• <code className="bg-background px-1 rounded">biography</code> or <code className="bg-background px-1 rounded">bio</code></li>
+                      </ul>
+                    </div>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-3">
+                    <span className="text-green-500">★</span> = Critical for enrichment (YouTube has 45% email discovery rate)
+                  </p>
+                </div>
               </div>
 
               {preview.length > 0 && (
