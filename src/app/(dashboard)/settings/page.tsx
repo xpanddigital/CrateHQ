@@ -306,7 +306,7 @@ export default function SettingsPage() {
             <Label htmlFor="persona">Communication Style</Label>
             <Select
               value={formData.ai_sdr_persona}
-              onValueChange={(value) => setFormData({ ...formData, ai_sdr_persona: value })}
+              onValueChange={(value) => setFormData({ ...formData, ai_sdr_persona: value as ScoutPersona })}
             >
               <SelectTrigger>
                 <SelectValue />
