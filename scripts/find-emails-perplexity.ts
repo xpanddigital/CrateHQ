@@ -13,7 +13,7 @@
  * Environment:
  *   PERPLEXITY_API_KEY — required
  *
- * Cost: ~$0.006/request → ~$1.50 for 250 artists, ~$6 for 1,000
+ * Cost: ~$0.011/request → ~$2.75 for 250 artists, ~$11 for 1,000
  */
 
 import { createReadStream, writeFileSync, existsSync } from 'fs'
@@ -25,7 +25,7 @@ import { stringify } from 'csv-stringify/sync'
 // ============================================================
 
 const PERPLEXITY_API_URL = 'https://api.perplexity.ai/chat/completions'
-const MODEL = 'sonar'
+const MODEL = 'sonar-pro'
 const DELAY_MS = 500
 const RATE_LIMIT_RETRY_DELAY_MS = 5000
 const MAX_TOKENS = 300
@@ -249,7 +249,7 @@ async function main() {
   })
 
   console.log(`📊 ${unique.length} unique artists loaded (${artists.length - unique.length} duplicates removed)`)
-  console.log(`💰 Estimated cost: ~$${(unique.length * 0.006).toFixed(2)}`)
+  console.log(`💰 Estimated cost: ~$${(unique.length * 0.011).toFixed(2)}`)
   console.log(`⏱  Estimated time: ~${formatTime(unique.length * (DELAY_MS / 1000 + 0.5))}`)
   console.log(`🔍 Starting Perplexity Sonar email search...\n`)
 
@@ -351,7 +351,7 @@ async function main() {
 
   // Summary
   const totalTime = (Date.now() - startTime) / 1000
-  const costEstimate = (unique.length * 0.006).toFixed(2)
+  const costEstimate = (unique.length * 0.011).toFixed(2)
 
   console.log(`
 ===== PERPLEXITY EMAIL FINDER RESULTS =====
@@ -362,7 +362,7 @@ Invalid emails:          ${invalid} (${(invalid / unique.length * 100).toFixed(1
 API errors:              ${errors} (${(errors / unique.length * 100).toFixed(1)}%)
 
 Time taken:    ${formatTime(totalTime)}
-Cost estimate: ~$${costEstimate} (${unique.length} requests × ~$0.006/request)
+Cost estimate: ~$${costEstimate} (${unique.length} requests × ~$0.011/request)
 Output:        ${outputPath}
 ============================================
 `)
