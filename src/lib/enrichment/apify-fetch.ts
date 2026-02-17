@@ -16,6 +16,85 @@
 const APIFY_BASE = 'https://api.apify.com/v2'
 const MAX_WAIT_MS = 45000
 const POLL_INTERVAL_MS = 2000
+const RATE_LIMIT_RETRY_MS = 10000
+
+// ============================================================
+// SAFE JSON PARSING — Apify sometimes returns plain text errors
+// ============================================================
+
+function safeJsonParse(text: string): { data: any; error: string | null } {
+  try {
+    return { data: JSON.parse(text), error: null }
+  } catch {
+    return { data: null, error: `Invalid JSON response: ${text.slice(0, 200)}` }
+  }
+}
+
+/**
+ * Check if an HTTP status code indicates we should skip immediately
+ */
+function isSkippableStatus(status: number): string | null {
+  if (status === 402) return 'Apify payment required (insufficient credits)'
+  if (status === 429) return 'Apify rate limit exceeded'
+  if (status >= 500) return `Apify server error (HTTP ${status})`
+  return null
+}
+
+// ============================================================
+// SHARED: Start an actor run with retry on 429
+// ============================================================
+
+async function startActorRun(
+  actorId: string,
+  token: string,
+  input: object,
+  label: string
+): Promise<{ runId: string; success: boolean; error?: string }> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(input),
+    })
+
+    // Check for skippable status codes before parsing
+    const skipReason = isSkippableStatus(res.status)
+
+    if (res.status === 429 && attempt === 0) {
+      console.warn(`[${label}] Rate limited (429), waiting ${RATE_LIMIT_RETRY_MS}ms and retrying...`)
+      await new Promise(resolve => setTimeout(resolve, RATE_LIMIT_RETRY_MS))
+      continue
+    }
+
+    if (skipReason) {
+      console.error(`[${label}] ${skipReason}`)
+      return { runId: '', success: false, error: skipReason }
+    }
+
+    if (!res.ok) {
+      const errText = await res.text()
+      console.error(`[${label}] Start failed: HTTP ${res.status} — ${errText.slice(0, 300)}`)
+      return { runId: '', success: false, error: `HTTP ${res.status}: ${errText.slice(0, 100)}` }
+    }
+
+    const bodyText = await res.text()
+    const parsed = safeJsonParse(bodyText)
+    if (parsed.error) {
+      console.error(`[${label}] Start response not JSON: ${parsed.error}`)
+      return { runId: '', success: false, error: parsed.error }
+    }
+
+    const runId = parsed.data?.data?.id
+    if (!runId) {
+      console.error(`[${label}] No run ID in response: ${bodyText.slice(0, 200)}`)
+      return { runId: '', success: false, error: 'No run ID in response' }
+    }
+
+    return { runId, success: true }
+  }
+
+  return { runId: '', success: false, error: 'Rate limited after retry' }
+}
 
 // ============================================================
 // SHARED: Poll an actor run until completion
@@ -34,21 +113,32 @@ async function pollForCompletion(
     pollCount++
 
     const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
+
     if (!res.ok) {
+      const skipReason = isSkippableStatus(res.status)
+      if (skipReason) {
+        return { datasetId: '', success: false, error: skipReason }
+      }
       return { datasetId: '', success: false, error: `Poll HTTP ${res.status}` }
     }
 
-    const data = await res.json()
-    const status = data.data.status
+    const bodyText = await res.text()
+    const parsed = safeJsonParse(bodyText)
+    if (parsed.error) {
+      console.warn(`[${label}] Poll #${pollCount}: non-JSON response, retrying...`)
+      continue
+    }
+
+    const status = parsed.data?.data?.status
     const elapsed = Date.now() - startTime
 
     console.log(`[${label}] Poll #${pollCount}: status=${status}, elapsed=${elapsed}ms`)
 
     if (status === 'SUCCEEDED') {
-      return { datasetId: data.data.defaultDatasetId, success: true }
+      return { datasetId: parsed.data.data.defaultDatasetId, success: true }
     }
     if (status === 'FAILED' || status === 'ABORTED') {
-      return { datasetId: '', success: false, error: `Run ${status}: ${data.data.statusMessage || 'unknown'}` }
+      return { datasetId: '', success: false, error: `Run ${status}: ${parsed.data.data.statusMessage || 'unknown'}` }
     }
   }
 
@@ -57,10 +147,25 @@ async function pollForCompletion(
 
 async function fetchDatasetItems(datasetId: string, token: string): Promise<any[]> {
   const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`)
+
   if (!res.ok) {
-    throw new Error(`Dataset fetch HTTP ${res.status}`)
+    const skipReason = isSkippableStatus(res.status)
+    if (skipReason) {
+      console.error(`[Dataset] ${skipReason}`)
+      return []
+    }
+    console.error(`[Dataset] HTTP ${res.status}`)
+    return []
   }
-  return res.json()
+
+  const bodyText = await res.text()
+  const parsed = safeJsonParse(bodyText)
+  if (parsed.error) {
+    console.error(`[Dataset] ${parsed.error}`)
+    return []
+  }
+
+  return Array.isArray(parsed.data) ? parsed.data : []
 }
 
 // ============================================================
@@ -81,47 +186,39 @@ export async function apifyFetchYouTube(channelUrl: string): Promise<YouTubeResu
   const token = process.env.APIFY_TOKEN
   const actorId = 'streamers~youtube-scraper'
   const label = 'Apify:YouTube'
+  const empty: YouTubeResult = { email: null, description: '', aboutText: '', allText: '', success: false, actorUsed: actorId }
 
   if (!token) {
-    return { email: null, description: '', aboutText: '', allText: '', success: false, error: 'No APIFY_TOKEN', actorUsed: actorId }
+    return { ...empty, error: 'No APIFY_TOKEN' }
   }
 
   try {
     console.log(`[${label}] Starting for: ${channelUrl}`)
 
-    const startRes = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        startUrls: [{ url: channelUrl }],
-        maxResults: 1,
-        channelInfoOnly: true,
-      }),
-    })
+    const start = await startActorRun(actorId, token, {
+      startUrls: [{ url: channelUrl }],
+      maxResults: 1,
+      channelInfoOnly: true,
+    }, label)
 
-    if (!startRes.ok) {
-      const errText = await startRes.text()
-      console.error(`[${label}] Start failed: HTTP ${startRes.status} — ${errText.slice(0, 300)}`)
-      return { email: null, description: '', aboutText: '', allText: '', success: false, error: `HTTP ${startRes.status}`, actorUsed: actorId }
+    if (!start.success) {
+      return { ...empty, error: start.error }
     }
 
-    const startData = await startRes.json()
-    const runId = startData.data.id
-    console.log(`[${label}] Run started: ${runId}`)
+    console.log(`[${label}] Run started: ${start.runId}`)
 
-    const poll = await pollForCompletion(runId, token, label)
+    const poll = await pollForCompletion(start.runId, token, label)
     if (!poll.success) {
-      return { email: null, description: '', aboutText: '', allText: '', success: false, error: poll.error, actorUsed: actorId }
+      return { ...empty, error: poll.error }
     }
 
     const items = await fetchDatasetItems(poll.datasetId, token)
     if (!items || items.length === 0) {
-      return { email: null, description: '', aboutText: '', allText: '', success: false, error: 'No results', actorUsed: actorId }
+      return { ...empty, error: 'No results' }
     }
 
     const data = items[0]
 
-    // Build combined text from all potentially useful fields
     const description = data.channelDescription || data.description || ''
     const aboutText = data.aboutText || data.about || ''
     const allText = [
@@ -133,7 +230,6 @@ export async function apifyFetchYouTube(channelUrl: string): Promise<YouTubeResu
       JSON.stringify(data.links || []),
     ].join('\n')
 
-    // Extract email — check dedicated fields first
     let email: string | null = null
     if (data.channelEmail && data.channelEmail.includes('@')) {
       email = data.channelEmail
@@ -141,7 +237,6 @@ export async function apifyFetchYouTube(channelUrl: string): Promise<YouTubeResu
       email = data.businessEmail
     }
 
-    // If no dedicated field, regex scan all text
     if (!email) {
       const emailMatch = allText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)
       if (emailMatch && emailMatch.length > 0) {
@@ -154,7 +249,7 @@ export async function apifyFetchYouTube(channelUrl: string): Promise<YouTubeResu
     return { email, description, aboutText, allText, success: true, actorUsed: actorId }
   } catch (error: any) {
     console.error(`[${label}] FAILED: ${error.message}`)
-    return { email: null, description: '', aboutText: '', allText: '', success: false, error: error.message, actorUsed: actorId }
+    return { ...empty, error: error.message }
   }
 }
 
@@ -187,7 +282,6 @@ export async function apifyFetchInstagram(handle: string): Promise<InstagramResu
     return { ...empty, error: 'No APIFY_TOKEN' }
   }
 
-  // Clean handle — remove @ and URL parts
   const cleanHandle = handle
     .replace(/^@/, '')
     .replace(/https?:\/\/(www\.)?instagram\.com\//, '')
@@ -200,25 +294,17 @@ export async function apifyFetchInstagram(handle: string): Promise<InstagramResu
   try {
     console.log(`[${label}] Starting for: @${cleanHandle}`)
 
-    const startRes = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        usernames: [cleanHandle],
-      }),
-    })
+    const start = await startActorRun(actorId, token, {
+      usernames: [cleanHandle],
+    }, label)
 
-    if (!startRes.ok) {
-      const errText = await startRes.text()
-      console.error(`[${label}] Start failed: HTTP ${startRes.status} — ${errText.slice(0, 300)}`)
-      return { ...empty, error: `HTTP ${startRes.status}` }
+    if (!start.success) {
+      return { ...empty, error: start.error }
     }
 
-    const startData = await startRes.json()
-    const runId = startData.data.id
-    console.log(`[${label}] Run started: ${runId}`)
+    console.log(`[${label}] Run started: ${start.runId}`)
 
-    const poll = await pollForCompletion(runId, token, label)
+    const poll = await pollForCompletion(start.runId, token, label)
     if (!poll.success) {
       return { ...empty, error: poll.error }
     }
@@ -242,13 +328,11 @@ export async function apifyFetchInstagram(handle: string): Promise<InstagramResu
       data.businessCategoryName || '',
     ].join('\n')
 
-    // Extract email — check dedicated field first
     let email: string | null = null
     if (businessEmail && businessEmail.includes('@')) {
       email = businessEmail
     }
 
-    // If no dedicated field, regex scan biography
     if (!email && biography) {
       const emailMatch = biography.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)
       if (emailMatch && emailMatch.length > 0) {
@@ -282,46 +366,38 @@ export async function apifyFetchWebPage(url: string, maxPages: number = 3): Prom
   const token = process.env.APIFY_TOKEN
   const actorId = 'apify~website-content-crawler'
   const label = 'Apify:WebPage'
+  const empty: WebPageResult = { text: '', html: '', success: false, actorUsed: actorId }
 
   if (!token) {
-    return { text: '', html: '', success: false, error: 'No APIFY_TOKEN', actorUsed: actorId }
+    return { ...empty, error: 'No APIFY_TOKEN' }
   }
 
   try {
     console.log(`[${label}] Starting for: ${url} (maxPages=${maxPages})`)
 
-    const startRes = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        startUrls: [{ url }],
-        maxCrawlPages: maxPages,
-        crawlerType: 'playwright:firefox',
-        maxCrawlDepth: 1,
-      }),
-    })
+    const start = await startActorRun(actorId, token, {
+      startUrls: [{ url }],
+      maxCrawlPages: maxPages,
+      crawlerType: 'playwright:firefox',
+      maxCrawlDepth: 1,
+    }, label)
 
-    if (!startRes.ok) {
-      const errText = await startRes.text()
-      console.error(`[${label}] Start failed: HTTP ${startRes.status} — ${errText.slice(0, 300)}`)
-      return { text: '', html: '', success: false, error: `HTTP ${startRes.status}`, actorUsed: actorId }
+    if (!start.success) {
+      return { ...empty, error: start.error }
     }
 
-    const startData = await startRes.json()
-    const runId = startData.data.id
-    console.log(`[${label}] Run started: ${runId}`)
+    console.log(`[${label}] Run started: ${start.runId}`)
 
-    const poll = await pollForCompletion(runId, token, label)
+    const poll = await pollForCompletion(start.runId, token, label)
     if (!poll.success) {
-      return { text: '', html: '', success: false, error: poll.error, actorUsed: actorId }
+      return { ...empty, error: poll.error }
     }
 
     const items = await fetchDatasetItems(poll.datasetId, token)
     if (!items || items.length === 0) {
-      return { text: '', html: '', success: false, error: 'No results', actorUsed: actorId }
+      return { ...empty, error: 'No results' }
     }
 
-    // Combine text from all crawled pages
     const allText = items.map((item: any) => item.text || item.content || '').join('\n\n')
     const allHtml = items.map((item: any) => item.html || '').join('\n\n')
 
@@ -330,7 +406,7 @@ export async function apifyFetchWebPage(url: string, maxPages: number = 3): Prom
     return { text: allText, html: allHtml, success: true, actorUsed: actorId }
   } catch (error: any) {
     console.error(`[${label}] FAILED: ${error.message}`)
-    return { text: '', html: '', success: false, error: error.message, actorUsed: actorId }
+    return { ...empty, error: error.message }
   }
 }
 
@@ -399,9 +475,6 @@ export function isBlockedContent(html: string): boolean {
   return blockSignals.some(signal => html.toLowerCase().includes(signal.toLowerCase()))
 }
 
-/**
- * Extract Instagram handle from a URL or handle string
- */
 export function extractInstagramHandle(input: string): string {
   if (!input) return ''
   return input
@@ -411,9 +484,6 @@ export function extractInstagramHandle(input: string): string {
     .split('?')[0]
 }
 
-/**
- * Find a YouTube channel URL from social_links
- */
 export function findYouTubeUrl(artist: any): string {
   const sl = artist.social_links || {}
   const yt = sl.youtube_url || sl.youtube || (artist as any).youtube_url || ''
@@ -427,20 +497,14 @@ export function findYouTubeUrl(artist: any): string {
   return ''
 }
 
-/**
- * Find an Instagram handle from social_links or artist fields
- */
 export function findInstagramHandle(artist: any): string {
   const sl = artist.social_links || {}
 
-  // Check for URL first, extract handle from it
   const igUrl = sl.instagram_url || sl.instagram || (artist as any).instagram_url || ''
   if (igUrl) return extractInstagramHandle(igUrl)
 
-  // Check for direct handle field
   if (artist.instagram_handle) return artist.instagram_handle
 
-  // Search all social links
   for (const value of Object.values(sl)) {
     if (typeof value === 'string' && value.includes('instagram.com')) {
       return extractInstagramHandle(value)
@@ -449,9 +513,6 @@ export function findInstagramHandle(artist: any): string {
   return ''
 }
 
-/**
- * Find a website URL from social_links or artist fields
- */
 export function findWebsiteUrl(artist: any): string {
   const sl = artist.social_links || {}
   const website = sl.website || artist.website || ''

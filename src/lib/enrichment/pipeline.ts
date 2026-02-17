@@ -181,7 +181,12 @@ async function extractEmailWithAI(
     const match = text.match(/\{[\s\S]*\}/)
 
     if (match) {
-      return JSON.parse(match[0])
+      try {
+        return JSON.parse(match[0])
+      } catch {
+        console.warn(`[AI Extraction] Failed to parse JSON from AI response: ${match[0].slice(0, 200)}`)
+        return { email: '', source: 'none' }
+      }
     }
 
     return { email: '', source: 'none' }
@@ -847,9 +852,9 @@ export async function enrichArtist(
 
     onProgress?.(step, i)
 
-    // Rate limiting between steps
+    // Rate limiting between steps (1s to avoid Apify concurrent run limits)
     if (i < steps.length - 1 && steps[i + 1].status !== 'skipped') {
-      await delay(500)
+      await delay(1000)
     }
   }
 
@@ -878,7 +883,7 @@ export async function enrichBatch(
   artists: Artist[],
   apiKeys: { anthropic?: string },
   onArtistComplete?: (summary: EnrichmentSummary, index: number, total: number) => void,
-  delayMs: number = 2000
+  delayMs: number = 3000
 ): Promise<{
   results: EnrichmentSummary[]
   total: number
@@ -893,6 +898,7 @@ export async function enrichBatch(
     results.push(summary)
     onArtistComplete?.(summary, i, artists.length)
 
+    // 3s between artists to avoid Apify concurrent run limits
     if (i < artists.length - 1) {
       console.log(`[Rate Limiting] Waiting ${delayMs}ms before next artist...`)
       await delay(delayMs)
