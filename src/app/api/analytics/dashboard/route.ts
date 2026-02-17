@@ -162,25 +162,29 @@ export async function GET(request: NextRequest) {
     // Combine and sort all activities
     const activities: any[] = []
 
-    recentDeals?.forEach((deal) => {
+    recentDeals?.forEach((deal: any) => {
+      const artist = Array.isArray(deal.artist) ? deal.artist[0] : deal.artist
+      const scout = Array.isArray(deal.scout) ? deal.scout[0] : deal.scout
       activities.push({
         type: 'deal_created',
         timestamp: deal.created_at,
-        artist_name: deal.artist?.name || 'Unknown',
-        artist_id: deal.artist?.id,
-        scout_name: deal.scout?.full_name,
+        artist_name: artist?.name || 'Unknown',
+        artist_id: artist?.id,
+        scout_name: scout?.full_name,
         stage: deal.stage,
         deal_id: deal.id,
       })
     })
 
-    recentConversations?.forEach((conv) => {
+    recentConversations?.forEach((conv: any) => {
+      const artist = Array.isArray(conv.artist) ? conv.artist[0] : conv.artist
+      const scout = Array.isArray(conv.scout) ? conv.scout[0] : conv.scout
       activities.push({
         type: conv.direction === 'inbound' ? 'message_received' : 'message_sent',
         timestamp: conv.sent_at,
-        artist_name: conv.artist?.name || 'Unknown',
-        artist_id: conv.artist?.id,
-        scout_name: conv.scout?.full_name,
+        artist_name: artist?.name || 'Unknown',
+        artist_id: artist?.id,
+        scout_name: scout?.full_name,
         channel: conv.channel,
         subject: conv.subject,
       })
