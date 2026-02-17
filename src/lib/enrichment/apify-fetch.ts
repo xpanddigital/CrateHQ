@@ -51,14 +51,17 @@ async function startActorRun(
   label: string
 ): Promise<{ runId: string; success: boolean; error?: string }> {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const res = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
+    const url = `${APIFY_BASE}/acts/${actorId}/runs?token=${token}`
+    console.log(`[${label}] POST ${url.replace(token, '***')} (attempt ${attempt + 1})`)
+
+    const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(input),
     })
 
-    // Check for skippable status codes before parsing
-    const skipReason = isSkippableStatus(res.status)
+    const bodyText = await res.text()
+    console.log(`[Apify Raw Response] startActorRun Status: ${res.status}, Body: ${bodyText.slice(0, 500)}`)
 
     if (res.status === 429 && attempt === 0) {
       console.warn(`[${label}] Rate limited (429), waiting ${RATE_LIMIT_RETRY_MS}ms and retrying...`)
@@ -66,18 +69,17 @@ async function startActorRun(
       continue
     }
 
+    const skipReason = isSkippableStatus(res.status)
     if (skipReason) {
       console.error(`[${label}] ${skipReason}`)
       return { runId: '', success: false, error: skipReason }
     }
 
     if (!res.ok) {
-      const errText = await res.text()
-      console.error(`[${label}] Start failed: HTTP ${res.status} — ${errText.slice(0, 300)}`)
-      return { runId: '', success: false, error: `HTTP ${res.status}: ${errText.slice(0, 100)}` }
+      console.error(`[${label}] Start failed: HTTP ${res.status} — ${bodyText.slice(0, 300)}`)
+      return { runId: '', success: false, error: `HTTP ${res.status}: ${bodyText.slice(0, 100)}` }
     }
 
-    const bodyText = await res.text()
     const parsed = safeJsonParse(bodyText)
     if (parsed.error) {
       console.error(`[${label}] Start response not JSON: ${parsed.error}`)
@@ -113,6 +115,8 @@ async function pollForCompletion(
     pollCount++
 
     const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
+    const bodyText = await res.text()
+    console.log(`[Apify Raw Response] pollForCompletion #${pollCount} Status: ${res.status}, Body: ${bodyText.slice(0, 500)}`)
 
     if (!res.ok) {
       const skipReason = isSkippableStatus(res.status)
@@ -122,7 +126,6 @@ async function pollForCompletion(
       return { datasetId: '', success: false, error: `Poll HTTP ${res.status}` }
     }
 
-    const bodyText = await res.text()
     const parsed = safeJsonParse(bodyText)
     if (parsed.error) {
       console.warn(`[${label}] Poll #${pollCount}: non-JSON response, retrying...`)
@@ -147,6 +150,8 @@ async function pollForCompletion(
 
 async function fetchDatasetItems(datasetId: string, token: string): Promise<any[]> {
   const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`)
+  const bodyText = await res.text()
+  console.log(`[Apify Raw Response] fetchDatasetItems Status: ${res.status}, Body: ${bodyText.slice(0, 500)}`)
 
   if (!res.ok) {
     const skipReason = isSkippableStatus(res.status)
@@ -158,7 +163,6 @@ async function fetchDatasetItems(datasetId: string, token: string): Promise<any[
     return []
   }
 
-  const bodyText = await res.text()
   const parsed = safeJsonParse(bodyText)
   if (parsed.error) {
     console.error(`[Dataset] ${parsed.error}`)
