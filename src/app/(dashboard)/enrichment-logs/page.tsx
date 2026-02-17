@@ -159,6 +159,13 @@ export default function EnrichmentLogsPage() {
       'Step 6: Emails Found',
       'Step 6: Actor',
       'Step 6: Error',
+      'Step 7: Method (Perplexity)',
+      'Step 7: Status',
+      'Step 7: Duration (ms)',
+      'Step 7: URL',
+      'Step 7: Emails Found',
+      'Step 7: Actor',
+      'Step 7: Error',
       'Error Details',
       'Run By',
       'Created At',
@@ -178,8 +185,8 @@ export default function EnrichmentLogsPage() {
         log.total_duration_ms,
       ]
 
-      // Add step details (up to 7 steps: Step 0 discovery + Steps 1-6) with actor and error info
-      for (let i = 0; i < 7; i++) {
+      // Add step details (up to 8 steps: Step 0 discovery + Steps 1-7) with actor and error info
+      for (let i = 0; i < 8; i++) {
         const step = steps[i]
         if (step) {
           row.push(

@@ -828,6 +828,146 @@ async function step6_RemainingSocials(
 }
 
 // ============================================================
+// STEP 7: Perplexity Sonar Pro — Last-Resort Web Search
+// ============================================================
+
+const PERPLEXITY_SYSTEM_PROMPT = `You are an email research assistant for a music industry catalog fund.
+
+Your task: Find a real, working business/booking/management email address for the given music artist.
+
+WHERE TO LOOK:
+- The artist's official website (often has a contact or booking page)
+- Their YouTube channel About page
+- Booking agency websites (CAA, WME, Paradigm, UTA, ICM, APA, etc.)
+- Management company websites
+- Their Bandcamp page
+- Their Linktree or similar link-in-bio pages
+- Press kit pages
+- Music industry databases and directories
+- Social media bios (Instagram, Twitter, Facebook)
+
+WHAT TO RETURN:
+- Return ONLY a valid email address, nothing else
+- Prefer booking/management emails over fan/general emails
+- Prefer addresses at known agencies or management companies
+- Do NOT return fan mail addresses, info@ generic addresses, or support@ addresses unless nothing else exists
+- If the email is from a booking agency, that's ideal (e.g. firstname@caa.com, agent@paradigmagency.com)
+- If you find multiple emails, return the one most likely to be for business/catalog inquiries
+
+IF YOU CANNOT FIND AN EMAIL:
+- Return exactly: NO_EMAIL_FOUND
+- Do NOT guess or fabricate email addresses
+- Do NOT return emails for a different artist with a similar name
+- Do NOT return generic company emails that aren't specific to this artist`
+
+const PERPLEXITY_FAKE_DOMAINS = [
+  'example.com', 'test.com', 'email.com', 'mail.com', 'domain.com',
+  'sample.com', 'placeholder.com', 'fake.com', 'none.com',
+]
+
+function extractPerplexityEmail(text: string): string | null {
+  const cleaned = text.trim().replace(/^["'`]+|["'`]+$/g, '').replace(/\*\*/g, '').trim()
+  const match = cleaned.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+  return match ? match[0].toLowerCase() : null
+}
+
+function validatePerplexityEmail(email: string): boolean {
+  const parts = email.split('@')
+  if (parts.length !== 2) return false
+  const [, domain] = parts
+  if (!domain.includes('.')) return false
+  const tld = domain.split('.').pop() || ''
+  if (tld.length < 2) return false
+  if (PERPLEXITY_FAKE_DOMAINS.includes(domain.toLowerCase())) return false
+  const lower = email.toLowerCase()
+  if (BLOCKED_EMAIL_PATTERNS.some(b => lower.includes(b))) return false
+  if (JUNK_DOMAINS.some(junk => domain === junk || domain.endsWith('.' + junk))) return false
+  return true
+}
+
+async function step7_Perplexity(
+  artist: Artist
+): Promise<{
+  emails: string[]; confidence: number; url: string; rawContent: string;
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string;
+  citations?: string[]
+}> {
+  const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: 'perplexity-sonar-pro', wasBlocked: false }
+
+  const perplexityKey = process.env.PERPLEXITY_API_KEY
+  if (!perplexityKey) {
+    console.log('[Step 7] No PERPLEXITY_API_KEY configured, skipping')
+    return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
+  }
+
+  console.log(`[Step 7] Perplexity Sonar Pro — searching web for "${artist.name}" email`)
+
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${perplexityKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sonar-pro',
+        messages: [
+          { role: 'system', content: PERPLEXITY_SYSTEM_PROMPT },
+          { role: 'user', content: `Find a business/booking/management contact email for the music artist "${artist.name}".` },
+        ],
+        max_tokens: 300,
+        temperature: 0.1,
+        web_search_options: { search_context_size: 'low' },
+      }),
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
+      console.error(`[Step 7] API error: ${errorDetail}`)
+      return { ...empty, errorDetails: errorDetail }
+    }
+
+    const data = await res.json()
+    const content = data.choices?.[0]?.message?.content || ''
+    const citations: string[] = data.citations || []
+
+    console.log(`[Step 7] Perplexity response: "${content.slice(0, 200)}"`)
+    if (citations.length > 0) {
+      console.log(`[Step 7] Citations: ${citations.slice(0, 3).join(', ')}`)
+    }
+
+    // Check for NO_EMAIL_FOUND
+    if (content.includes('NO_EMAIL_FOUND') || !content.includes('@')) {
+      console.log('[Step 7] Perplexity: no email found')
+      return { ...empty, rawContent: content, citations }
+    }
+
+    // Extract and validate email
+    const email = extractPerplexityEmail(content)
+    if (email && validatePerplexityEmail(email)) {
+      console.log(`[Step 7] Perplexity found email: ${email}`)
+      return {
+        emails: [email],
+        confidence: 0.7,
+        url: citations[0] || 'perplexity-web-search',
+        rawContent: content,
+        apifyUsed: false,
+        apifyActor: 'perplexity-sonar-pro',
+        wasBlocked: false,
+        citations,
+      }
+    }
+
+    console.log(`[Step 7] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
+    return { ...empty, rawContent: content, errorDetails: `Invalid email extracted: ${email || 'none'}`, citations }
+  } catch (error: any) {
+    console.error(`[Step 7] Perplexity error:`, error.message)
+    return { ...empty, errorDetails: error.message }
+  }
+}
+
+// ============================================================
 // MAIN PIPELINE
 // ============================================================
 
@@ -850,6 +990,7 @@ export async function enrichArtist(
     { method: 'website_contact', label: 'Artist Website (direct fetch / website-content-crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'facebook_about', label: 'Facebook (skipped — requires login)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'remaining_socials', label: 'Remaining Socials (skipped — blocked)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'perplexity_search', label: 'Perplexity Sonar Pro (web search last resort)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
   ]
 
   const allEmails: Array<{ email: string; source: string; confidence: number }> = []
@@ -862,6 +1003,7 @@ export async function enrichArtist(
   console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
   console.log(`[Enrichment] YOUTUBE_API_KEY present: ${!!process.env.YOUTUBE_API_KEY}`)
   console.log(`[Enrichment] APIFY_TOKEN present: ${!!process.env.APIFY_TOKEN}`)
+  console.log(`[Enrichment] PERPLEXITY_API_KEY present: ${!!process.env.PERPLEXITY_API_KEY}`)
   console.log(`[Enrichment] Social links:`, JSON.stringify(artist.social_links || {}))
 
   for (let i = 0; i < steps.length; i++) {
@@ -908,6 +1050,9 @@ export async function enrichArtist(
           break
         case 'remaining_socials':
           result = await step6_RemainingSocials(artist)
+          break
+        case 'perplexity_search':
+          result = await step7_Perplexity(artist)
           break
         default:
           result = { emails: [], confidence: 0, url: '', rawContent: '' }

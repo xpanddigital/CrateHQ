@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Sparkles, CheckCircle, XCircle, Clock, Youtube, Share2, Instagram, Globe, Facebook, SkipForward, Search } from 'lucide-react'
+import { Loader2, Sparkles, CheckCircle, XCircle, Clock, Youtube, Share2, Instagram, Globe, Facebook, SkipForward, Search, Radar } from 'lucide-react'
 import type { EnrichmentStep as PipelineStep } from '@/lib/enrichment/pipeline'
 
 interface EnrichmentPanelProps {
@@ -34,6 +34,8 @@ export function EnrichmentPanel({ artistId, onEnrichmentComplete }: EnrichmentPa
         return <Facebook className="h-4 w-4" />
       case 'remaining_socials':
         return <SkipForward className="h-4 w-4" />
+      case 'perplexity_search':
+        return <Radar className="h-4 w-4" />
       default:
         return <Sparkles className="h-4 w-4" />
     }
@@ -53,6 +55,7 @@ export function EnrichmentPanel({ artistId, onEnrichmentComplete }: EnrichmentPa
       { method: 'website_contact', label: 'Artist Website (direct fetch / crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'facebook_about', label: 'Facebook (skipped)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'remaining_socials', label: 'Remaining Socials (skipped)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+      { method: 'perplexity_search', label: 'Perplexity Sonar Pro (web search)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     ]
     setSteps(initialSteps)
 
