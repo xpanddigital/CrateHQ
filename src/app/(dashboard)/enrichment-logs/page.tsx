@@ -8,8 +8,10 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { EnrichmentLogViewer } from '@/components/artists/EnrichmentLogViewer'
-import { FileText, Search, Filter, Calendar, CheckCircle, XCircle, Download } from 'lucide-react'
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from '@/components/ui/alert-dialog'
+import { FileText, Search, Filter, Calendar, CheckCircle, XCircle, Download, Trash2 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { useToast } from '@/components/ui/use-toast'
 
 interface EnrichmentLog {
   id: string
@@ -30,8 +32,10 @@ interface EnrichmentLog {
 export default function EnrichmentLogsPage() {
   const [logs, setLogs] = useState<EnrichmentLog[]>([])
   const [loading, setLoading] = useState(true)
+  const [clearing, setClearing] = useState(false)
   const [search, setSearch] = useState('')
   const [filter, setFilter] = useState<'all' | 'success' | 'failed'>('all')
+  const { toast } = useToast()
 
   useEffect(() => {
     fetchLogs()
@@ -49,6 +53,23 @@ export default function EnrichmentLogsPage() {
       console.error('Error fetching enrichment logs:', error)
     } finally {
       setLoading(false)
+    }
+  }
+
+  const clearLogs = async () => {
+    setClearing(true)
+    try {
+      const res = await fetch('/api/enrichment/logs', { method: 'DELETE' })
+      if (!res.ok) {
+        const data = await res.json()
+        throw new Error(data.error || 'Failed to clear logs')
+      }
+      setLogs([])
+      toast({ title: 'Logs cleared', description: 'All enrichment logs have been removed.' })
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' })
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -207,6 +228,28 @@ export default function EnrichmentLogsPage() {
             <Download className="h-4 w-4 mr-2" />
             Export CSV ({filteredLogs.length})
           </Button>
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button variant="outline" disabled={logs.length === 0 || clearing} className="text-destructive hover:text-destructive">
+                <Trash2 className="h-4 w-4 mr-2" />
+                Clear Logs
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Clear all enrichment logs?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  This will permanently delete {logs.length} enrichment log{logs.length !== 1 ? 's' : ''}. This action cannot be undone.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                <AlertDialogAction onClick={clearLogs} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                  Clear All
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
           <Button onClick={fetchLogs} variant="outline">
             Refresh
           </Button>
