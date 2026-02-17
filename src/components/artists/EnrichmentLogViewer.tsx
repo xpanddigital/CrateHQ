@@ -15,6 +15,11 @@ interface EnrichmentStep {
   confidence: number
   error?: string
   duration_ms?: number
+  url_fetched?: string
+  apify_used?: boolean
+  apify_actor?: string
+  was_blocked?: boolean
+  content_length?: number
 }
 
 interface EnrichmentLog {
@@ -235,6 +240,21 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                         </div>
                       )}
 
+                      {/* Actor + fetch details */}
+                      {(step.apify_actor || step.url_fetched || step.content_length) && (
+                        <div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                          {step.apify_actor && step.apify_actor !== 'skipped' && (
+                            <span>Actor: <span className="font-mono">{step.apify_actor}</span></span>
+                          )}
+                          {step.url_fetched && (
+                            <span className="truncate max-w-[300px]">URL: {step.url_fetched}</span>
+                          )}
+                          {step.content_length !== undefined && step.content_length > 0 && (
+                            <span>{step.content_length.toLocaleString()} chars</span>
+                          )}
+                        </div>
+                      )}
+
                       {step.status === 'failed' && (
                         <div className="text-xs text-muted-foreground">
                           {step.error || 'No emails found in this step'}
@@ -243,7 +263,9 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
 
                       {step.status === 'skipped' && (
                         <div className="text-xs text-muted-foreground">
-                          Skipped (email already found in previous step)
+                          {step.method === 'facebook_about' ? 'Skipped — Facebook requires login'
+                            : step.method === 'remaining_socials' ? 'Skipped — platforms block scraping'
+                            : 'Skipped (email already found in previous step)'}
                         </div>
                       )}
                     </div>

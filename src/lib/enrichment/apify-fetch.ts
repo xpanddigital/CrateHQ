@@ -1,347 +1,462 @@
 /**
- * Apify Fetch for Enrichment Pipeline
- * 
- * Replaces direct fetch() calls with Apify's JavaScript-rendering crawler.
- * This solves blocking issues with YouTube, Instagram, Facebook, etc.
- * 
- * Uses Apify's Website Content Crawler with Chromium rendering to get
- * fully rendered HTML from pages that require JavaScript.
+ * Platform-Specific Apify Actors for Enrichment Pipeline
+ *
+ * Each social platform needs its own dedicated scraper actor because the
+ * generic website-content-crawler returns cookie consent walls and login pages.
+ *
+ * Actors:
+ *   YouTube:   streamers~youtube-scraper        (~$0.002/channel)
+ *   Instagram: apify~instagram-profile-scraper  (~$0.01/profile)
+ *   Web pages: apify~website-content-crawler    (~$0.001/page, for Linktree + artist websites only)
+ *
+ * Token is ALWAYS passed as ?token= query parameter, never as Authorization header.
+ * Actor IDs use tilde (~) separator, never slash (/).
  */
 
 const APIFY_BASE = 'https://api.apify.com/v2'
-// CRITICAL: Apify REST API uses tilde (~) as separator, NOT slash (/)
-// Slash gets interpreted as a URL path segment and causes 404
-const WEBSITE_CRAWLER_ACTOR = 'apify~website-content-crawler'
-const MAX_WAIT_MS = 45000 // 45 seconds (leave headroom for Vercel timeout)
-const POLL_INTERVAL_MS = 2000 // 2 seconds
+const MAX_WAIT_MS = 45000
+const POLL_INTERVAL_MS = 2000
 
-/**
- * Fetch a single URL using Apify's JavaScript-rendering crawler
- */
-export async function apifyFetch(url: string): Promise<{ html: string; success: boolean; error?: string }> {
+// ============================================================
+// SHARED: Poll an actor run until completion
+// ============================================================
+
+async function pollForCompletion(
+  runId: string,
+  token: string,
+  label: string
+): Promise<{ datasetId: string; success: boolean; error?: string }> {
+  const startTime = Date.now()
+  let pollCount = 0
+
+  while (Date.now() - startTime < MAX_WAIT_MS) {
+    await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+    pollCount++
+
+    const res = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
+    if (!res.ok) {
+      return { datasetId: '', success: false, error: `Poll HTTP ${res.status}` }
+    }
+
+    const data = await res.json()
+    const status = data.data.status
+    const elapsed = Date.now() - startTime
+
+    console.log(`[${label}] Poll #${pollCount}: status=${status}, elapsed=${elapsed}ms`)
+
+    if (status === 'SUCCEEDED') {
+      return { datasetId: data.data.defaultDatasetId, success: true }
+    }
+    if (status === 'FAILED' || status === 'ABORTED') {
+      return { datasetId: '', success: false, error: `Run ${status}: ${data.data.statusMessage || 'unknown'}` }
+    }
+  }
+
+  return { datasetId: '', success: false, error: `Timeout after ${MAX_WAIT_MS}ms (${pollCount} polls)` }
+}
+
+async function fetchDatasetItems(datasetId: string, token: string): Promise<any[]> {
+  const res = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`)
+  if (!res.ok) {
+    throw new Error(`Dataset fetch HTTP ${res.status}`)
+  }
+  return res.json()
+}
+
+// ============================================================
+// YOUTUBE: streamers~youtube-scraper
+// ============================================================
+
+export interface YouTubeResult {
+  email: string | null
+  description: string
+  aboutText: string
+  allText: string
+  success: boolean
+  error?: string
+  actorUsed: string
+}
+
+export async function apifyFetchYouTube(channelUrl: string): Promise<YouTubeResult> {
   const token = process.env.APIFY_TOKEN
+  const actorId = 'streamers~youtube-scraper'
+  const label = 'Apify:YouTube'
 
   if (!token) {
-    console.warn('[Apify Fetch] No APIFY_TOKEN configured, cannot render JavaScript')
-    return { html: '', success: false, error: 'No APIFY_TOKEN configured' }
+    return { email: null, description: '', aboutText: '', allText: '', success: false, error: 'No APIFY_TOKEN', actorUsed: actorId }
   }
 
   try {
-    const apiUrl = `${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=${token}`
-    console.log(`[Apify Fetch] Starting actor run for: ${url}`)
-    console.log(`[Apify Fetch] API URL: ${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=***`)
+    console.log(`[${label}] Starting for: ${channelUrl}`)
 
-    // 1. Start the actor
-    const startRes = await fetch(apiUrl, {
+    const startRes = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        startUrls: [{ url }],
-        maxCrawlPages: 1,
-        crawlerType: 'cheerio',
-        maxCrawlDepth: 0,
+        startUrls: [{ url: channelUrl }],
+        maxResults: 1,
+        channelInfoOnly: true,
       }),
     })
 
     if (!startRes.ok) {
-      const errorText = await startRes.text()
-      console.error(`[Apify Fetch] Actor start FAILED: HTTP ${startRes.status}`)
-      console.error(`[Apify Fetch] Response: ${errorText.slice(0, 500)}`)
-      throw new Error(`Failed to start Apify actor: ${startRes.status} ${errorText.slice(0, 200)}`)
+      const errText = await startRes.text()
+      console.error(`[${label}] Start failed: HTTP ${startRes.status} — ${errText.slice(0, 300)}`)
+      return { email: null, description: '', aboutText: '', allText: '', success: false, error: `HTTP ${startRes.status}`, actorUsed: actorId }
     }
 
     const startData = await startRes.json()
     const runId = startData.data.id
-    const datasetId = startData.data.defaultDatasetId
+    console.log(`[${label}] Run started: ${runId}`)
 
-    console.log(`[Apify Fetch] Run started: ${runId}, dataset: ${datasetId}`)
+    const poll = await pollForCompletion(runId, token, label)
+    if (!poll.success) {
+      return { email: null, description: '', aboutText: '', allText: '', success: false, error: poll.error, actorUsed: actorId }
+    }
 
-    // 2. Poll for completion
-    const startTime = Date.now()
-    let status = 'RUNNING'
+    const items = await fetchDatasetItems(poll.datasetId, token)
+    if (!items || items.length === 0) {
+      return { email: null, description: '', aboutText: '', allText: '', success: false, error: 'No results', actorUsed: actorId }
+    }
 
-    while (Date.now() - startTime < MAX_WAIT_MS) {
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+    const data = items[0]
 
-      const statusRes = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
-      if (!statusRes.ok) {
-        throw new Error(`Failed to check run status: ${statusRes.status}`)
+    // Build combined text from all potentially useful fields
+    const description = data.channelDescription || data.description || ''
+    const aboutText = data.aboutText || data.about || ''
+    const allText = [
+      description,
+      aboutText,
+      data.channelEmail || '',
+      data.businessEmail || '',
+      data.contactInfo || '',
+      JSON.stringify(data.links || []),
+    ].join('\n')
+
+    // Extract email — check dedicated fields first
+    let email: string | null = null
+    if (data.channelEmail && data.channelEmail.includes('@')) {
+      email = data.channelEmail
+    } else if (data.businessEmail && data.businessEmail.includes('@')) {
+      email = data.businessEmail
+    }
+
+    // If no dedicated field, regex scan all text
+    if (!email) {
+      const emailMatch = allText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)
+      if (emailMatch && emailMatch.length > 0) {
+        email = emailMatch[0]
       }
-
-      const statusData = await statusRes.json()
-      status = statusData.data.status
-      console.log(`[Apify Fetch] Poll: status=${status}, elapsed=${Date.now() - startTime}ms`)
-
-      if (status === 'SUCCEEDED') {
-        console.log(`[Apify Fetch] Run completed successfully in ${Date.now() - startTime}ms`)
-        break
-      } else if (status === 'FAILED' || status === 'ABORTED') {
-        throw new Error(`Actor run ${status}: ${statusData.data.statusMessage || 'Unknown error'}`)
-      }
     }
 
-    if (status !== 'SUCCEEDED') {
-      throw new Error(`Actor run timeout after ${MAX_WAIT_MS}ms`)
-    }
+    console.log(`[${label}] Success: email=${email || 'none'}, desc=${description.length} chars`)
 
-    // 3. Fetch the dataset results
-    const resultsRes = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`)
-    if (!resultsRes.ok) {
-      throw new Error(`Failed to fetch results: ${resultsRes.status}`)
-    }
-
-    const results = await resultsRes.json()
-
-    if (!results || results.length === 0) {
-      throw new Error('No results returned from crawler')
-    }
-
-    // 4. Extract HTML content
-    const html = results[0].html || results[0].text || ''
-
-    console.log(`[Apify Fetch] Success: ${html.length} characters from ${url}`)
-
-    return { html, success: true }
+    return { email, description, aboutText, allText, success: true, actorUsed: actorId }
   } catch (error: any) {
-    console.error(`[Apify Fetch] FAILED for ${url}: ${error.message}`)
-    return { html: '', success: false, error: error.message }
+    console.error(`[${label}] FAILED: ${error.message}`)
+    return { email: null, description: '', aboutText: '', allText: '', success: false, error: error.message, actorUsed: actorId }
   }
 }
 
-/**
- * Batch fetch multiple URLs in a single Apify crawler run
- * This is much more efficient than fetching each URL separately
- */
-export async function apifyFetchMultiple(urls: string[]): Promise<Map<string, string>> {
+// ============================================================
+// INSTAGRAM: apify~instagram-profile-scraper
+// ============================================================
+
+export interface InstagramResult {
+  email: string | null
+  businessEmail: string | null
+  biography: string
+  externalUrl: string | null
+  allText: string
+  success: boolean
+  error?: string
+  actorUsed: string
+}
+
+export async function apifyFetchInstagram(handle: string): Promise<InstagramResult> {
   const token = process.env.APIFY_TOKEN
-  const resultMap = new Map<string, string>()
+  const actorId = 'apify~instagram-profile-scraper'
+  const label = 'Apify:Instagram'
+
+  const empty: InstagramResult = {
+    email: null, businessEmail: null, biography: '', externalUrl: null,
+    allText: '', success: false, actorUsed: actorId,
+  }
 
   if (!token) {
-    console.error('[Apify Batch] APIFY_TOKEN is not set — cannot fetch URLs')
-    return resultMap
+    return { ...empty, error: 'No APIFY_TOKEN' }
   }
 
-  if (urls.length === 0) {
-    console.warn('[Apify Batch] No URLs to fetch')
-    return resultMap
-  }
+  // Clean handle — remove @ and URL parts
+  const cleanHandle = handle
+    .replace(/^@/, '')
+    .replace(/https?:\/\/(www\.)?instagram\.com\//, '')
+    .replace(/\/$/, '')
 
-  const apiUrl = `${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=${token}`
+  if (!cleanHandle) {
+    return { ...empty, error: 'Empty handle' }
+  }
 
   try {
-    console.log(`[Apify Batch] Starting batch fetch for ${urls.length} URLs`)
-    console.log(`[Apify Batch] Actor: ${WEBSITE_CRAWLER_ACTOR}`)
-    console.log(`[Apify Batch] URLs:`, urls)
+    console.log(`[${label}] Starting for: @${cleanHandle}`)
 
-    // 1. Start the actor with all URLs
-    const body = {
-      startUrls: urls.map(url => ({ url })),
-      maxCrawlPages: urls.length,
-      crawlerType: 'cheerio',
-      maxCrawlDepth: 0,
-    }
-
-    console.log(`[Apify Batch] POST ${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=***`)
-
-    const startRes = await fetch(apiUrl, {
+    const startRes = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        usernames: [cleanHandle],
+      }),
     })
 
     if (!startRes.ok) {
-      const errorText = await startRes.text()
-      console.error(`[Apify Batch] Actor start FAILED: HTTP ${startRes.status}`)
-      console.error(`[Apify Batch] Response body: ${errorText.slice(0, 500)}`)
-      throw new Error(`Apify actor start failed: HTTP ${startRes.status} - ${errorText.slice(0, 200)}`)
+      const errText = await startRes.text()
+      console.error(`[${label}] Start failed: HTTP ${startRes.status} — ${errText.slice(0, 300)}`)
+      return { ...empty, error: `HTTP ${startRes.status}` }
     }
 
     const startData = await startRes.json()
     const runId = startData.data.id
-    const datasetId = startData.data.defaultDatasetId
+    console.log(`[${label}] Run started: ${runId}`)
 
-    console.log(`[Apify Batch] Run started! runId=${runId}, datasetId=${datasetId}`)
-
-    // 2. Poll for completion
-    const startTime = Date.now()
-    let status = 'RUNNING'
-    let pollCount = 0
-
-    while (Date.now() - startTime < MAX_WAIT_MS) {
-      await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
-      pollCount++
-
-      const statusRes = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
-      if (!statusRes.ok) {
-        console.error(`[Apify Batch] Poll failed: HTTP ${statusRes.status}`)
-        throw new Error(`Failed to check run status: ${statusRes.status}`)
-      }
-
-      const statusData = await statusRes.json()
-      status = statusData.data.status
-      const elapsed = Date.now() - startTime
-
-      console.log(`[Apify Batch] Poll #${pollCount}: status=${status}, elapsed=${elapsed}ms`)
-
-      if (status === 'SUCCEEDED') {
-        console.log(`[Apify Batch] Run SUCCEEDED in ${elapsed}ms after ${pollCount} polls`)
-        break
-      } else if (status === 'FAILED' || status === 'ABORTED') {
-        const msg = statusData.data.statusMessage || 'Unknown error'
-        console.error(`[Apify Batch] Run ${status}: ${msg}`)
-        throw new Error(`Actor run ${status}: ${msg}`)
-      }
+    const poll = await pollForCompletion(runId, token, label)
+    if (!poll.success) {
+      return { ...empty, error: poll.error }
     }
 
-    if (status !== 'SUCCEEDED') {
-      console.error(`[Apify Batch] TIMEOUT after ${MAX_WAIT_MS}ms (${pollCount} polls)`)
-      throw new Error(`Actor run timeout after ${MAX_WAIT_MS}ms`)
+    const items = await fetchDatasetItems(poll.datasetId, token)
+    if (!items || items.length === 0) {
+      return { ...empty, error: 'No results' }
     }
 
-    // 3. Fetch the dataset results
-    console.log(`[Apify Batch] Fetching dataset results: ${datasetId}`)
-    const resultsRes = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`)
-    if (!resultsRes.ok) {
-      throw new Error(`Failed to fetch results: ${resultsRes.status}`)
+    const data = items[0]
+
+    const biography = data.biography || data.bio || ''
+    const businessEmail = data.businessEmail || data.contactEmail || null
+    const externalUrl = data.externalUrl || data.website || null
+
+    const allText = [
+      biography,
+      businessEmail || '',
+      externalUrl || '',
+      data.businessPhoneNumber || '',
+      data.businessCategoryName || '',
+    ].join('\n')
+
+    // Extract email — check dedicated field first
+    let email: string | null = null
+    if (businessEmail && businessEmail.includes('@')) {
+      email = businessEmail
     }
 
-    const results = await resultsRes.json()
-    console.log(`[Apify Batch] Dataset returned ${results.length} items`)
-
-    // 4. Build map of URL -> HTML
-    for (const result of results) {
-      const pageUrl = result.url
-      const html = result.html || result.text || ''
-      if (pageUrl && html) {
-        resultMap.set(pageUrl, html)
-        console.log(`[Apify Batch] ✅ ${pageUrl}: ${html.length} chars`)
-      } else {
-        console.warn(`[Apify Batch] ⚠️ Empty result for: ${pageUrl || 'unknown URL'}`)
+    // If no dedicated field, regex scan biography
+    if (!email && biography) {
+      const emailMatch = biography.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g)
+      if (emailMatch && emailMatch.length > 0) {
+        email = emailMatch[0]
       }
     }
 
-    console.log(`[Apify Batch] Complete: ${resultMap.size}/${urls.length} pages fetched successfully`)
+    console.log(`[${label}] Success: email=${email || 'none'}, bio=${biography.length} chars, externalUrl=${externalUrl || 'none'}`)
 
-    return resultMap
+    return { email, businessEmail, biography, externalUrl, allText, success: true, actorUsed: actorId }
   } catch (error: any) {
-    console.error(`[Apify Batch] ❌ FAILED: ${error.message}`)
-    console.error(`[Apify Batch] Stack: ${error.stack?.slice(0, 300)}`)
-    // Return whatever we have (could be empty)
-    return resultMap
+    console.error(`[${label}] FAILED: ${error.message}`)
+    return { ...empty, error: error.message }
   }
 }
 
-/**
- * Collect all URLs for an artist that need to be fetched
- */
-export function collectArtistUrls(artist: any): string[] {
-  const urls: string[] = []
-  const socialLinks = artist.social_links || {}
+// ============================================================
+// WEB PAGE: apify~website-content-crawler
+// For Linktree, artist websites, and other simple pages ONLY
+// ============================================================
 
-  // YouTube - check both social_links and direct properties
-  const youtubeUrl = socialLinks.youtube_url || socialLinks.youtube || artist.youtube_url
-  if (youtubeUrl) {
-    let aboutUrl = youtubeUrl
-    if (youtubeUrl.includes('/channel/') || youtubeUrl.includes('/@')) {
-      aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
-    } else if (youtubeUrl.includes('/c/')) {
-      aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
+export interface WebPageResult {
+  text: string
+  html: string
+  success: boolean
+  error?: string
+  actorUsed: string
+}
+
+export async function apifyFetchWebPage(url: string, maxPages: number = 3): Promise<WebPageResult> {
+  const token = process.env.APIFY_TOKEN
+  const actorId = 'apify~website-content-crawler'
+  const label = 'Apify:WebPage'
+
+  if (!token) {
+    return { text: '', html: '', success: false, error: 'No APIFY_TOKEN', actorUsed: actorId }
+  }
+
+  try {
+    console.log(`[${label}] Starting for: ${url} (maxPages=${maxPages})`)
+
+    const startRes = await fetch(`${APIFY_BASE}/acts/${actorId}/runs?token=${token}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        startUrls: [{ url }],
+        maxCrawlPages: maxPages,
+        crawlerType: 'playwright:firefox',
+        maxCrawlDepth: 1,
+      }),
+    })
+
+    if (!startRes.ok) {
+      const errText = await startRes.text()
+      console.error(`[${label}] Start failed: HTTP ${startRes.status} — ${errText.slice(0, 300)}`)
+      return { text: '', html: '', success: false, error: `HTTP ${startRes.status}`, actorUsed: actorId }
     }
-    urls.push(aboutUrl)
-  }
 
-  // Instagram - check both handle and URL formats
-  const instagramUrl = socialLinks.instagram_url || socialLinks.instagram || artist.instagram_url
-  if (instagramUrl) {
-    urls.push(instagramUrl)
-  } else if (artist.instagram_handle) {
-    urls.push(`https://www.instagram.com/${artist.instagram_handle}/`)
-  }
+    const startData = await startRes.json()
+    const runId = startData.data.id
+    console.log(`[${label}] Run started: ${runId}`)
 
-  // Facebook
-  const facebookUrl = socialLinks.facebook_url || socialLinks.facebook || artist.facebook_url
-  if (facebookUrl) {
-    urls.push(facebookUrl.replace(/\/$/, '') + '/about')
-  }
+    const poll = await pollForCompletion(runId, token, label)
+    if (!poll.success) {
+      return { text: '', html: '', success: false, error: poll.error, actorUsed: actorId }
+    }
 
-  // Website (homepage + common contact pages)
-  const website = socialLinks.website || artist.website
+    const items = await fetchDatasetItems(poll.datasetId, token)
+    if (!items || items.length === 0) {
+      return { text: '', html: '', success: false, error: 'No results', actorUsed: actorId }
+    }
+
+    // Combine text from all crawled pages
+    const allText = items.map((item: any) => item.text || item.content || '').join('\n\n')
+    const allHtml = items.map((item: any) => item.html || '').join('\n\n')
+
+    console.log(`[${label}] Success: ${items.length} pages, ${allText.length} chars text`)
+
+    return { text: allText, html: allHtml, success: true, actorUsed: actorId }
+  } catch (error: any) {
+    console.error(`[${label}] FAILED: ${error.message}`)
+    return { text: '', html: '', success: false, error: error.message, actorUsed: actorId }
+  }
+}
+
+// ============================================================
+// DIRECT FETCH: For pages that don't need Apify
+// ============================================================
+
+export async function directFetch(url: string, timeoutMs: number = 8000): Promise<{ html: string; success: boolean }> {
+  try {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+
+    const res = await fetch(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+      },
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+
+    if (!res.ok) {
+      return { html: '', success: false }
+    }
+
+    const html = await res.text()
+    return { html, success: html.length > 200 }
+  } catch {
+    return { html: '', success: false }
+  }
+}
+
+// ============================================================
+// HELPERS
+// ============================================================
+
+export function isLinktreeDomain(url: string): boolean {
+  const linkDomains = [
+    'linktr.ee', 'linktree.com', 'beacons.ai', 'stan.store',
+    'solo.to', 'lnk.to', 'bio.link', 'linkfire.com', 'ffm.to',
+    'linkin.bio', 'fanlink.to', 'smarturl.it',
+  ]
+  return linkDomains.some(domain => url.includes(domain))
+}
+
+export function isTicketingPlatform(url: string): boolean {
+  const blocked = [
+    'livenation.com', 'axs.com', 'dice.fm', 'gaana.com', 'tvmaze.com',
+    'songkick.com', 'bandsintown.com', 'ticketmaster.com', 'eventbrite.com',
+    'seetickets.com', 'stubhub.com',
+  ]
+  return blocked.some(domain => url.includes(domain))
+}
+
+export function isBlockedContent(html: string): boolean {
+  if (!html || html.length < 300) return true
+
+  const blockSignals = [
+    'consent.youtube.com', 'before you continue', 'Sign in to confirm',
+    'Login • Instagram', 'Create an account', 'log in to see',
+    'You must log in', 'Log Into Facebook',
+    'Enhanced Tracking Protection', 'Something went wrong',
+  ]
+
+  return blockSignals.some(signal => html.toLowerCase().includes(signal.toLowerCase()))
+}
+
+/**
+ * Extract Instagram handle from a URL or handle string
+ */
+export function extractInstagramHandle(input: string): string {
+  if (!input) return ''
+  return input
+    .replace(/^@/, '')
+    .replace(/https?:\/\/(www\.)?instagram\.com\//, '')
+    .replace(/\/$/, '')
+    .split('?')[0]
+}
+
+/**
+ * Find a YouTube channel URL from social_links
+ */
+export function findYouTubeUrl(artist: any): string {
+  const sl = artist.social_links || {}
+  const yt = sl.youtube_url || sl.youtube || (artist as any).youtube_url || ''
+  if (yt) return yt
+
+  for (const value of Object.values(sl)) {
+    if (typeof value === 'string' && (value.includes('youtube.com') || value.includes('youtu.be'))) {
+      return value
+    }
+  }
+  return ''
+}
+
+/**
+ * Find an Instagram handle from social_links or artist fields
+ */
+export function findInstagramHandle(artist: any): string {
+  const sl = artist.social_links || {}
+
+  // Check for URL first, extract handle from it
+  const igUrl = sl.instagram_url || sl.instagram || (artist as any).instagram_url || ''
+  if (igUrl) return extractInstagramHandle(igUrl)
+
+  // Check for direct handle field
+  if (artist.instagram_handle) return artist.instagram_handle
+
+  // Search all social links
+  for (const value of Object.values(sl)) {
+    if (typeof value === 'string' && value.includes('instagram.com')) {
+      return extractInstagramHandle(value)
+    }
+  }
+  return ''
+}
+
+/**
+ * Find a website URL from social_links or artist fields
+ */
+export function findWebsiteUrl(artist: any): string {
+  const sl = artist.social_links || {}
+  const website = sl.website || artist.website || ''
   if (website) {
-    let fullWebsite = website
-    if (!fullWebsite.startsWith('http')) {
-      fullWebsite = 'https://' + fullWebsite
-    }
-    urls.push(fullWebsite)
-    
-    // Also try common contact pages
-    try {
-      const baseUrl = new URL(fullWebsite)
-      const domain = `${baseUrl.protocol}//${baseUrl.host}`
-      urls.push(`${domain}/contact`)
-      urls.push(`${domain}/booking`)
-    } catch (e) {
-      // Invalid URL, skip
-    }
+    return website.startsWith('http') ? website : `https://${website}`
   }
-
-  // Twitter/X
-  const twitterUrl = socialLinks.twitter_url || socialLinks.twitter || artist.twitter_url
-  if (twitterUrl) {
-    urls.push(twitterUrl)
-  }
-
-  // TikTok
-  const tiktokUrl = socialLinks.tiktok_url || socialLinks.tiktok || artist.tiktok_url
-  if (tiktokUrl) {
-    urls.push(tiktokUrl)
-  }
-
-  // Spotify
-  const spotifyUrl = socialLinks.spotify_url || socialLinks.spotify || artist.spotify_url
-  if (spotifyUrl) {
-    urls.push(spotifyUrl)
-  }
-
-  console.log(`[collectArtistUrls] Collected ${urls.length} URLs for ${artist.name}:`, urls)
-
-  return urls
-}
-
-/**
- * Check if a URL is a simple link-in-bio page that doesn't need JavaScript rendering
- */
-export function isSimpleLinkInBio(url: string): boolean {
-  const simpleDomains = ['linktr.ee', 'beacons.ai', 'stan.store', 'lnk.to', 'solo.to', 'linkin.bio']
-  return simpleDomains.some(domain => url.includes(domain))
-}
-
-/**
- * Try direct fetch first, fall back to Apify if content is too small
- */
-export async function smartFetch(url: string): Promise<{ html: string; success: boolean; method: 'direct' | 'apify' }> {
-  // For simple link-in-bio pages, try direct fetch first
-  if (isSimpleLinkInBio(url)) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-      })
-
-      if (response.ok) {
-        const html = await response.text()
-        if (html.length >= 500) {
-          console.log(`[Smart Fetch] Direct fetch success for ${url}`)
-          return { html, success: true, method: 'direct' }
-        }
-      }
-    } catch (e) {
-      // Fall through to Apify
-    }
-  }
-
-  // Fall back to Apify for JavaScript rendering
-  const result = await apifyFetch(url)
-  return { ...result, method: 'apify' }
+  return ''
 }

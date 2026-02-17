@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { collectArtistUrls } from '@/lib/enrichment/apify-fetch'
+import { findYouTubeUrl, findInstagramHandle, findWebsiteUrl } from '@/lib/enrichment/apify-fetch'
 
 export async function GET() {
   try {
@@ -21,8 +21,9 @@ export async function GET() {
       })
     }
 
-    // Test URL collection
-    const urls = collectArtistUrls(artist)
+    const youtubeUrl = findYouTubeUrl(artist)
+    const instagramHandle = findInstagramHandle(artist)
+    const websiteUrl = findWebsiteUrl(artist)
 
     return NextResponse.json({
       status: 'debug_info',
@@ -40,15 +41,23 @@ export async function GET() {
         social_links: artist.social_links,
         social_links_keys: Object.keys(artist.social_links || {}),
       },
-      url_collection: {
-        collected_urls: urls,
-        url_count: urls.length,
-        expected_minimum: 1,
-        status: urls.length > 0 ? '✅ URLs found' : '❌ No URLs collected',
+      pipeline_inputs: {
+        step1_youtube: youtubeUrl || 'NONE — will skip Step 1',
+        step2_instagram: instagramHandle ? `@${instagramHandle}` : 'NONE — will skip Step 2',
+        step3_linktree: 'Determined after Step 2 (externalUrl from Instagram)',
+        step4_website: websiteUrl || 'NONE — will skip Step 4',
+        step5_facebook: 'SKIPPED (requires login)',
+        step6_remaining: 'SKIPPED (platforms block scraping)',
       },
-      diagnosis: urls.length === 0 
-        ? '❌ Problem: collectArtistUrls() returned empty array. Check social_links JSONB structure.'
-        : '✅ URL collection working. If Apify still not running, check Apify API or credits.',
+      actors: {
+        step1: 'streamers~youtube-scraper',
+        step2: 'apify~instagram-profile-scraper',
+        step3: 'apify~website-content-crawler (fallback only)',
+        step4: 'apify~website-content-crawler (fallback only)',
+      },
+      diagnosis: (!youtubeUrl && !instagramHandle && !websiteUrl)
+        ? 'No social URLs found. Check social_links JSONB structure.'
+        : `Found: ${[youtubeUrl && 'YouTube', instagramHandle && 'Instagram', websiteUrl && 'Website'].filter(Boolean).join(', ')}`,
     })
   } catch (error: any) {
     return NextResponse.json({ 
