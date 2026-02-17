@@ -29,6 +29,7 @@ import Anthropic from '@anthropic-ai/sdk'
 import * as cheerio from 'cheerio'
 import type { Artist } from '@/types/database'
 import { ApifyEnrichmentFallback, type ApifyConfig } from './apify-fallback'
+import { apifyFetchMultiple, collectArtistUrls, smartFetch } from './apify-fetch'
 
 // ============================================================
 // TYPES
@@ -238,12 +239,13 @@ function delay(ms: number): Promise<void> {
 
 /**
  * STEP 1: YouTube About Tab Email (highest hit rate — 45%)
- * 3-TIER SYSTEM: Direct fetch → Apify fallback → AI extraction
+ * Uses pre-fetched content from batched Apify run if available
  */
 async function step1_YouTubeAbout(
   artist: Artist,
   anthropicKey: string,
-  apifyFallback?: ApifyEnrichmentFallback
+  apifyFallback?: ApifyEnrichmentFallback,
+  preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
   let youtubeUrl = ''
@@ -275,9 +277,16 @@ async function step1_YouTubeAbout(
   let wasBlocked = false
 
   try {
-    // TIER 1: Direct fetch
-    html = await fetchWithTimeout(aboutUrl)
-    wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'youtube')
+    // Check if we have pre-fetched content from batched Apify run
+    if (preFetchedContent && preFetchedContent.has(aboutUrl)) {
+      html = preFetchedContent.get(aboutUrl) || ''
+      apifyUsed = true
+      console.log(`[Step 1] Using pre-fetched content: ${html.length} chars`)
+    } else {
+      // TIER 1: Direct fetch
+      html = await fetchWithTimeout(aboutUrl)
+      wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'youtube')
+    }
 
     // TIER 2: Apify fallback if blocked
     if (wasBlocked && apifyFallback) {
@@ -353,12 +362,13 @@ If no email found: {"email": "", "source": "none"}`
 
 /**
  * STEP 2: Instagram Bio Email
- * 3-TIER SYSTEM: Direct fetch → Apify fallback → AI extraction
+ * Uses pre-fetched content from batched Apify run if available
  */
 async function step2_InstagramBio(
   artist: Artist,
   anthropicKey: string,
-  apifyFallback?: ApifyEnrichmentFallback
+  apifyFallback?: ApifyEnrichmentFallback,
+  preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls: string[]; apifyUsed: boolean; wasBlocked: boolean }> {
   const handle = artist.instagram_handle
   if (!handle) {
@@ -374,9 +384,16 @@ async function step2_InstagramBio(
   let linktreeUrls: string[] = []
 
   try {
-    // TIER 1: Direct fetch
-    html = await fetchWithTimeout(instagramUrl)
-    wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'instagram')
+    // Check if we have pre-fetched content from batched Apify run
+    if (preFetchedContent && preFetchedContent.has(instagramUrl)) {
+      html = preFetchedContent.get(instagramUrl) || ''
+      apifyUsed = true
+      console.log(`[Step 2] Using pre-fetched content: ${html.length} chars`)
+    } else {
+      // TIER 1: Direct fetch
+      html = await fetchWithTimeout(instagramUrl)
+      wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'instagram')
+    }
 
     // TIER 2: Apify fallback if blocked
     if (wasBlocked && apifyFallback) {
@@ -860,6 +877,20 @@ export async function enrichArtist(
 
   console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
 
+  // OPTIMIZATION: Batch fetch all URLs upfront using Apify
+  // This turns 6 separate Apify runs into 1, saving time and cost
+  const useApifyBatch = !!process.env.APIFY_TOKEN
+  let pageContents = new Map<string, string>()
+
+  if (useApifyBatch) {
+    console.log(`[Enrichment] Using batched Apify fetch for all URLs...`)
+    const urls = collectArtistUrls(artist)
+    if (urls.length > 0) {
+      pageContents = await apifyFetchMultiple(urls)
+      console.log(`[Enrichment] Batched fetch complete: ${pageContents.size} pages loaded`)
+    }
+  }
+
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
     step.status = 'running'
@@ -880,10 +911,10 @@ export async function enrichArtist(
 
       switch (step.method) {
         case 'youtube_about':
-          result = await step1_YouTubeAbout(artist, apiKeys.anthropic, apifyFallback)
+          result = await step1_YouTubeAbout(artist, apiKeys.anthropic, apifyFallback, pageContents)
           break
         case 'instagram_bio':
-          result = await step2_InstagramBio(artist, apiKeys.anthropic, apifyFallback)
+          result = await step2_InstagramBio(artist, apiKeys.anthropic, apifyFallback, pageContents)
           linktreeUrls = result.linktreeUrls || []
           break
         case 'link_in_bio':
