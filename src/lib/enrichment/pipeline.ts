@@ -1,14 +1,20 @@
 /**
- * Email Enrichment Pipeline — REAL WEB SCRAPING VERSION
+ * Email Enrichment Pipeline — 3-TIER SYSTEM WITH APIFY FALLBACK
  * 
- * This pipeline ACTUALLY FETCHES web pages and extracts real emails from real content.
- * It NEVER guesses or fabricates emails — only returns emails found in actual page content.
+ * This pipeline uses a 3-tier approach for maximum success:
  * 
- * Architecture:
- * 1. Fetch the actual URL (using fetch() + Cheerio for HTML parsing)
- * 2. Pass the real page content to Claude for email extraction
- * 3. Validate that the email was actually present in the fetched content
- * 4. Stop as soon as a verified email is found (early termination)
+ * TIER 1: Direct fetch() - Fast, free, works most of the time
+ * TIER 2: Apify fallback - When direct fetch is blocked/empty, use Apify scrapers
+ * TIER 3: AI extraction - Pass real content to Claude for email discovery
+ * 
+ * Architecture per step:
+ * 1. Try direct fetch() with browser headers
+ * 2. Check if blocked (login wall, <500 chars, consent screens)
+ * 3. If blocked → Apify scraper fallback (if configured)
+ * 4. Extract emails from HTML with regex
+ * 5. If no emails → Ask Claude to find email in content
+ * 6. Validate email was actually in the fetched content (anti-hallucination)
+ * 7. Early termination on first valid email found
  * 
  * Steps (in order, stopping when email found):
  * 1. YouTube About Tab Email (45% hit rate)
@@ -22,6 +28,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import * as cheerio from 'cheerio'
 import type { Artist } from '@/types/database'
+import { ApifyEnrichmentFallback, type ApifyConfig } from './apify-fallback'
 
 // ============================================================
 // TYPES
@@ -37,6 +44,9 @@ export interface EnrichmentStep {
   error?: string
   duration_ms?: number
   url_fetched?: string
+  apify_used?: boolean
+  was_blocked?: boolean
+  content_length?: number
 }
 
 export interface EnrichmentSummary {
@@ -228,11 +238,13 @@ function delay(ms: number): Promise<void> {
 
 /**
  * STEP 1: YouTube About Tab Email (highest hit rate — 45%)
+ * 3-TIER SYSTEM: Direct fetch → Apify fallback → AI extraction
  */
 async function step1_YouTubeAbout(
   artist: Artist,
-  anthropicKey: string
-): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  anthropicKey: string,
+  apifyFallback?: ApifyEnrichmentFallback
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
   let youtubeUrl = ''
 
@@ -245,7 +257,7 @@ async function step1_YouTubeAbout(
   }
 
   if (!youtubeUrl) {
-    return { emails: [], confidence: 0, url: '', rawContent: '' }
+    return { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
   }
 
   // Ensure we have the channel URL and append /about
@@ -258,21 +270,60 @@ async function step1_YouTubeAbout(
 
   console.log(`[Step 1] Fetching YouTube About: ${aboutUrl}`)
 
-  try {
-    const html = await fetchWithTimeout(aboutUrl)
-    const $ = cheerio.load(html)
+  let html = ''
+  let apifyUsed = false
+  let wasBlocked = false
 
-    // Extract text content
+  try {
+    // TIER 1: Direct fetch
+    html = await fetchWithTimeout(aboutUrl)
+    wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'youtube')
+
+    // TIER 2: Apify fallback if blocked
+    if (wasBlocked && apifyFallback) {
+      console.log(`[Step 1] YouTube blocked, trying Apify fallback...`)
+      const apifyResult = await apifyFallback.scrapeYouTube(youtubeUrl)
+      
+      if (apifyResult.success) {
+        html = apifyResult.content
+        apifyUsed = true
+        wasBlocked = false
+        console.log(`[Step 1] Apify fallback success`)
+        
+        // Check if Apify already found emails
+        if (apifyResult.emails.length > 0) {
+          console.log(`[Step 1] Apify found emails directly: ${apifyResult.emails.join(', ')}`)
+          return { 
+            emails: apifyResult.emails, 
+            confidence: 0.85, 
+            url: aboutUrl, 
+            rawContent: html,
+            apifyUsed: true,
+            wasBlocked: false
+          }
+        }
+      } else {
+        console.log(`[Step 1] Apify fallback failed: ${apifyResult.error}`)
+      }
+    }
+
+    // If still blocked after Apify attempt, return empty
+    if (wasBlocked) {
+      console.log(`[Step 1] Content blocked and no Apify fallback available`)
+      return { emails: [], confidence: 0, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked: true }
+    }
+
+    // TIER 3: Extract emails from HTML
+    const $ = cheerio.load(html)
     const pageText = $('body').text()
 
-    // Try to extract emails directly from HTML
     const directEmails = extractEmailsFromHTML(html)
     if (directEmails.length > 0) {
       console.log(`[Step 1] Found direct emails: ${directEmails.join(', ')}`)
-      return { emails: directEmails, confidence: 0.85, url: aboutUrl, rawContent: html }
+      return { emails: directEmails, confidence: 0.85, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked }
     }
 
-    // Use AI to extract from page content
+    // TIER 3b: AI extraction
     const prompt = `You are extracting a real email address from a YouTube channel's About page.
 Here is the actual page content from the About tab of "${artist.name}"'s YouTube channel:
 
@@ -290,13 +341,13 @@ If no email found: {"email": "", "source": "none"}`
     const result = await extractEmailWithAI(html, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
     
     if (result.email && validateEmail(result.email, html)) {
-      return { emails: [result.email], confidence: 0.85, url: aboutUrl, rawContent: html }
+      return { emails: [result.email], confidence: 0.85, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked }
     }
 
-    return { emails: [], confidence: 0, url: aboutUrl, rawContent: html }
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked }
   } catch (error: any) {
     console.error('[Step 1 Error]', error.message)
-    return { emails: [], confidence: 0, url: aboutUrl, rawContent: '' }
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: '', apifyUsed, wasBlocked }
   }
 }
 
@@ -734,13 +785,17 @@ export async function enrichArtist(
   apiKeys: {
     anthropic?: string
   },
-  onProgress?: ProgressCallback
+  onProgress?: ProgressCallback,
+  apifyConfig?: ApifyConfig
 ): Promise<EnrichmentSummary> {
   const startTime = Date.now()
   
   if (!apiKeys.anthropic) {
     throw new Error('Anthropic API key is required for enrichment')
   }
+
+  // Initialize Apify fallback if config provided
+  const apifyFallback = apifyConfig ? new ApifyEnrichmentFallback(apifyConfig) : undefined
 
   const steps: EnrichmentStep[] = [
     { method: 'youtube_about', label: 'YouTube About Tab', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
@@ -767,11 +822,19 @@ export async function enrichArtist(
     const stepStart = Date.now()
 
     try {
-      let result: { emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls?: string[] }
+      let result: { 
+        emails: string[]
+        confidence: number
+        url: string
+        rawContent: string
+        linktreeUrls?: string[]
+        apifyUsed?: boolean
+        wasBlocked?: boolean
+      }
 
       switch (step.method) {
         case 'youtube_about':
-          result = await step1_YouTubeAbout(artist, apiKeys.anthropic)
+          result = await step1_YouTubeAbout(artist, apiKeys.anthropic, apifyFallback)
           break
         case 'instagram_bio':
           result = await step2_InstagramBio(artist, apiKeys.anthropic)
@@ -790,13 +853,16 @@ export async function enrichArtist(
           result = await step6_RemainingSocials(artist, apiKeys.anthropic)
           break
         default:
-          result = { emails: [], confidence: 0, url: '', rawContent: '' }
+          result = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
       }
 
       step.duration_ms = Date.now() - stepStart
       step.url_fetched = result.url
       step.emails_found = result.emails
       step.confidence = result.confidence
+      step.apify_used = result.apifyUsed || false
+      step.was_blocked = result.wasBlocked || false
+      step.content_length = result.rawContent?.length || 0
 
       if (step.emails_found.length > 0) {
         step.status = 'success'
