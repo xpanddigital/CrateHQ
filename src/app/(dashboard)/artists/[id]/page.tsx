@@ -62,6 +62,22 @@ export default function ArtistDetailPage() {
   const handleSave = async () => {
     setSaving(true)
     try {
+      // Build social_links from editData
+      const social_links: Record<string, string> = {}
+      if (editData.social_links) {
+        // Preserve existing social_links and update with any changes
+        Object.assign(social_links, editData.social_links)
+      }
+      
+      // Update social_links with individual URL fields if they exist in editData
+      if (editData.instagram_url) social_links.instagram = editData.instagram_url
+      if (editData.youtube_url) social_links.youtube = editData.youtube_url
+      if (editData.facebook_url) social_links.facebook = editData.facebook_url
+      if (editData.twitter_url) social_links.twitter = editData.twitter_url
+      if (editData.tiktok_url) social_links.tiktok = editData.tiktok_url
+      if (editData.spotify_url) social_links.spotify = editData.spotify_url
+      if (editData.website) social_links.website = editData.website
+
       // Only send fields that can be updated
       const updatePayload = {
         name: editData.name,
@@ -75,6 +91,7 @@ export default function ArtistDetailPage() {
         instagram_handle: editData.instagram_handle,
         website: editData.website,
         spotify_url: editData.spotify_url,
+        social_links,
       }
 
       const res = await fetch(`/api/artists/${params.id}`, {
@@ -465,39 +482,95 @@ export default function ArtistDetailPage() {
 
               {!editMode ? (
                 <>
-                  {artist.instagram_handle && (
+                  {(artist.social_links?.instagram || artist.instagram_handle) && (
                     <div className="flex items-center gap-3">
                       <Instagram className="h-4 w-4 text-muted-foreground" />
                       <a
-                        href={`https://instagram.com/${artist.instagram_handle}`}
+                        href={artist.social_links?.instagram || `https://instagram.com/${artist.instagram_handle}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm hover:text-primary"
                       >
-                        @{artist.instagram_handle}
+                        {artist.instagram_handle ? `@${artist.instagram_handle}` : 'Instagram'}
                       </a>
                     </div>
                   )}
 
-                  {artist.website && (
-                    <div className="flex items-center gap-3">
-                      <Globe className="h-4 w-4 text-muted-foreground" />
-                      <a
-                        href={artist.website}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-sm hover:text-primary"
-                      >
-                        {artist.website}
-                      </a>
-                    </div>
-                  )}
-
-                  {artist.spotify_url && (
+                  {artist.social_links?.youtube && (
                     <div className="flex items-center gap-3">
                       <Music className="h-4 w-4 text-muted-foreground" />
                       <a
-                        href={artist.spotify_url}
+                        href={artist.social_links.youtube}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm hover:text-primary"
+                      >
+                        YouTube
+                      </a>
+                    </div>
+                  )}
+
+                  {artist.social_links?.facebook && (
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <a
+                        href={artist.social_links.facebook}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm hover:text-primary"
+                      >
+                        Facebook
+                      </a>
+                    </div>
+                  )}
+
+                  {artist.social_links?.twitter && (
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <a
+                        href={artist.social_links.twitter}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm hover:text-primary"
+                      >
+                        Twitter/X
+                      </a>
+                    </div>
+                  )}
+
+                  {artist.social_links?.tiktok && (
+                    <div className="flex items-center gap-3">
+                      <Music className="h-4 w-4 text-muted-foreground" />
+                      <a
+                        href={artist.social_links.tiktok}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm hover:text-primary"
+                      >
+                        TikTok
+                      </a>
+                    </div>
+                  )}
+
+                  {(artist.social_links?.website || artist.website) && (
+                    <div className="flex items-center gap-3">
+                      <Globe className="h-4 w-4 text-muted-foreground" />
+                      <a
+                        href={artist.social_links?.website || artist.website}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm hover:text-primary"
+                      >
+                        Website
+                      </a>
+                    </div>
+                  )}
+
+                  {(artist.social_links?.spotify || artist.spotify_url) && (
+                    <div className="flex items-center gap-3">
+                      <Music className="h-4 w-4 text-muted-foreground" />
+                      <a
+                        href={artist.social_links?.spotify || artist.spotify_url}
                         target="_blank"
                         rel="noopener noreferrer"
                         className="text-sm hover:text-primary"
@@ -510,29 +583,76 @@ export default function ArtistDetailPage() {
               ) : (
                 <div className="space-y-3">
                   <div className="space-y-2">
-                    <Label>Instagram Handle</Label>
-                    <Input
-                      value={editData.instagram_handle || ''}
-                      onChange={(e) => setEditData({ ...editData, instagram_handle: e.target.value })}
-                      placeholder="champagnepapi"
-                    />
+                    <Label className="text-sm font-semibold">Social Media URLs</Label>
+                    <p className="text-xs text-muted-foreground">
+                      Used by enrichment pipeline to find contact emails
+                    </p>
                   </div>
+                  
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <Label>Instagram URL</Label>
+                      <Input
+                        type="url"
+                        value={editData.instagram_url || editData.social_links?.instagram || ''}
+                        onChange={(e) => setEditData({ ...editData, instagram_url: e.target.value })}
+                        placeholder="https://instagram.com/artist"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>YouTube URL</Label>
+                      <Input
+                        type="url"
+                        value={editData.youtube_url || editData.social_links?.youtube || ''}
+                        onChange={(e) => setEditData({ ...editData, youtube_url: e.target.value })}
+                        placeholder="https://youtube.com/@artist"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Facebook URL</Label>
+                      <Input
+                        type="url"
+                        value={editData.facebook_url || editData.social_links?.facebook || ''}
+                        onChange={(e) => setEditData({ ...editData, facebook_url: e.target.value })}
+                        placeholder="https://facebook.com/artist"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Twitter/X URL</Label>
+                      <Input
+                        type="url"
+                        value={editData.twitter_url || editData.social_links?.twitter || ''}
+                        onChange={(e) => setEditData({ ...editData, twitter_url: e.target.value })}
+                        placeholder="https://twitter.com/artist"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>TikTok URL</Label>
+                      <Input
+                        type="url"
+                        value={editData.tiktok_url || editData.social_links?.tiktok || ''}
+                        onChange={(e) => setEditData({ ...editData, tiktok_url: e.target.value })}
+                        placeholder="https://tiktok.com/@artist"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Spotify URL</Label>
+                      <Input
+                        type="url"
+                        value={editData.spotify_url || editData.social_links?.spotify || ''}
+                        onChange={(e) => setEditData({ ...editData, spotify_url: e.target.value })}
+                        placeholder="https://open.spotify.com/artist/..."
+                      />
+                    </div>
+                  </div>
+                  
                   <div className="space-y-2">
                     <Label>Website</Label>
                     <Input
                       type="url"
-                      value={editData.website || ''}
+                      value={editData.website || editData.social_links?.website || ''}
                       onChange={(e) => setEditData({ ...editData, website: e.target.value })}
                       placeholder="https://example.com"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Spotify URL</Label>
-                    <Input
-                      type="url"
-                      value={editData.spotify_url || ''}
-                      onChange={(e) => setEditData({ ...editData, spotify_url: e.target.value })}
-                      placeholder="https://open.spotify.com/artist/..."
                     />
                   </div>
                 </div>
