@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import Image from 'next/image'
@@ -64,11 +64,7 @@ export default function InboxPage() {
   const [filterClassification, setFilterClassification] = useState<string>('all')
   const [filterScout, setFilterScout] = useState<string>('all')
 
-  useEffect(() => {
-    fetchInbox()
-  }, [filterClassification, filterScout])
-
-  const fetchInbox = async () => {
+  const fetchInbox = useCallback(async () => {
     try {
       const params = new URLSearchParams()
       if (filterClassification !== 'all') params.set('classification', filterClassification)
@@ -91,7 +87,11 @@ export default function InboxPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [filterClassification, filterScout])
+
+  useEffect(() => {
+    fetchInbox()
+  }, [fetchInbox])
 
   const handleMarkRead = async (itemId: string) => {
     try {

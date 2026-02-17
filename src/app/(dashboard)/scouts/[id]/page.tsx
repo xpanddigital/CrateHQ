@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -41,12 +41,7 @@ export default function ScoutDetailPage({ params }: { params: { id: string } }) 
   const [scout, setScout] = useState<ScoutDetail | null>(null)
   const [loading, setLoading] = useState(true)
 
-  useEffect(() => {
-    checkAccess()
-    fetchScoutDetail()
-  }, [params.id])
-
-  const checkAccess = async () => {
+  const checkAccess = useCallback(async () => {
     try {
       const supabase = (await import('@/lib/supabase/client')).createClient()
       const { data: { user } } = await supabase.auth.getUser()
@@ -65,9 +60,9 @@ export default function ScoutDetailPage({ params }: { params: { id: string } }) 
     } catch (error) {
       console.error('Error checking access:', error)
     }
-  }
+  }, [router])
 
-  const fetchScoutDetail = async () => {
+  const fetchScoutDetail = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch(`/api/scouts/${params.id}`)
@@ -80,7 +75,12 @@ export default function ScoutDetailPage({ params }: { params: { id: string } }) 
     } finally {
       setLoading(false)
     }
-  }
+  }, [params.id])
+
+  useEffect(() => {
+    checkAccess()
+    fetchScoutDetail()
+  }, [checkAccess, fetchScoutDetail])
 
   if (loading) {
     return (

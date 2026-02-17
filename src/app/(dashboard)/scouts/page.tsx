@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
@@ -52,12 +52,7 @@ export default function ScoutsPage() {
     role: 'scout',
   })
 
-  useEffect(() => {
-    checkAccess()
-    fetchScouts()
-  }, [])
-
-  const checkAccess = async () => {
+  const checkAccess = useCallback(async () => {
     try {
       const supabase = (await import('@/lib/supabase/client')).createClient()
       const { data: { user } } = await supabase.auth.getUser()
@@ -76,9 +71,9 @@ export default function ScoutsPage() {
     } catch (error) {
       console.error('Error checking access:', error)
     }
-  }
+  }, [router])
 
-  const fetchScouts = async () => {
+  const fetchScouts = useCallback(async () => {
     setLoading(true)
     try {
       const res = await fetch('/api/scouts')
@@ -91,7 +86,12 @@ export default function ScoutsPage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
+
+  useEffect(() => {
+    checkAccess()
+    fetchScouts()
+  }, [checkAccess, fetchScouts])
 
   const handleInvite = async () => {
     if (!inviteForm.email || !inviteForm.full_name) {

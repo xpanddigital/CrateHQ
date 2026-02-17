@@ -16,14 +16,19 @@ import {
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { Save, User, Bot, Link as LinkIcon, Mail, CheckCircle, XCircle, Loader2, Download } from 'lucide-react'
 import { Profile } from '@/types/database'
-import { SCOUT_PERSONAS } from '@/lib/ai/sdr'
+import { SCOUT_PERSONAS, ScoutPersona } from '@/lib/ai/sdr'
 
 export default function SettingsPage() {
   const router = useRouter()
   const [profile, setProfile] = useState<Profile | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [formData, setFormData] = useState({
+  const [formData, setFormData] = useState<{
+    full_name: string
+    phone: string
+    calendly_link: string
+    ai_sdr_persona: ScoutPersona
+  }>({
     full_name: '',
     phone: '',
     calendly_link: '',

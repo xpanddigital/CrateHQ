@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { DragDropContext, Droppable, Draggable, DropResult } from '@hello-pangea/dnd'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -48,11 +48,7 @@ export default function PipelinePage() {
   const [search, setSearch] = useState('')
   const [scoutFilter, setScoutFilter] = useState<string | null>(null)
 
-  useEffect(() => {
-    fetchDeals()
-  }, [])
-
-  const fetchDeals = async () => {
+  const fetchDeals = useCallback(async () => {
     try {
       const params = new URLSearchParams()
       if (search) params.set('search', search)
@@ -79,7 +75,11 @@ export default function PipelinePage() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [search, scoutFilter])
+
+  useEffect(() => {
+    fetchDeals()
+  }, [fetchDeals])
 
   const handleDragEnd = async (result: DropResult) => {
     const { source, destination, draggableId } = result
