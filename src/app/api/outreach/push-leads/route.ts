@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Get campaign name for logging
-    const { data: integration: integrationData } = await supabase
+    const { data: integrationData } = await supabase
       .from('integrations')
       .select('api_key')
       .eq('user_id', user.id)
