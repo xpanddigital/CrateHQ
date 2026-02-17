@@ -293,6 +293,7 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                         <div className="text-xs text-muted-foreground">
                           {step.method === 'facebook_about' ? 'Skipped — Facebook requires login'
                             : step.method === 'remaining_socials' ? 'Skipped — platforms block scraping'
+                            : step.method === 'youtube_about' ? 'Skipped — no YouTube URL available'
                             : 'Skipped (email already found in previous step)'}
                         </div>
                       )}

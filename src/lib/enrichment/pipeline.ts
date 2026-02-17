@@ -30,6 +30,7 @@ import {
   findInstagramHandle,
   findWebsiteUrl,
 } from './apify-fetch'
+import { discoverYouTubeChannel } from './youtube-api'
 
 // ============================================================
 // TYPES
@@ -203,25 +204,90 @@ function delay(ms: number): Promise<void> {
 }
 
 // ============================================================
-// STEP 1: YouTube (streamers~youtube-scraper)
+// STEP 0: YouTube Discovery (YouTube Data API + Haiku verify)
 // ============================================================
 
-async function step1_YouTube(
+async function step0_YouTubeDiscovery(
   artist: Artist,
   anthropicKey: string
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string;
+  discoveredYouTubeUrl?: string
+}> {
+  const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: 'youtube-data-api', wasBlocked: false }
+
+  const youtubeApiKey = process.env.YOUTUBE_API_KEY
+  if (!youtubeApiKey) {
+    console.log('[Step 0] No YOUTUBE_API_KEY configured, skipping discovery')
+    return { ...empty, errorDetails: 'No YOUTUBE_API_KEY configured' }
+  }
+
+  // Skip if artist already has a YouTube URL
+  const existingUrl = findYouTubeUrl(artist)
+  if (existingUrl) {
+    console.log(`[Step 0] Artist already has YouTube URL: ${existingUrl} — skipping discovery`)
+    return { ...empty, url: existingUrl, discoveredYouTubeUrl: existingUrl, apifyActor: 'skipped (already has URL)' }
+  }
+
+  const result = await discoverYouTubeChannel(artist, {
+    youtube: youtubeApiKey,
+    anthropic: anthropicKey,
+  })
+
+  if (!result.success || !result.channelUrl) {
+    console.log(`[Step 0] YouTube discovery failed: ${result.error || 'No match found'}`)
+    return { ...empty, errorDetails: result.error || 'No YouTube channel found', apifyActor: result.method }
+  }
+
+  console.log(`[Step 0] Discovered YouTube channel: ${result.channelUrl} (confidence: ${result.confidence}, method: ${result.method})`)
+
+  // If the API already found emails in the channel description, return them
+  if (result.emailsFromDescription.length > 0) {
+    console.log(`[Step 0] Emails found in YouTube description: ${result.emailsFromDescription.join(', ')}`)
+    return {
+      emails: result.emailsFromDescription,
+      confidence: Math.min(result.confidence, 0.85),
+      url: result.channelUrl,
+      rawContent: result.description,
+      apifyUsed: false,
+      apifyActor: result.method,
+      wasBlocked: false,
+      discoveredYouTubeUrl: result.channelUrl,
+    }
+  }
+
+  // No email in description, but we found the channel — pass URL to Step 1
+  return {
+    ...empty,
+    url: result.channelUrl,
+    rawContent: result.description,
+    apifyActor: result.method,
+    discoveredYouTubeUrl: result.channelUrl,
+  }
+}
+
+// ============================================================
+// STEP 1: YouTube Email Extraction (streamers~youtube-scraper)
+// ============================================================
+
+async function step1_YouTube(
+  artist: Artist,
+  anthropicKey: string,
+  discoveredYouTubeUrl?: string
+): Promise<{
+  emails: string[]; confidence: number; url: string; rawContent: string;
   apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string
 }> {
-  const youtubeUrl = findYouTubeUrl(artist)
+  const youtubeUrl = discoveredYouTubeUrl || findYouTubeUrl(artist)
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: '', wasBlocked: false }
 
   if (!youtubeUrl) {
-    console.log('[Step 1] No YouTube URL found, skipping')
+    console.log('[Step 1] No YouTube URL found (even after discovery), skipping')
     return empty
   }
 
-  console.log(`[Step 1] YouTube URL: ${youtubeUrl}`)
+  console.log(`[Step 1] YouTube URL: ${youtubeUrl}${discoveredYouTubeUrl ? ' (from Step 0 discovery)' : ' (from artist data)'}`)
 
   const result = await apifyFetchYouTube(youtubeUrl)
 
@@ -740,7 +806,8 @@ export async function enrichArtist(
   }
 
   const steps: EnrichmentStep[] = [
-    { method: 'youtube_about', label: 'YouTube (streamers~youtube-scraper)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'youtube_discovery', label: 'YouTube Discovery (Data API + Haiku)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'youtube_about', label: 'YouTube Email Extraction (streamers~youtube-scraper)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'instagram_bio', label: 'Instagram (apify~instagram-profile-scraper)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'link_in_bio', label: 'Link-in-Bio (direct fetch / website-content-crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'website_contact', label: 'Artist Website (direct fetch / website-content-crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
@@ -753,8 +820,10 @@ export async function enrichArtist(
   let bestConfidence = 0
   let bestSource = ''
   let instagramExternalUrl: string | null = null
+  let discoveredYouTubeUrl: string | undefined = undefined
 
   console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
+  console.log(`[Enrichment] YOUTUBE_API_KEY present: ${!!process.env.YOUTUBE_API_KEY}`)
   console.log(`[Enrichment] APIFY_TOKEN present: ${!!process.env.APIFY_TOKEN}`)
   console.log(`[Enrichment] Social links:`, JSON.stringify(artist.social_links || {}))
 
@@ -776,21 +845,26 @@ export async function enrichArtist(
         apifyActor?: string
         wasBlocked?: boolean
         errorDetails?: string
+        discoveredYouTubeUrl?: string
       }
 
       switch (step.method) {
+        case 'youtube_discovery':
+          result = await step0_YouTubeDiscovery(artist, apiKeys.anthropic!)
+          discoveredYouTubeUrl = result.discoveredYouTubeUrl
+          break
         case 'youtube_about':
-          result = await step1_YouTube(artist, apiKeys.anthropic)
+          result = await step1_YouTube(artist, apiKeys.anthropic!, discoveredYouTubeUrl)
           break
         case 'instagram_bio':
-          result = await step2_Instagram(artist, apiKeys.anthropic)
+          result = await step2_Instagram(artist, apiKeys.anthropic!)
           instagramExternalUrl = result.externalUrl || null
           break
         case 'link_in_bio':
-          result = await step3_LinkInBio(artist, instagramExternalUrl, apiKeys.anthropic)
+          result = await step3_LinkInBio(artist, instagramExternalUrl, apiKeys.anthropic!)
           break
         case 'website_contact':
-          result = await step4_Website(artist, apiKeys.anthropic)
+          result = await step4_Website(artist, apiKeys.anthropic!)
           break
         case 'facebook_about':
           result = await step5_Facebook(artist)
@@ -812,9 +886,54 @@ export async function enrichArtist(
       step.content_length = result.rawContent?.length || 0
       step.error_details = result.errorDetails
 
-      // Steps 5 and 6 are always skipped
+      // Steps that are always skipped
       if (step.method === 'facebook_about' || step.method === 'remaining_socials') {
         step.status = 'skipped'
+        onProgress?.(step, i)
+        continue
+      }
+
+      // Step 0 (discovery) is special: if it found emails, great — early terminate.
+      // If it didn't find emails but found a URL, that's still a success for discovery (URL passed to Step 1).
+      // If it found nothing, mark as failed but continue.
+      if (step.method === 'youtube_discovery') {
+        if (step.emails_found.length > 0) {
+          step.status = 'success'
+          step.best_email = step.emails_found[0]
+          console.log(`[Step 0 Success] Found email in YouTube description: ${step.emails_found.join(', ')}`)
+
+          for (const email of step.emails_found) {
+            allEmails.push({ email, source: 'youtube_discovery', confidence: result.confidence })
+          }
+          if (result.confidence > bestConfidence) {
+            bestEmail = step.emails_found[0]
+            bestConfidence = result.confidence
+            bestSource = 'youtube_discovery'
+          }
+
+          onProgress?.(step, i)
+
+          // Early termination
+          console.log('[Early Termination] Email found in YouTube description, skipping remaining steps')
+          for (let j = i + 1; j < steps.length; j++) {
+            steps[j].status = 'skipped'
+          }
+          break
+        } else if (discoveredYouTubeUrl) {
+          step.status = 'success'
+          console.log(`[Step 0] YouTube channel discovered: ${discoveredYouTubeUrl} — proceeding to Step 1 for deep extraction`)
+        } else {
+          step.status = 'failed'
+          console.log('[Step 0] No YouTube channel discovered')
+        }
+        onProgress?.(step, i)
+        continue
+      }
+
+      // For Step 1: if discovery didn't find a YouTube URL and artist has no YouTube URL, skip
+      if (step.method === 'youtube_about' && !discoveredYouTubeUrl && !findYouTubeUrl(artist)) {
+        step.status = 'skipped'
+        step.error_details = 'No YouTube URL available (discovery failed and no URL in artist data)'
         onProgress?.(step, i)
         continue
       }
@@ -823,7 +942,7 @@ export async function enrichArtist(
         step.status = 'success'
         step.best_email = step.emails_found[0]
 
-        console.log(`[Step ${i + 1} Success] Found: ${step.emails_found.join(', ')} via ${step.apify_actor || 'direct'}`)
+        console.log(`[Step ${i} Success] Found: ${step.emails_found.join(', ')} via ${step.apify_actor || 'direct'}`)
 
         for (const email of step.emails_found) {
           allEmails.push({ email, source: step.method, confidence: result.confidence })
@@ -845,13 +964,13 @@ export async function enrichArtist(
         break
       } else {
         step.status = 'failed'
-        console.log(`[Step ${i + 1} Failed] No email found`)
+        console.log(`[Step ${i} Failed] No email found`)
       }
     } catch (error: any) {
       step.status = 'failed'
       step.error = error.message
       step.duration_ms = Date.now() - stepStart
-      console.error(`[Step ${i + 1} Error]`, error.message)
+      console.error(`[Step ${i} Error]`, error.message)
     }
 
     onProgress?.(step, i)

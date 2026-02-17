@@ -4,7 +4,7 @@ import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Sparkles, CheckCircle, XCircle, Clock, Youtube, Share2, Instagram, Globe, Facebook, SkipForward } from 'lucide-react'
+import { Loader2, Sparkles, CheckCircle, XCircle, Clock, Youtube, Share2, Instagram, Globe, Facebook, SkipForward, Search } from 'lucide-react'
 import type { EnrichmentStep as PipelineStep } from '@/lib/enrichment/pipeline'
 
 interface EnrichmentPanelProps {
@@ -20,6 +20,8 @@ export function EnrichmentPanel({ artistId, onEnrichmentComplete }: EnrichmentPa
 
   const getStepIcon = (method: string) => {
     switch (method) {
+      case 'youtube_discovery':
+        return <Search className="h-4 w-4" />
       case 'youtube_about':
         return <Youtube className="h-4 w-4" />
       case 'instagram_bio':
@@ -44,7 +46,8 @@ export function EnrichmentPanel({ artistId, onEnrichmentComplete }: EnrichmentPa
     
     // Initialize steps matching the pipeline
     const initialSteps: PipelineStep[] = [
-      { method: 'youtube_about', label: 'YouTube (streamers~youtube-scraper)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+      { method: 'youtube_discovery', label: 'YouTube Discovery (Data API + Haiku)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+      { method: 'youtube_about', label: 'YouTube Email Extraction (Apify scraper)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'instagram_bio', label: 'Instagram (apify~instagram-profile-scraper)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'link_in_bio', label: 'Link-in-Bio (direct fetch / crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'website_contact', label: 'Artist Website (direct fetch / crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
