@@ -353,24 +353,69 @@ If no email found: {"email": "", "source": "none"}`
 
 /**
  * STEP 2: Instagram Bio Email
+ * 3-TIER SYSTEM: Direct fetch → Apify fallback → AI extraction
  */
 async function step2_InstagramBio(
   artist: Artist,
-  anthropicKey: string
-): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls: string[] }> {
+  anthropicKey: string,
+  apifyFallback?: ApifyEnrichmentFallback
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls: string[]; apifyUsed: boolean; wasBlocked: boolean }> {
   const handle = artist.instagram_handle
   if (!handle) {
-    return { emails: [], confidence: 0, url: '', rawContent: '', linktreeUrls: [] }
+    return { emails: [], confidence: 0, url: '', rawContent: '', linktreeUrls: [], apifyUsed: false, wasBlocked: false }
   }
 
   const instagramUrl = `https://www.instagram.com/${handle}/`
   console.log(`[Step 2] Fetching Instagram: ${instagramUrl}`)
 
-  try {
-    const html = await fetchWithTimeout(instagramUrl)
-    const $ = cheerio.load(html)
+  let html = ''
+  let apifyUsed = false
+  let wasBlocked = false
+  let linktreeUrls: string[] = []
 
-    // Extract meta tags
+  try {
+    // TIER 1: Direct fetch
+    html = await fetchWithTimeout(instagramUrl)
+    wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'instagram')
+
+    // TIER 2: Apify fallback if blocked
+    if (wasBlocked && apifyFallback) {
+      console.log(`[Step 2] Instagram blocked, trying Apify fallback...`)
+      const apifyResult = await apifyFallback.scrapeInstagram(handle)
+      
+      if (apifyResult.success) {
+        html = apifyResult.content
+        apifyUsed = true
+        wasBlocked = false
+        linktreeUrls = apifyResult.links
+        console.log(`[Step 2] Apify fallback success`)
+        
+        // Check if Apify already found emails
+        if (apifyResult.emails.length > 0) {
+          console.log(`[Step 2] Apify found emails directly: ${apifyResult.emails.join(', ')}`)
+          return { 
+            emails: apifyResult.emails, 
+            confidence: 0.8, 
+            url: instagramUrl, 
+            rawContent: html,
+            linktreeUrls,
+            apifyUsed: true,
+            wasBlocked: false
+          }
+        }
+      } else {
+        console.log(`[Step 2] Apify fallback failed: ${apifyResult.error}`)
+      }
+    }
+
+    // If still blocked after Apify attempt, return empty
+    if (wasBlocked) {
+      console.log(`[Step 2] Content blocked and no Apify fallback available`)
+      return { emails: [], confidence: 0, url: instagramUrl, rawContent: html, linktreeUrls: [], apifyUsed, wasBlocked: true }
+    }
+
+    // TIER 3: Extract emails from HTML
+    const $ = cheerio.load(html)
     const ogDescription = $('meta[property="og:description"]').attr('content') || ''
     const pageText = $('body').text()
 
@@ -378,21 +423,22 @@ async function step2_InstagramBio(
     const directEmails = extractEmailsFromHTML(html)
     if (directEmails.length > 0) {
       console.log(`[Step 2] Found direct emails: ${directEmails.join(', ')}`)
-      return { emails: directEmails, confidence: 0.8, url: instagramUrl, rawContent: html, linktreeUrls: [] }
+      return { emails: directEmails, confidence: 0.8, url: instagramUrl, rawContent: html, linktreeUrls, apifyUsed, wasBlocked }
     }
 
-    // Extract link-in-bio URLs
-    const linktreePatterns = ['linktr.ee', 'beacons.ai', 'stan.store', 'solo.to', 'lnk.to', 'linkin.bio', 'linkfire', 'fanlink', 'smarturl']
-    const linktreeUrls: string[] = []
-    
-    $('a').each((i, el) => {
-      const href = $(el).attr('href')
-      if (href && linktreePatterns.some(pattern => href.includes(pattern))) {
-        linktreeUrls.push(href)
-      }
-    })
+    // Extract link-in-bio URLs if not already found by Apify
+    if (linktreeUrls.length === 0) {
+      const linktreePatterns = ['linktr.ee', 'beacons.ai', 'stan.store', 'solo.to', 'lnk.to', 'linkin.bio', 'linkfire', 'fanlink', 'smarturl']
+      
+      $('a').each((i, el) => {
+        const href = $(el).attr('href')
+        if (href && linktreePatterns.some(pattern => href.includes(pattern))) {
+          linktreeUrls.push(href)
+        }
+      })
+    }
 
-    // Use AI to extract from bio content
+    // TIER 3b: AI extraction
     const prompt = `You are extracting a real email address from an Instagram profile page.
 Here is the actual page content/meta data from @${handle}'s Instagram:
 
@@ -411,13 +457,13 @@ If no email: {"email": "", "source": "none", "linktree_urls": ["any urls found"]
     const foundLinktreeUrls = result.linktree_urls || linktreeUrls
 
     if (result.email && validateEmail(result.email, html)) {
-      return { emails: [result.email], confidence: 0.8, url: instagramUrl, rawContent: html, linktreeUrls: foundLinktreeUrls }
+      return { emails: [result.email], confidence: 0.8, url: instagramUrl, rawContent: html, linktreeUrls: foundLinktreeUrls, apifyUsed, wasBlocked }
     }
 
-    return { emails: [], confidence: 0, url: instagramUrl, rawContent: html, linktreeUrls: foundLinktreeUrls }
+    return { emails: [], confidence: 0, url: instagramUrl, rawContent: html, linktreeUrls: foundLinktreeUrls, apifyUsed, wasBlocked }
   } catch (error: any) {
     console.error('[Step 2 Error]', error.message)
-    return { emails: [], confidence: 0, url: instagramUrl, rawContent: '', linktreeUrls: [] }
+    return { emails: [], confidence: 0, url: instagramUrl, rawContent: '', linktreeUrls: [], apifyUsed, wasBlocked }
   }
 }
 
@@ -837,7 +883,7 @@ export async function enrichArtist(
           result = await step1_YouTubeAbout(artist, apiKeys.anthropic, apifyFallback)
           break
         case 'instagram_bio':
-          result = await step2_InstagramBio(artist, apiKeys.anthropic)
+          result = await step2_InstagramBio(artist, apiKeys.anthropic, apifyFallback)
           linktreeUrls = result.linktreeUrls || []
           break
         case 'link_in_bio':
