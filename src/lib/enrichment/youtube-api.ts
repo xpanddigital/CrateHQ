@@ -268,6 +268,120 @@ If no good match: {"channelId": "", "confidence": 0, "reasoning": "No matching c
 }
 
 // ============================================================
+// RESOLVE: Extract channel ID from a YouTube URL
+// ============================================================
+
+async function resolveChannelId(
+  youtubeUrl: string,
+  apiKey: string
+): Promise<string | null> {
+  // Format: youtube.com/channel/UCxxxxxx
+  const channelMatch = youtubeUrl.match(/youtube\.com\/channel\/(UC[a-zA-Z0-9_-]+)/)
+  if (channelMatch) return channelMatch[1]
+
+  // Format: youtube.com/@handle or youtube.com/c/name or youtube.com/user/name
+  const handleMatch = youtubeUrl.match(/youtube\.com\/(@[a-zA-Z0-9._-]+|c\/[a-zA-Z0-9._-]+|user\/[a-zA-Z0-9._-]+)/)
+  if (handleMatch) {
+    const handle = handleMatch[1]
+    console.log(`[YouTube API] Resolving handle "${handle}" to channel ID`)
+
+    // Use search to resolve handle → channel ID
+    const query = handle.startsWith('@') ? handle.slice(1) : handle.replace(/^(c|user)\//, '')
+    const params = new URLSearchParams({
+      part: 'snippet',
+      q: query,
+      type: 'channel',
+      maxResults: '1',
+      key: apiKey,
+    })
+
+    try {
+      const res = await fetch(`${YT_API_BASE}/search?${params}`)
+      if (!res.ok) return null
+
+      const data = JSON.parse(await res.text())
+      const channelId = data.items?.[0]?.snippet?.channelId || data.items?.[0]?.id?.channelId
+      if (channelId) {
+        console.log(`[YouTube API] Resolved "${handle}" → ${channelId}`)
+        return channelId
+      }
+    } catch {
+      // Fall through
+    }
+  }
+
+  // Last resort: try the URL as a search query
+  const urlParts = youtubeUrl.replace(/https?:\/\/(www\.)?youtube\.com\/?/, '').replace(/\//g, ' ').trim()
+  if (urlParts) {
+    const params = new URLSearchParams({
+      part: 'snippet',
+      q: urlParts,
+      type: 'channel',
+      maxResults: '1',
+      key: apiKey,
+    })
+
+    try {
+      const res = await fetch(`${YT_API_BASE}/search?${params}`)
+      if (!res.ok) return null
+
+      const data = JSON.parse(await res.text())
+      return data.items?.[0]?.snippet?.channelId || data.items?.[0]?.id?.channelId || null
+    } catch {
+      return null
+    }
+  }
+
+  return null
+}
+
+// ============================================================
+// FETCH: Get description/about from an existing YouTube URL
+// ============================================================
+
+export async function fetchYouTubeDescription(
+  youtubeUrl: string,
+  apiKey: string
+): Promise<{
+  success: boolean
+  channel: YouTubeChannel | null
+  description: string
+  emailsFromDescription: string[]
+  error?: string
+}> {
+  const empty = { success: false, channel: null, description: '', emailsFromDescription: [] }
+
+  if (!apiKey) {
+    return { ...empty, error: 'No YouTube API key configured' }
+  }
+
+  console.log(`[YouTube API] Fetching description for existing URL: ${youtubeUrl}`)
+
+  const channelId = await resolveChannelId(youtubeUrl, apiKey)
+
+  if (!channelId) {
+    console.log(`[YouTube API] Could not resolve channel ID from URL: ${youtubeUrl}`)
+    return { ...empty, error: `Could not resolve channel ID from URL: ${youtubeUrl}` }
+  }
+
+  const channel = await getChannelDetails(channelId, apiKey)
+
+  if (!channel) {
+    return { ...empty, error: `Could not fetch channel details for ID: ${channelId}` }
+  }
+
+  const emails = extractEmailsFromText(channel.description)
+  console.log(`[YouTube API] Channel: "${channel.title}", Description: ${channel.description.length} chars, Emails found: ${emails.length}`)
+
+  return {
+    success: true,
+    channel,
+    description: channel.description,
+    emailsFromDescription: emails,
+  }
+}
+
+// ============================================================
 // MAIN: Discover YouTube channel for an artist
 // ============================================================
 

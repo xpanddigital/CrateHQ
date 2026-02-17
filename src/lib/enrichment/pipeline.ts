@@ -30,7 +30,7 @@ import {
   findInstagramHandle,
   findWebsiteUrl,
 } from './apify-fetch'
-import { discoverYouTubeChannel } from './youtube-api'
+import { discoverYouTubeChannel, fetchYouTubeDescription } from './youtube-api'
 
 // ============================================================
 // TYPES
@@ -223,12 +223,48 @@ async function step0_YouTubeDiscovery(
     return { ...empty, errorDetails: 'No YOUTUBE_API_KEY configured' }
   }
 
-  // Skip if artist already has a YouTube URL
   const existingUrl = findYouTubeUrl(artist)
+
+  // CASE A: Artist already has a YouTube URL — fetch the description via Data API
   if (existingUrl) {
-    console.log(`[Step 0] Artist already has YouTube URL: ${existingUrl} — skipping discovery`)
-    return { ...empty, url: existingUrl, discoveredYouTubeUrl: existingUrl, apifyActor: 'skipped (already has URL)' }
+    console.log(`[Step 0] Artist has YouTube URL: ${existingUrl} — fetching description via Data API`)
+
+    const descResult = await fetchYouTubeDescription(existingUrl, youtubeApiKey)
+
+    if (!descResult.success) {
+      console.log(`[Step 0] Failed to fetch description: ${descResult.error}`)
+      // Still pass the URL through to Step 1 (Apify can try)
+      return { ...empty, url: existingUrl, discoveredYouTubeUrl: existingUrl, apifyActor: 'youtube-data-api (description fetch failed)', errorDetails: descResult.error }
+    }
+
+    // Check for emails in the channel description
+    if (descResult.emailsFromDescription.length > 0) {
+      console.log(`[Step 0] Emails found in YouTube description: ${descResult.emailsFromDescription.join(', ')}`)
+      return {
+        emails: descResult.emailsFromDescription,
+        confidence: 0.9,
+        url: existingUrl,
+        rawContent: descResult.description,
+        apifyUsed: false,
+        apifyActor: 'youtube-data-api (description)',
+        wasBlocked: false,
+        discoveredYouTubeUrl: existingUrl,
+      }
+    }
+
+    // No email in description — pass to Step 1 for deeper Apify extraction
+    console.log(`[Step 0] No email in YouTube description (${descResult.description.length} chars). Passing to Step 1 for Apify extraction.`)
+    return {
+      ...empty,
+      url: existingUrl,
+      rawContent: descResult.description,
+      apifyActor: 'youtube-data-api (no email in description)',
+      discoveredYouTubeUrl: existingUrl,
+    }
   }
+
+  // CASE B: No YouTube URL — discover the channel via search + Haiku verification
+  console.log(`[Step 0] No YouTube URL in artist data — starting discovery`)
 
   const result = await discoverYouTubeChannel(artist, {
     youtube: youtubeApiKey,
