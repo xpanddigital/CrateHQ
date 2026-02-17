@@ -83,11 +83,18 @@ export async function POST(
 
     // Update deal's last_outreach_at if outbound
     if (direction === 'outbound') {
+      // Fetch current emails_sent, then increment
+      const { data: currentDeal } = await supabase
+        .from('deals')
+        .select('emails_sent')
+        .eq('id', params.id)
+        .single()
+
       await supabase
         .from('deals')
         .update({
           last_outreach_at: new Date().toISOString(),
-          emails_sent: supabase.rpc('increment', { x: 1 }),
+          emails_sent: (currentDeal?.emails_sent || 0) + 1,
         })
         .eq('id', params.id)
     }

@@ -25,6 +25,7 @@ export async function GET(
     }
 
     // Get snapshots for growth calculation
+    // Note: artist_snapshots table may not exist yet — handle gracefully
     const { data: snapshots, error: snapshotsError } = await supabase
       .from('artist_snapshots')
       .select('*')
@@ -32,7 +33,17 @@ export async function GET(
       .order('snapshot_date', { ascending: false })
       .limit(365)
 
-    if (snapshotsError) throw snapshotsError
+    // If table doesn't exist, return zeroed growth data instead of crashing
+    if (snapshotsError) {
+      console.warn('Growth calculation skipped:', snapshotsError.message)
+      return NextResponse.json({
+        growth_mom: artist.growth_mom || 0,
+        growth_qoq: artist.growth_qoq || 0,
+        growth_yoy: artist.growth_yoy || 0,
+        trend_direction: artist.growth_status || 'stable',
+        sparkline: [],
+      })
+    }
 
     const now = new Date()
     const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
