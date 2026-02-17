@@ -709,7 +709,15 @@ export default function DealDetailPage() {
               {deal.artist.tags && deal.artist.tags.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {deal.artist.tags.map((tag) => (
-                    <TagBadge key={tag.id} tag={tag} />
+                    <TagBadge 
+                      key={tag.id} 
+                      tag={{
+                        ...tag,
+                        description: tag.description ?? null,
+                        created_by: tag.created_by ?? null,
+                        created_at: tag.created_at ?? new Date().toISOString(),
+                      }} 
+                    />
                   ))}
                 </div>
               )}
