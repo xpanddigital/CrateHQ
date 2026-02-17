@@ -14,13 +14,17 @@ interface PreviewRow {
   name: string
   email?: string
   instagram_handle?: string
+  instagram_url?: string
   instagram_followers?: number
   website?: string
+  spotify_url?: string
   spotify_monthly_listeners?: number
   streams_last_month?: number
   track_count?: number
   genres?: string[]
   country?: string
+  facebook_url?: string
+  twitter_url?: string
 }
 
 export default function ArtistsImportPage() {
@@ -69,6 +73,11 @@ export default function ArtistsImportPage() {
       case 'ig_handle':
         row.instagram_handle = value.replace('@', '')
         break
+      case 'instagram_url':
+      case 'instagram url':
+      case 'ig_url':
+        row.instagram_url = value
+        break
       case 'instagram_followers':
       case 'instagram followers':
       case 'ig_followers':
@@ -77,6 +86,22 @@ export default function ArtistsImportPage() {
       case 'website':
       case 'url':
         row.website = value
+        break
+      case 'spotify_url':
+      case 'spotify url':
+      case 'spotify_link':
+      case 'spotify link':
+        row.spotify_url = value
+        break
+      case 'facebook_url':
+      case 'facebook url':
+      case 'facebook':
+        row.facebook_url = value
+        break
+      case 'twitter_url':
+      case 'twitter url':
+      case 'twitter':
+        row.twitter_url = value
         break
       case 'monthly_listeners':
       case 'spotify_monthly_listeners':
@@ -90,6 +115,7 @@ export default function ArtistsImportPage() {
       case 'streams last month':
       case 'last_month_streams':
       case 'monthly_streams':
+      case 'est_streams_month':
         row.streams_last_month = parseNumber(value)
         break
       case 'tracks':
@@ -97,6 +123,8 @@ export default function ArtistsImportPage() {
       case 'track count':
       case 'number_of_tracks':
       case 'total_tracks':
+      case 'album_count':
+      case 'single_count':
         row.track_count = parseNumber(value)
         break
       case 'genres':
@@ -211,7 +239,7 @@ export default function ArtistsImportPage() {
             <CardHeader>
               <CardTitle>Upload CSV File</CardTitle>
               <CardDescription>
-                Upload a CSV file with columns: name, email, instagram_handle, website, monthly_listeners, streams_last_month, track_count, genres, country
+                Upload a CSV file with columns: name, email, instagram_url, spotify_url, website, monthly_listeners, est_streams_month, album_count, single_count, genres, country
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
