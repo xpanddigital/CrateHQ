@@ -1,0 +1,144 @@
+---
+description: Debugging guidelines for Apify enrichment pipeline issues
+globs: src/lib/enrichment/**/*.ts
+alwaysApply: false
+---
+
+# Apify Enrichment Debugging
+
+## Common Issues and Solutions
+
+### 1. Apify Not Being Called
+
+**Symptoms:**
+- No runs appear in Apify dashboard
+- Enrichment completes but finds no emails
+- No Apify-related logs in Vercel
+
+**Debug Steps:**
+
+```typescript
+// Check these console logs in order:
+console.log('[Enrichment] APIFY_TOKEN present:', !!process.env.APIFY_TOKEN)
+console.log('[Enrichment] Collected URLs:', urls)
+console.log('[Apify Fetch Multiple] Starting batch fetch...')
+```
+
+**Common Causes:**
+- `APIFY_TOKEN` not set in Vercel environment variables
+- `collectArtistUrls()` returning empty array
+- `social_links` JSONB has wrong key names (`youtube` vs `youtube_url`)
+- Apify API call failing silently
+
+### 2. URL Collection Issues
+
+**Problem:** `collectArtistUrls()` returns `[]`
+
+**Check social_links structure:**
+```sql
+SELECT name, social_links FROM artists LIMIT 5;
+```
+
+**Expected format:**
+```json
+{
+  "youtube_url": "https://youtube.com/@artist",
+  "instagram_url": "https://www.instagram.com/artist/",
+  "facebook_url": "https://www.facebook.com/artist"
+}
+```
+
+**Also accepts (fallback):**
+```json
+{
+  "youtube": "https://youtube.com/@artist",
+  "instagram": "https://www.instagram.com/artist/"
+}
+```
+
+### 3. Vercel Function Timeout
+
+**Symptoms:**
+- Enrichment request returns but no logs
+- Function duration shows as very short
+- No completion logs
+
+**Causes:**
+- Apify fetch timing out (60s max)
+- Too many URLs in batch
+- Network issues
+
+**Fix:**
+```typescript
+// Reduce MAX_WAIT_MS if needed
+const MAX_WAIT_MS = 45000 // 45 seconds instead of 60
+```
+
+### 4. Silent Failures
+
+**Problem:** Apify errors are caught and return empty Map
+
+```typescript
+// In apifyFetchMultiple():
+catch (error: any) {
+  console.error('[Apify Fetch Multiple] Error:', error.message)
+  return resultMap  // Empty Map - enrichment continues with direct fetch
+}
+```
+
+**Solution:** Always check Vercel function logs for error messages
+
+## Debugging Checklist
+
+When enrichment isn't using Apify:
+
+- [ ] Verify `APIFY_TOKEN` in Vercel environment variables
+- [ ] Check debug endpoint: `/api/debug/enrichment-test`
+- [ ] Confirm `has_apify_token: true`
+- [ ] Confirm `url_count > 0`
+- [ ] Check Vercel function logs for console output
+- [ ] Look for `[Apify Fetch Multiple]` logs
+- [ ] Check Apify dashboard for runs
+- [ ] Verify Apify account has credits
+- [ ] Test Apify API with cURL
+
+## Debug Endpoint
+
+Use `/api/debug/enrichment-test` to check:
+- Environment variables are set
+- URLs are being collected
+- Social links structure is correct
+
+**Expected response:**
+```json
+{
+  "environment": {
+    "has_apify_token": true,
+    "apify_token_length": 46
+  },
+  "url_collection": {
+    "collected_urls": ["https://..."],
+    "url_count": 2,
+    "status": "✅ URLs found"
+  }
+}
+```
+
+## Logging Best Practices
+
+Always log:
+1. Function entry point
+2. Environment variable presence (not values!)
+3. URL collection results
+4. Apify API call start/end
+5. Errors with full context
+
+```typescript
+// ✅ GOOD
+console.log('[Enrichment] Starting for:', artist.name)
+console.log('[Enrichment] APIFY_TOKEN present:', !!process.env.APIFY_TOKEN)
+console.log('[Enrichment] Collected URLs:', urls.length)
+
+// ❌ BAD - logs sensitive data
+console.log('[Enrichment] Token:', process.env.APIFY_TOKEN)
+```

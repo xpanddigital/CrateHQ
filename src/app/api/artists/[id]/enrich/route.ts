@@ -26,11 +26,18 @@ export async function POST(
     }
 
     // Run enrichment pipeline
+    console.log(`[Single Enrich] Starting for: ${artist.name} (${artist.id})`)
+    console.log(`[Single Enrich] Social links:`, JSON.stringify(artist.social_links || {}))
+    console.log(`[Single Enrich] APIFY_TOKEN present:`, !!process.env.APIFY_TOKEN)
+    console.log(`[Single Enrich] ANTHROPIC_API_KEY present:`, !!process.env.ANTHROPIC_API_KEY)
+    
     const apiKeys = {
       anthropic: process.env.ANTHROPIC_API_KEY,
     }
 
+    console.log(`[Single Enrich] Calling enrichArtist...`)
     const result = await enrichArtist(artist, apiKeys)
+    console.log(`[Single Enrich] Enrichment complete. Email found:`, result.email_found || 'None')
 
     // Update artist record
     const updateData: any = {
