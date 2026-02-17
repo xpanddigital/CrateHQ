@@ -486,26 +486,32 @@ If no email: {"email": "", "source": "none", "linktree_urls": ["any urls found"]
 
 /**
  * STEP 3: Link-in-Bio Pages (Linktree, Beacons, etc.)
+ * Uses smart fetch: direct first, Apify fallback for small content
  */
 async function step3_LinkInBio(
   artist: Artist,
   linktreeUrls: string[],
   anthropicKey: string
-): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   if (linktreeUrls.length === 0) {
-    return { emails: [], confidence: 0, url: '', rawContent: '' }
+    return { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
   }
 
   let allContent = ''
   let allEmails: string[] = []
   let lastUrl = ''
+  let anyApifyUsed = false
 
   for (const url of linktreeUrls.slice(0, 3)) { // Max 3 link-in-bio pages
     console.log(`[Step 3] Fetching link-in-bio: ${url}`)
     
     try {
       await delay(1000) // Rate limiting
-      const html = await fetchWithTimeout(url)
+      
+      // Use smart fetch: try direct first, Apify if content too small
+      const { html, method } = await smartFetch(url)
+      if (method === 'apify') anyApifyUsed = true
+      
       const $ = cheerio.load(html)
       
       allContent += html + '\n\n'
@@ -531,7 +537,8 @@ async function step3_LinkInBio(
       for (const contactUrl of contactLinks.slice(0, 3)) {
         try {
           await delay(1000)
-          const contactHtml = await fetchWithTimeout(contactUrl)
+          const { html: contactHtml, method } = await smartFetch(contactUrl)
+          if (method === 'apify') anyApifyUsed = true
           allContent += contactHtml + '\n\n'
           const contactEmails = extractEmailsFromHTML(contactHtml)
           allEmails.push(...contactEmails)
@@ -547,7 +554,7 @@ async function step3_LinkInBio(
   // If we found direct emails, return them
   if (allEmails.length > 0) {
     console.log(`[Step 3] Found direct emails: ${allEmails.join(', ')}`)
-    return { emails: Array.from(new Set(allEmails)), confidence: 0.75, url: lastUrl, rawContent: allContent }
+    return { emails: Array.from(new Set(allEmails)), confidence: 0.75, url: lastUrl, rawContent: allContent, apifyUsed: anyApifyUsed, wasBlocked: false }
   }
 
   // Use AI to extract
@@ -572,25 +579,27 @@ If no email: {"email": "", "source": "none"}`
     const result = await extractEmailWithAI(allContent, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
     
     if (result.email && validateEmail(result.email, allContent)) {
-      return { emails: [result.email], confidence: 0.75, url: lastUrl, rawContent: allContent }
+      return { emails: [result.email], confidence: 0.75, url: lastUrl, rawContent: allContent, apifyUsed: anyApifyUsed, wasBlocked: false }
     }
   }
 
-  return { emails: [], confidence: 0, url: lastUrl, rawContent: allContent }
+  return { emails: [], confidence: 0, url: lastUrl, rawContent: allContent, apifyUsed: anyApifyUsed, wasBlocked: false }
 }
 
 /**
  * STEP 4: Artist Website Contact Page
+ * Uses pre-fetched content from batched Apify run if available
  */
 async function step4_WebsiteContact(
   artist: Artist,
-  anthropicKey: string
-): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  anthropicKey: string,
+  preFetchedContent?: Map<string, string>
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
   let websiteUrl = artist.website || socialLinks.website || ''
 
   if (!websiteUrl) {
-    return { emails: [], confidence: 0, url: '', rawContent: '' }
+    return { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
   }
 
   // Ensure URL has protocol
@@ -602,10 +611,19 @@ async function step4_WebsiteContact(
 
   let allContent = ''
   let allEmails: string[] = []
+  let apifyUsed = false
 
   try {
-    // Fetch homepage
-    const html = await fetchWithTimeout(websiteUrl)
+    // Check for pre-fetched homepage
+    let html = ''
+    if (preFetchedContent && preFetchedContent.has(websiteUrl)) {
+      html = preFetchedContent.get(websiteUrl) || ''
+      apifyUsed = true
+      console.log(`[Step 4] Using pre-fetched homepage: ${html.length} chars`)
+    } else {
+      html = await fetchWithTimeout(websiteUrl)
+    }
+    
     const $ = cheerio.load(html)
     allContent += html + '\n\n'
 
@@ -641,7 +659,17 @@ async function step4_WebsiteContact(
       try {
         await delay(1000)
         console.log(`[Step 4] Fetching contact page: ${contactUrl}`)
-        const contactHtml = await fetchWithTimeout(contactUrl)
+        
+        // Check for pre-fetched contact page
+        let contactHtml = ''
+        if (preFetchedContent && preFetchedContent.has(contactUrl)) {
+          contactHtml = preFetchedContent.get(contactUrl) || ''
+          apifyUsed = true
+          console.log(`[Step 4] Using pre-fetched contact page: ${contactHtml.length} chars`)
+        } else {
+          contactHtml = await fetchWithTimeout(contactUrl)
+        }
+        
         allContent += contactHtml + '\n\n'
         const contactEmails = extractEmailsFromHTML(contactHtml)
         allEmails.push(...contactEmails)
@@ -653,7 +681,7 @@ async function step4_WebsiteContact(
     // If we found direct emails, return them
     if (allEmails.length > 0) {
       console.log(`[Step 4] Found direct emails: ${allEmails.join(', ')}`)
-      return { emails: Array.from(new Set(allEmails)), confidence: 0.8, url: websiteUrl, rawContent: allContent }
+      return { emails: Array.from(new Set(allEmails)), confidence: 0.8, url: websiteUrl, rawContent: allContent, apifyUsed, wasBlocked: false }
     }
 
     // Use AI to extract
@@ -674,23 +702,25 @@ If no email: {"email": "", "source": "none"}`
     const result = await extractEmailWithAI(allContent, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
     
     if (result.email && validateEmail(result.email, allContent)) {
-      return { emails: [result.email], confidence: 0.8, url: websiteUrl, rawContent: allContent }
+      return { emails: [result.email], confidence: 0.8, url: websiteUrl, rawContent: allContent, apifyUsed, wasBlocked: false }
     }
 
-    return { emails: [], confidence: 0, url: websiteUrl, rawContent: allContent }
+    return { emails: [], confidence: 0, url: websiteUrl, rawContent: allContent, apifyUsed, wasBlocked: false }
   } catch (error: any) {
     console.error('[Step 4 Error]', error.message)
-    return { emails: [], confidence: 0, url: websiteUrl, rawContent: '' }
+    return { emails: [], confidence: 0, url: websiteUrl, rawContent: '', apifyUsed, wasBlocked: false }
   }
 }
 
 /**
  * STEP 5: Facebook About Section
+ * Uses pre-fetched content from batched Apify run if available
  */
 async function step5_FacebookAbout(
   artist: Artist,
-  anthropicKey: string
-): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  anthropicKey: string,
+  preFetchedContent?: Map<string, string>
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
   let facebookUrl = ''
 
@@ -703,7 +733,7 @@ async function step5_FacebookAbout(
   }
 
   if (!facebookUrl) {
-    return { emails: [], confidence: 0, url: '', rawContent: '' }
+    return { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
   }
 
   // Ensure we have the about page
@@ -711,8 +741,21 @@ async function step5_FacebookAbout(
 
   console.log(`[Step 5] Fetching Facebook About: ${aboutUrl}`)
 
+  let apifyUsed = false
+  let wasBlocked = false
+
   try {
-    const html = await fetchWithTimeout(aboutUrl)
+    // Check for pre-fetched content
+    let html = ''
+    if (preFetchedContent && preFetchedContent.has(aboutUrl)) {
+      html = preFetchedContent.get(aboutUrl) || ''
+      apifyUsed = true
+      console.log(`[Step 5] Using pre-fetched content: ${html.length} chars`)
+    } else {
+      html = await fetchWithTimeout(aboutUrl)
+      wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'facebook')
+    }
+
     const $ = cheerio.load(html)
 
     // Extract text content
@@ -722,7 +765,7 @@ async function step5_FacebookAbout(
     const directEmails = extractEmailsFromHTML(html)
     if (directEmails.length > 0) {
       console.log(`[Step 5] Found direct emails: ${directEmails.join(', ')}`)
-      return { emails: directEmails, confidence: 0.7, url: aboutUrl, rawContent: html }
+      return { emails: directEmails, confidence: 0.7, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked }
     }
 
     // Use AI (Haiku for cost savings on simpler task)
@@ -739,27 +782,30 @@ If none: {"email": "", "source": "none"}`
     const result = await extractEmailWithAI(html, prompt, 'claude-haiku-4-5-20251001', anthropicKey)
     
     if (result.email && validateEmail(result.email, html)) {
-      return { emails: [result.email], confidence: 0.7, url: aboutUrl, rawContent: html }
+      return { emails: [result.email], confidence: 0.7, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked }
     }
 
-    return { emails: [], confidence: 0, url: aboutUrl, rawContent: html }
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked }
   } catch (error: any) {
     console.error('[Step 5 Error]', error.message)
-    return { emails: [], confidence: 0, url: aboutUrl, rawContent: '' }
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: '', apifyUsed, wasBlocked }
   }
 }
 
 /**
  * STEP 6: All Remaining Socials Sweep (last resort)
+ * Uses pre-fetched content from batched Apify run if available
  */
 async function step6_RemainingSocials(
   artist: Artist,
-  anthropicKey: string
-): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  anthropicKey: string,
+  preFetchedContent?: Map<string, string>
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
   let allContent = ''
   let allEmails: string[] = []
   let lastUrl = ''
+  let apifyUsed = false
 
   const socialUrls: { platform: string; url: string }[] = []
 
@@ -777,7 +823,7 @@ async function step6_RemainingSocials(
   }
 
   if (socialUrls.length === 0) {
-    return { emails: [], confidence: 0, url: '', rawContent: '' }
+    return { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
   }
 
   console.log(`[Step 6] Fetching remaining socials: ${socialUrls.map(s => s.platform).join(', ')}`)
@@ -785,7 +831,17 @@ async function step6_RemainingSocials(
   for (const { platform, url } of socialUrls.slice(0, 3)) {
     try {
       await delay(1000)
-      const html = await fetchWithTimeout(url)
+      
+      // Check for pre-fetched content
+      let html = ''
+      if (preFetchedContent && preFetchedContent.has(url)) {
+        html = preFetchedContent.get(url) || ''
+        apifyUsed = true
+        console.log(`[Step 6] Using pre-fetched ${platform}: ${html.length} chars`)
+      } else {
+        html = await fetchWithTimeout(url)
+      }
+      
       allContent += `\n\n=== ${platform} ===\n${html}\n`
       lastUrl = url
 
@@ -799,7 +855,7 @@ async function step6_RemainingSocials(
   // If we found direct emails, return them
   if (allEmails.length > 0) {
     console.log(`[Step 6] Found direct emails: ${allEmails.join(', ')}`)
-    return { emails: Array.from(new Set(allEmails)), confidence: 0.6, url: lastUrl, rawContent: allContent }
+    return { emails: Array.from(new Set(allEmails)), confidence: 0.6, url: lastUrl, rawContent: allContent, apifyUsed, wasBlocked: false }
   }
 
   // Use AI for final comprehensive check
@@ -827,11 +883,11 @@ Return JSON only:
     if (result.email && validateEmail(result.email, allContent)) {
       const confidenceMap: Record<string, number> = { high: 0.7, medium: 0.5, low: 0.3 }
       const confidence = confidenceMap[result.confidence || 'low'] || 0.5
-      return { emails: [result.email], confidence, url: lastUrl, rawContent: allContent }
+      return { emails: [result.email], confidence, url: lastUrl, rawContent: allContent, apifyUsed, wasBlocked: false }
     }
   }
 
-  return { emails: [], confidence: 0, url: lastUrl, rawContent: allContent }
+  return { emails: [], confidence: 0, url: lastUrl, rawContent: allContent, apifyUsed, wasBlocked: false }
 }
 
 // ============================================================
@@ -921,13 +977,13 @@ export async function enrichArtist(
           result = await step3_LinkInBio(artist, linktreeUrls, apiKeys.anthropic)
           break
         case 'website_contact':
-          result = await step4_WebsiteContact(artist, apiKeys.anthropic)
+          result = await step4_WebsiteContact(artist, apiKeys.anthropic, pageContents)
           break
         case 'facebook_about':
-          result = await step5_FacebookAbout(artist, apiKeys.anthropic)
+          result = await step5_FacebookAbout(artist, apiKeys.anthropic, pageContents)
           break
         case 'remaining_socials':
-          result = await step6_RemainingSocials(artist, apiKeys.anthropic)
+          result = await step6_RemainingSocials(artist, apiKeys.anthropic, pageContents)
           break
         default:
           result = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, wasBlocked: false }
