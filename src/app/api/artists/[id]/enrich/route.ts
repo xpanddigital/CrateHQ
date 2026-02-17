@@ -52,6 +52,19 @@ export async function POST(
       updated_at: new Date().toISOString(),
     }
 
+    // Save discovered YouTube URL to social_links if it's new
+    if (result.discovered_youtube_url) {
+      const currentLinks = artist.social_links || {}
+      const existingYt = currentLinks.youtube || currentLinks.youtube_url || ''
+      if (!existingYt) {
+        updateData.social_links = {
+          ...currentLinks,
+          youtube: result.discovered_youtube_url,
+        }
+        console.log(`[Single Enrich] Saving discovered YouTube URL to profile: ${result.discovered_youtube_url}`)
+      }
+    }
+
     const { error: updateError } = await supabase
       .from('artists')
       .update(updateData)

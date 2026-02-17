@@ -64,6 +64,7 @@ export interface EnrichmentSummary {
   total_duration_ms: number
   is_contactable: boolean
   error_details?: string
+  discovered_youtube_url?: string
 }
 
 export type ProgressCallback = (step: EnrichmentStep, stepIndex: number) => void
@@ -1034,6 +1035,7 @@ export async function enrichArtist(
     total_duration_ms: Date.now() - startTime,
     is_contactable: !!bestEmail,
     error_details: allErrorDetails || undefined,
+    discovered_youtube_url: discoveredYouTubeUrl,
   }
 
   console.log(`[Enrichment Complete] ${bestEmail ? `Found: ${bestEmail}` : 'No email found'} (${summary.total_duration_ms}ms)\n`)
