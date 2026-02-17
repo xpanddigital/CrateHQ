@@ -28,8 +28,7 @@
 import Anthropic from '@anthropic-ai/sdk'
 import * as cheerio from 'cheerio'
 import type { Artist } from '@/types/database'
-import { ApifyEnrichmentFallback, type ApifyConfig } from './apify-fallback'
-import { apifyFetchMultiple, collectArtistUrls, smartFetch } from './apify-fetch'
+import { apifyFetch, apifyFetchMultiple, collectArtistUrls, smartFetch } from './apify-fetch'
 
 // ============================================================
 // TYPES
@@ -93,6 +92,31 @@ const JUNK_DOMAINS = [
 // ============================================================
 // UTILITY FUNCTIONS
 // ============================================================
+
+/**
+ * Check if fetched content appears to be blocked (login wall, consent screen, etc.)
+ */
+function isBlockedContent(html: string, platform: string): boolean {
+  if (!html || html.length < 500) return true
+
+  const blockSignals: Record<string, string[]> = {
+    youtube: [
+      'consent.youtube.com', 'accounts.google.com/ServiceLogin',
+      'before you continue', 'Sign in to confirm', 'This page requires JavaScript'
+    ],
+    instagram: [
+      'Login • Instagram', 'Create an account', 'log in to see',
+      'Sign up to see photos', 'Not Found'
+    ],
+    facebook: [
+      'You must log in', 'Log Into Facebook', 'Create new account',
+      'Facebook - Log In', 'Sign Up for Facebook'
+    ],
+  }
+
+  const signals = blockSignals[platform] || []
+  return signals.some(signal => html.toLowerCase().includes(signal.toLowerCase()))
+}
 
 /**
  * Fetch a URL with timeout and browser-like headers
@@ -244,7 +268,6 @@ function delay(ms: number): Promise<void> {
 async function step1_YouTubeAbout(
   artist: Artist,
   anthropicKey: string,
-  apifyFallback?: ApifyEnrichmentFallback,
   preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
@@ -275,55 +298,53 @@ async function step1_YouTubeAbout(
   }
 
   console.log(`[Step 1] YouTube URL: ${youtubeUrl}`)
-  console.log(`[Step 1] Fetching YouTube About: ${aboutUrl}`)
+  console.log(`[Step 1] About URL: ${aboutUrl}`)
 
   let html = ''
   let apifyUsed = false
   let wasBlocked = false
 
   try {
-    // Check if we have pre-fetched content from batched Apify run
-    if (preFetchedContent && preFetchedContent.has(aboutUrl)) {
+    // TIER 1: Check pre-fetched content from batched Apify run
+    if (preFetchedContent && preFetchedContent.size > 0 && preFetchedContent.has(aboutUrl)) {
       html = preFetchedContent.get(aboutUrl) || ''
       apifyUsed = true
-      console.log(`[Step 1] Using pre-fetched content: ${html.length} chars`)
-    } else {
-      // TIER 1: Direct fetch
-      html = await fetchWithTimeout(aboutUrl)
-      wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'youtube')
+      console.log(`[Step 1] Using pre-fetched Apify content: ${html.length} chars`)
+    } else if (preFetchedContent && preFetchedContent.size > 0) {
+      // Pre-fetch ran but URL wasn't in results — try partial match
+      preFetchedContent.forEach((value, key) => {
+        if (!html && (key.includes(youtubeUrl.replace(/\/$/, '')) || youtubeUrl.includes(key.replace(/\/about$/, '')))) {
+          html = value
+          apifyUsed = true
+          console.log(`[Step 1] Using pre-fetched content (partial match ${key}): ${html.length} chars`)
+        }
+      })
     }
 
-    // TIER 2: Apify fallback if blocked
-    if (wasBlocked && apifyFallback) {
-      console.log(`[Step 1] YouTube blocked, trying Apify fallback...`)
-      const apifyResult = await apifyFallback.scrapeYouTube(youtubeUrl)
-      
-      if (apifyResult.success) {
-        html = apifyResult.content
+    // TIER 2: Single Apify fetch if no pre-fetched content
+    if (!html && process.env.APIFY_TOKEN) {
+      console.log(`[Step 1] No pre-fetched content, calling apifyFetch directly...`)
+      const apifyResult = await apifyFetch(aboutUrl)
+      if (apifyResult.success && apifyResult.html.length > 100) {
+        html = apifyResult.html
         apifyUsed = true
-        wasBlocked = false
-        console.log(`[Step 1] Apify fallback success`)
-        
-        // Check if Apify already found emails
-        if (apifyResult.emails.length > 0) {
-          console.log(`[Step 1] Apify found emails directly: ${apifyResult.emails.join(', ')}`)
-          return { 
-            emails: apifyResult.emails, 
-            confidence: 0.85, 
-            url: aboutUrl, 
-            rawContent: html,
-            apifyUsed: true,
-            wasBlocked: false
-          }
-        }
+        console.log(`[Step 1] Apify single fetch success: ${html.length} chars`)
       } else {
-        console.log(`[Step 1] Apify fallback failed: ${apifyResult.error}`)
+        console.log(`[Step 1] Apify single fetch failed: ${apifyResult.error || 'empty content'}`)
       }
     }
 
-    // If still blocked after Apify attempt, return empty
-    if (wasBlocked) {
-      console.log(`[Step 1] Content blocked and no Apify fallback available`)
+    // TIER 3: Direct fetch as last resort
+    if (!html) {
+      console.log(`[Step 1] Falling back to direct fetch...`)
+      html = await fetchWithTimeout(aboutUrl)
+      wasBlocked = isBlockedContent(html, 'youtube')
+      console.log(`[Step 1] Direct fetch: ${html.length} chars, blocked=${wasBlocked}`)
+    }
+
+    // If blocked and no content, return empty
+    if (wasBlocked && html.length < 500) {
+      console.log(`[Step 1] Content blocked, no usable content`)
       return { emails: [], confidence: 0, url: aboutUrl, rawContent: html, apifyUsed, wasBlocked: true }
     }
 
@@ -372,7 +393,6 @@ If no email found: {"email": "", "source": "none"}`
 async function step2_InstagramBio(
   artist: Artist,
   anthropicKey: string,
-  apifyFallback?: ApifyEnrichmentFallback,
   preFetchedContent?: Map<string, string>
 ): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls: string[]; apifyUsed: boolean; wasBlocked: boolean }> {
   const socialLinks = artist.social_links || {}
@@ -400,7 +420,6 @@ async function step2_InstagramBio(
   }
 
   console.log(`[Step 2] Instagram URL: ${instagramUrl}`)
-  console.log(`[Step 2] Fetching Instagram: ${instagramUrl}`)
 
   // Extract handle for logging/AI prompts
   const handle = artist.instagram_handle || instagramUrl.split('instagram.com/')[1]?.replace(/\//g, '') || 'artist'
@@ -411,45 +430,38 @@ async function step2_InstagramBio(
   let linktreeUrls: string[] = []
 
   try {
-    // Check if we have pre-fetched content from batched Apify run
-    if (preFetchedContent && preFetchedContent.has(instagramUrl)) {
+    // TIER 1: Check pre-fetched content from batched Apify run
+    if (preFetchedContent && preFetchedContent.size > 0 && preFetchedContent.has(instagramUrl)) {
       html = preFetchedContent.get(instagramUrl) || ''
       apifyUsed = true
-      console.log(`[Step 2] Using pre-fetched content: ${html.length} chars`)
-    } else {
-      // TIER 1: Direct fetch
-      html = await fetchWithTimeout(instagramUrl)
-      wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'instagram')
+      console.log(`[Step 2] Using pre-fetched Apify content: ${html.length} chars`)
     }
 
-    // TIER 2: Apify fallback if blocked
-    if (wasBlocked && apifyFallback) {
-      console.log(`[Step 2] Instagram blocked, trying Apify fallback...`)
-      const apifyResult = await apifyFallback.scrapeInstagram(handle)
-      
-      if (apifyResult.success) {
-        html = apifyResult.content
+    // TIER 2: Single Apify fetch if no pre-fetched content
+    if (!html && process.env.APIFY_TOKEN) {
+      console.log(`[Step 2] No pre-fetched content, calling apifyFetch directly...`)
+      const apifyResult = await apifyFetch(instagramUrl)
+      if (apifyResult.success && apifyResult.html.length > 100) {
+        html = apifyResult.html
         apifyUsed = true
-        wasBlocked = false
-        linktreeUrls = apifyResult.links
-        console.log(`[Step 2] Apify fallback success`)
-        
-        // Check if Apify already found emails
-        if (apifyResult.emails.length > 0) {
-          console.log(`[Step 2] Apify found emails directly: ${apifyResult.emails.join(', ')}`)
-          return { 
-            emails: apifyResult.emails, 
-            confidence: 0.8, 
-            url: instagramUrl, 
-            rawContent: html,
-            linktreeUrls,
-            apifyUsed: true,
-            wasBlocked: false
-          }
-        }
+        console.log(`[Step 2] Apify single fetch success: ${html.length} chars`)
       } else {
-        console.log(`[Step 2] Apify fallback failed: ${apifyResult.error}`)
+        console.log(`[Step 2] Apify single fetch failed: ${apifyResult.error || 'empty content'}`)
       }
+    }
+
+    // TIER 3: Direct fetch as last resort
+    if (!html) {
+      console.log(`[Step 2] Falling back to direct fetch...`)
+      html = await fetchWithTimeout(instagramUrl)
+      wasBlocked = isBlockedContent(html, 'instagram')
+      console.log(`[Step 2] Direct fetch: ${html.length} chars, blocked=${wasBlocked}`)
+    }
+
+    // If blocked and no content, return empty
+    if (wasBlocked && html.length < 500) {
+      console.log(`[Step 2] Content blocked, no usable content`)
+      return { emails: [], confidence: 0, url: instagramUrl, rawContent: html, linktreeUrls: [], apifyUsed, wasBlocked: true }
     }
 
     // If still blocked after Apify attempt, return empty
@@ -785,7 +797,7 @@ async function step5_FacebookAbout(
       console.log(`[Step 5] Using pre-fetched content: ${html.length} chars`)
     } else {
       html = await fetchWithTimeout(aboutUrl)
-      wasBlocked = ApifyEnrichmentFallback.isBlockedContent(html, 'facebook')
+      wasBlocked = isBlockedContent(html, 'facebook')
     }
 
     const $ = cheerio.load(html)
@@ -956,17 +968,13 @@ export async function enrichArtist(
   apiKeys: {
     anthropic?: string
   },
-  onProgress?: ProgressCallback,
-  apifyConfig?: ApifyConfig
+  onProgress?: ProgressCallback
 ): Promise<EnrichmentSummary> {
   const startTime = Date.now()
   
   if (!apiKeys.anthropic) {
     throw new Error('Anthropic API key is required for enrichment')
   }
-
-  // Initialize Apify fallback if config provided
-  const apifyFallback = apifyConfig ? new ApifyEnrichmentFallback(apifyConfig) : undefined
 
   const steps: EnrichmentStep[] = [
     { method: 'youtube_about', label: 'YouTube About Tab', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
@@ -1027,10 +1035,10 @@ export async function enrichArtist(
 
       switch (step.method) {
         case 'youtube_about':
-          result = await step1_YouTubeAbout(artist, apiKeys.anthropic, apifyFallback, pageContents)
+          result = await step1_YouTubeAbout(artist, apiKeys.anthropic, pageContents)
           break
         case 'instagram_bio':
-          result = await step2_InstagramBio(artist, apiKeys.anthropic, apifyFallback, pageContents)
+          result = await step2_InstagramBio(artist, apiKeys.anthropic, pageContents)
           linktreeUrls = result.linktreeUrls || []
           break
         case 'link_in_bio':

@@ -9,9 +9,11 @@
  */
 
 const APIFY_BASE = 'https://api.apify.com/v2'
-const WEBSITE_CRAWLER_ACTOR = 'apify/website-content-crawler'
-const MAX_WAIT_MS = 60000 // 60 seconds
-const POLL_INTERVAL_MS = 3000 // 3 seconds
+// CRITICAL: Apify REST API uses tilde (~) as separator, NOT slash (/)
+// Slash gets interpreted as a URL path segment and causes 404
+const WEBSITE_CRAWLER_ACTOR = 'apify~website-content-crawler'
+const MAX_WAIT_MS = 45000 // 45 seconds (leave headroom for Vercel timeout)
+const POLL_INTERVAL_MS = 2000 // 2 seconds
 
 /**
  * Fetch a single URL using Apify's JavaScript-rendering crawler
@@ -25,30 +27,34 @@ export async function apifyFetch(url: string): Promise<{ html: string; success: 
   }
 
   try {
-    console.log(`[Apify Fetch] Rendering ${url} with JavaScript...`)
+    const apiUrl = `${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=${token}`
+    console.log(`[Apify Fetch] Starting actor run for: ${url}`)
+    console.log(`[Apify Fetch] API URL: ${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=***`)
 
     // 1. Start the actor
-    const startRes = await fetch(`${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=${token}`, {
+    const startRes = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         startUrls: [{ url }],
         maxCrawlPages: 1,
-        renderingType: 'chromium',
+        crawlerType: 'cheerio',
         maxCrawlDepth: 0,
       }),
     })
 
     if (!startRes.ok) {
       const errorText = await startRes.text()
-      throw new Error(`Failed to start Apify actor: ${startRes.status} ${errorText}`)
+      console.error(`[Apify Fetch] Actor start FAILED: HTTP ${startRes.status}`)
+      console.error(`[Apify Fetch] Response: ${errorText.slice(0, 500)}`)
+      throw new Error(`Failed to start Apify actor: ${startRes.status} ${errorText.slice(0, 200)}`)
     }
 
     const startData = await startRes.json()
     const runId = startData.data.id
     const datasetId = startData.data.defaultDatasetId
 
-    console.log(`[Apify Fetch] Run started: ${runId}`)
+    console.log(`[Apify Fetch] Run started: ${runId}, dataset: ${datasetId}`)
 
     // 2. Poll for completion
     const startTime = Date.now()
@@ -64,9 +70,10 @@ export async function apifyFetch(url: string): Promise<{ html: string; success: 
 
       const statusData = await statusRes.json()
       status = statusData.data.status
+      console.log(`[Apify Fetch] Poll: status=${status}, elapsed=${Date.now() - startTime}ms`)
 
       if (status === 'SUCCEEDED') {
-        console.log(`[Apify Fetch] Run completed successfully`)
+        console.log(`[Apify Fetch] Run completed successfully in ${Date.now() - startTime}ms`)
         break
       } else if (status === 'FAILED' || status === 'ABORTED') {
         throw new Error(`Actor run ${status}: ${statusData.data.statusMessage || 'Unknown error'}`)
@@ -74,7 +81,7 @@ export async function apifyFetch(url: string): Promise<{ html: string; success: 
     }
 
     if (status !== 'SUCCEEDED') {
-      throw new Error('Actor run timeout')
+      throw new Error(`Actor run timeout after ${MAX_WAIT_MS}ms`)
     }
 
     // 3. Fetch the dataset results
@@ -92,11 +99,11 @@ export async function apifyFetch(url: string): Promise<{ html: string; success: 
     // 4. Extract HTML content
     const html = results[0].html || results[0].text || ''
 
-    console.log(`[Apify Fetch] Success: ${html.length} characters`)
+    console.log(`[Apify Fetch] Success: ${html.length} characters from ${url}`)
 
     return { html, success: true }
   } catch (error: any) {
-    console.error('[Apify Fetch] Error:', error.message)
+    console.error(`[Apify Fetch] FAILED for ${url}: ${error.message}`)
     return { html: '', success: false, error: error.message }
   }
 }
@@ -110,90 +117,116 @@ export async function apifyFetchMultiple(urls: string[]): Promise<Map<string, st
   const resultMap = new Map<string, string>()
 
   if (!token) {
-    console.warn('[Apify Fetch Multiple] No APIFY_TOKEN configured')
+    console.error('[Apify Batch] APIFY_TOKEN is not set — cannot fetch URLs')
     return resultMap
   }
 
   if (urls.length === 0) {
+    console.warn('[Apify Batch] No URLs to fetch')
     return resultMap
   }
 
+  const apiUrl = `${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=${token}`
+
   try {
-    console.log(`[Apify Fetch Multiple] Rendering ${urls.length} URLs in batch...`)
+    console.log(`[Apify Batch] Starting batch fetch for ${urls.length} URLs`)
+    console.log(`[Apify Batch] Actor: ${WEBSITE_CRAWLER_ACTOR}`)
+    console.log(`[Apify Batch] URLs:`, urls)
 
     // 1. Start the actor with all URLs
-    const startRes = await fetch(`${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=${token}`, {
+    const body = {
+      startUrls: urls.map(url => ({ url })),
+      maxCrawlPages: urls.length,
+      crawlerType: 'cheerio',
+      maxCrawlDepth: 0,
+    }
+
+    console.log(`[Apify Batch] POST ${APIFY_BASE}/acts/${WEBSITE_CRAWLER_ACTOR}/runs?token=***`)
+
+    const startRes = await fetch(apiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        startUrls: urls.map(url => ({ url })),
-        maxCrawlPages: urls.length,
-        renderingType: 'chromium',
-        maxCrawlDepth: 0,
-      }),
+      body: JSON.stringify(body),
     })
 
     if (!startRes.ok) {
       const errorText = await startRes.text()
-      throw new Error(`Failed to start Apify actor: ${startRes.status} ${errorText}`)
+      console.error(`[Apify Batch] Actor start FAILED: HTTP ${startRes.status}`)
+      console.error(`[Apify Batch] Response body: ${errorText.slice(0, 500)}`)
+      throw new Error(`Apify actor start failed: HTTP ${startRes.status} - ${errorText.slice(0, 200)}`)
     }
 
     const startData = await startRes.json()
     const runId = startData.data.id
     const datasetId = startData.data.defaultDatasetId
 
-    console.log(`[Apify Fetch Multiple] Run started: ${runId}`)
+    console.log(`[Apify Batch] Run started! runId=${runId}, datasetId=${datasetId}`)
 
     // 2. Poll for completion
     const startTime = Date.now()
     let status = 'RUNNING'
+    let pollCount = 0
 
     while (Date.now() - startTime < MAX_WAIT_MS) {
       await new Promise(resolve => setTimeout(resolve, POLL_INTERVAL_MS))
+      pollCount++
 
       const statusRes = await fetch(`${APIFY_BASE}/actor-runs/${runId}?token=${token}`)
       if (!statusRes.ok) {
+        console.error(`[Apify Batch] Poll failed: HTTP ${statusRes.status}`)
         throw new Error(`Failed to check run status: ${statusRes.status}`)
       }
 
       const statusData = await statusRes.json()
       status = statusData.data.status
+      const elapsed = Date.now() - startTime
+
+      console.log(`[Apify Batch] Poll #${pollCount}: status=${status}, elapsed=${elapsed}ms`)
 
       if (status === 'SUCCEEDED') {
-        console.log(`[Apify Fetch Multiple] Run completed successfully`)
+        console.log(`[Apify Batch] Run SUCCEEDED in ${elapsed}ms after ${pollCount} polls`)
         break
       } else if (status === 'FAILED' || status === 'ABORTED') {
-        throw new Error(`Actor run ${status}: ${statusData.data.statusMessage || 'Unknown error'}`)
+        const msg = statusData.data.statusMessage || 'Unknown error'
+        console.error(`[Apify Batch] Run ${status}: ${msg}`)
+        throw new Error(`Actor run ${status}: ${msg}`)
       }
     }
 
     if (status !== 'SUCCEEDED') {
-      throw new Error('Actor run timeout')
+      console.error(`[Apify Batch] TIMEOUT after ${MAX_WAIT_MS}ms (${pollCount} polls)`)
+      throw new Error(`Actor run timeout after ${MAX_WAIT_MS}ms`)
     }
 
     // 3. Fetch the dataset results
+    console.log(`[Apify Batch] Fetching dataset results: ${datasetId}`)
     const resultsRes = await fetch(`${APIFY_BASE}/datasets/${datasetId}/items?token=${token}&format=json`)
     if (!resultsRes.ok) {
       throw new Error(`Failed to fetch results: ${resultsRes.status}`)
     }
 
     const results = await resultsRes.json()
+    console.log(`[Apify Batch] Dataset returned ${results.length} items`)
 
     // 4. Build map of URL -> HTML
     for (const result of results) {
-      const url = result.url
+      const pageUrl = result.url
       const html = result.html || result.text || ''
-      if (url && html) {
-        resultMap.set(url, html)
-        console.log(`[Apify Fetch Multiple] ${url}: ${html.length} characters`)
+      if (pageUrl && html) {
+        resultMap.set(pageUrl, html)
+        console.log(`[Apify Batch] ✅ ${pageUrl}: ${html.length} chars`)
+      } else {
+        console.warn(`[Apify Batch] ⚠️ Empty result for: ${pageUrl || 'unknown URL'}`)
       }
     }
 
-    console.log(`[Apify Fetch Multiple] Success: ${resultMap.size}/${urls.length} pages fetched`)
+    console.log(`[Apify Batch] Complete: ${resultMap.size}/${urls.length} pages fetched successfully`)
 
     return resultMap
   } catch (error: any) {
-    console.error('[Apify Fetch Multiple] Error:', error.message)
+    console.error(`[Apify Batch] ❌ FAILED: ${error.message}`)
+    console.error(`[Apify Batch] Stack: ${error.stack?.slice(0, 300)}`)
+    // Return whatever we have (could be empty)
     return resultMap
   }
 }
