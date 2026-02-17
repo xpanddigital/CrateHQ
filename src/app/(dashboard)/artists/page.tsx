@@ -35,6 +35,7 @@ export default function ArtistsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showBulkTagModal, setShowBulkTagModal] = useState(false)
   const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false)
+  const [showEnrichUnenrichedModal, setShowEnrichUnenrichedModal] = useState(false)
   const [valuating, setValuating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [creatingDeals, setCreatingDeals] = useState(false)
@@ -278,6 +279,16 @@ export default function ArtistsPage() {
         }}
       />
 
+      <BulkEnrichModal
+        open={showEnrichUnenrichedModal}
+        onOpenChange={setShowEnrichUnenrichedModal}
+        artistIds={Array.from(selectedIds)}
+        onComplete={() => {
+          setSelectedIds(new Set())
+          fetchArtists()
+        }}
+      />
+
       <Card className="p-4">
         <div className="flex items-center gap-4">
           <div className="relative flex-1">
@@ -354,6 +365,23 @@ export default function ArtistsPage() {
           >
             <DollarSign className="h-4 w-4 mr-1" />
             Revalue All
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              // Get all unenriched artist IDs (no email)
+              const unenrichedIds = artists
+                .filter(a => !a.email || a.email.trim() === '')
+                .map(a => a.id)
+              if (unenrichedIds.length > 0) {
+                setSelectedIds(new Set(unenrichedIds))
+                setShowEnrichUnenrichedModal(true)
+              }
+            }}
+          >
+            <CheckCircle className="h-4 w-4 mr-1" />
+            Enrich Unenriched ({artists.filter(a => !a.email || a.email.trim() === '').length})
           </Button>
         </div>
       </Card>
