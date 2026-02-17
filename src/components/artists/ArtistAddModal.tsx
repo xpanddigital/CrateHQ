@@ -28,13 +28,19 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
     name: '',
     email: '',
     instagram_url: '',
+    facebook_url: '',
+    twitter_url: '',
+    tiktok_url: '',
+    youtube_url: '',
     website: '',
     spotify_url: '',
     spotify_monthly_listeners: '',
+    instagram_followers: '',
     streams_last_month: '',
     track_count: '',
     genres: '',
     country: '',
+    biography: '',
   })
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -61,6 +67,10 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
       // Build social_links object
       const social_links: Record<string, string> = {}
       if (formData.instagram_url) social_links.instagram = formData.instagram_url
+      if (formData.facebook_url) social_links.facebook = formData.facebook_url
+      if (formData.twitter_url) social_links.twitter = formData.twitter_url
+      if (formData.tiktok_url) social_links.tiktok = formData.tiktok_url
+      if (formData.youtube_url) social_links.youtube = formData.youtube_url
       if (formData.spotify_url) social_links.spotify = formData.spotify_url
       if (formData.website) social_links.website = formData.website
 
@@ -68,6 +78,9 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
         name: formData.name,
         email: formData.email || null,
         instagram_handle,
+        instagram_followers: formData.instagram_followers
+          ? parseInt(formData.instagram_followers)
+          : 0,
         website: formData.website || null,
         spotify_url: formData.spotify_url || null,
         social_links,
@@ -80,6 +93,7 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
         track_count: formData.track_count ? parseInt(formData.track_count) : 0,
         genres: genresArray,
         country: formData.country || null,
+        biography: formData.biography || null,
         is_contactable: !!formData.email,
       }
 
@@ -99,13 +113,19 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
         name: '',
         email: '',
         instagram_url: '',
+        facebook_url: '',
+        twitter_url: '',
+        tiktok_url: '',
+        youtube_url: '',
         website: '',
         spotify_url: '',
         spotify_monthly_listeners: '',
+        instagram_followers: '',
         streams_last_month: '',
         track_count: '',
         genres: '',
         country: '',
+        biography: '',
       })
       onOpenChange(false)
       router.refresh()
@@ -165,6 +185,13 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
                 />
               </div>
 
+              <div className="space-y-2 col-span-2">
+                <Label className="text-sm font-semibold">Social Media URLs</Label>
+                <p className="text-xs text-muted-foreground">
+                  These URLs are used by the enrichment pipeline to find contact emails
+                </p>
+              </div>
+
               <div className="space-y-2">
                 <Label htmlFor="instagram">Instagram URL</Label>
                 <Input
@@ -174,6 +201,34 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
                   value={formData.instagram_url}
                   onChange={(e) =>
                     setFormData({ ...formData, instagram_url: e.target.value })
+                  }
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="instagram_followers">Instagram Followers</Label>
+                <Input
+                  id="instagram_followers"
+                  type="number"
+                  placeholder="50000"
+                  value={formData.instagram_followers}
+                  onChange={(e) =>
+                    setFormData({ ...formData, instagram_followers: e.target.value })
+                  }
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="youtube">YouTube URL</Label>
+                <Input
+                  id="youtube"
+                  type="url"
+                  placeholder="https://youtube.com/@artist"
+                  value={formData.youtube_url}
+                  onChange={(e) =>
+                    setFormData({ ...formData, youtube_url: e.target.value })
                   }
                   disabled={loading}
                 />
@@ -193,7 +248,49 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
                 />
               </div>
 
-              <div className="space-y-2 col-span-2">
+              <div className="space-y-2">
+                <Label htmlFor="facebook">Facebook URL</Label>
+                <Input
+                  id="facebook"
+                  type="url"
+                  placeholder="https://facebook.com/artist"
+                  value={formData.facebook_url}
+                  onChange={(e) =>
+                    setFormData({ ...formData, facebook_url: e.target.value })
+                  }
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="twitter">Twitter/X URL</Label>
+                <Input
+                  id="twitter"
+                  type="url"
+                  placeholder="https://twitter.com/artist"
+                  value={formData.twitter_url}
+                  onChange={(e) =>
+                    setFormData({ ...formData, twitter_url: e.target.value })
+                  }
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="tiktok">TikTok URL</Label>
+                <Input
+                  id="tiktok"
+                  type="url"
+                  placeholder="https://tiktok.com/@artist"
+                  value={formData.tiktok_url}
+                  onChange={(e) =>
+                    setFormData({ ...formData, tiktok_url: e.target.value })
+                  }
+                  disabled={loading}
+                />
+              </div>
+
+              <div className="space-y-2">
                 <Label htmlFor="website">Website</Label>
                 <Input
                   id="website"
@@ -205,6 +302,10 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
                   }
                   disabled={loading}
                 />
+              </div>
+
+              <div className="space-y-2 col-span-2">
+                <Label className="text-sm font-semibold">Artist Stats</Label>
               </div>
 
               <div className="space-y-2">
@@ -283,6 +384,23 @@ export function ArtistAddModal({ open, onOpenChange }: ArtistAddModalProps) {
                 />
                 <p className="text-xs text-muted-foreground">
                   Comma-separated list
+                </p>
+              </div>
+
+              <div className="space-y-2 col-span-2">
+                <Label htmlFor="biography">Biography</Label>
+                <Textarea
+                  id="biography"
+                  placeholder="Artist bio, background, notable achievements..."
+                  value={formData.biography}
+                  onChange={(e) =>
+                    setFormData({ ...formData, biography: e.target.value })
+                  }
+                  disabled={loading}
+                  rows={3}
+                />
+                <p className="text-xs text-muted-foreground">
+                  Used by enrichment pipeline to find contact info
                 </p>
               </div>
             </div>

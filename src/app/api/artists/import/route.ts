@@ -30,6 +30,8 @@ export async function POST(request: NextRequest) {
       if (artist.instagram_url) social_links.instagram = artist.instagram_url
       if (artist.facebook_url) social_links.facebook = artist.facebook_url
       if (artist.twitter_url) social_links.twitter = artist.twitter_url
+      if (artist.tiktok_url) social_links.tiktok = artist.tiktok_url
+      if (artist.youtube_url) social_links.youtube = artist.youtube_url
       if (artist.spotify_url) social_links.spotify = artist.spotify_url
       if (artist.website) social_links.website = artist.website
 
@@ -45,6 +47,7 @@ export async function POST(request: NextRequest) {
         track_count: artist.track_count || (artist.album_count || 0) + (artist.single_count || 0),
         genres: artist.genres || [],
         country: artist.country || null,
+        biography: artist.biography || null,
         social_links,
         source: 'csv_import',
         source_batch: new Date().toISOString(),

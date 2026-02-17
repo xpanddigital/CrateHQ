@@ -25,6 +25,9 @@ interface PreviewRow {
   country?: string
   facebook_url?: string
   twitter_url?: string
+  tiktok_url?: string
+  youtube_url?: string
+  biography?: string
 }
 
 export default function ArtistsImportPage() {
@@ -101,7 +104,23 @@ export default function ArtistsImportPage() {
       case 'twitter_url':
       case 'twitter url':
       case 'twitter':
+      case 'x_url':
         row.twitter_url = value
+        break
+      case 'tiktok_url':
+      case 'tiktok url':
+      case 'tiktok':
+        row.tiktok_url = value
+        break
+      case 'youtube_url':
+      case 'youtube url':
+      case 'youtube':
+        row.youtube_url = value
+        break
+      case 'biography':
+      case 'bio':
+      case 'description':
+        row.biography = value
         break
       case 'monthly_listeners':
       case 'spotify_monthly_listeners':
