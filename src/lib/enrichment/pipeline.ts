@@ -1,22 +1,26 @@
 /**
- * Email Enrichment Pipeline — Optimized from 8,498 Real Artist Analysis
+ * Email Enrichment Pipeline — REAL WEB SCRAPING VERSION
  * 
- * Drop this file into src/lib/enrichment/pipeline.ts
- * REPLACES the previous version.
+ * This pipeline ACTUALLY FETCHES web pages and extracts real emails from real content.
+ * It NEVER guesses or fabricates emails — only returns emails found in actual page content.
  * 
- * Tested enrichment rates:
- *   Step 1: YouTube Email Extraction → 45.86% hit rate
- *   Step 2: Social Media Email       → +10.83% incremental (56.68% cumulative)
- *   Step 3: Instagram Contact Info    → +7.61% incremental (66.91% cumulative)
- *   Step 4: New Instagram Emails      → +5.17% incremental (72.08% cumulative)
+ * Architecture:
+ * 1. Fetch the actual URL (using fetch() + Cheerio for HTML parsing)
+ * 2. Pass the real page content to Claude for email extraction
+ * 3. Validate that the email was actually present in the fetched content
+ * 4. Stop as soon as a verified email is found (early termination)
  * 
- * Total expected coverage: ~72% of artists get an email
- * 
- * Pipeline stops as soon as a valid email is found (early termination).
- * Each step updates progress so the UI can show real-time status.
+ * Steps (in order, stopping when email found):
+ * 1. YouTube About Tab Email (45% hit rate)
+ * 2. Instagram Bio Email
+ * 3. Link-in-Bio Pages (Linktree, Beacons, etc.)
+ * 4. Artist Website Contact Page
+ * 5. Facebook About Section
+ * 6. All Remaining Socials Sweep
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import * as cheerio from 'cheerio'
 import type { Artist } from '@/types/database'
 
 // ============================================================
@@ -32,6 +36,7 @@ export interface EnrichmentStep {
   confidence: number
   error?: string
   duration_ms?: number
+  url_fetched?: string
 }
 
 export interface EnrichmentSummary {
@@ -49,59 +54,670 @@ export interface EnrichmentSummary {
 export type ProgressCallback = (step: EnrichmentStep, stepIndex: number) => void
 
 // ============================================================
-// EMAIL VALIDATION
+// CONSTANTS
 // ============================================================
 
-const JUNK_EMAILS = [
-  'example@example.com',
-  'support@audiomack.com',
-  'info@audiomack.com',
-  'noreply@',
-  'no-reply@',
-  'mailer-daemon@',
+const FETCH_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+  'Accept-Language': 'en-US,en;q=0.9',
+}
+
+const FETCH_TIMEOUT = 10000 // 10 seconds
+
+const BLOCKED_EMAIL_PATTERNS = [
+  'support@', 'help@', 'noreply@', 'no-reply@', 'mailer-daemon@',
+  'info@youtube', 'info@instagram', 'info@facebook', 'info@twitter',
+  'example@example.com', 'test@test.com', 'admin@', 'webmaster@',
+  'postmaster@', 'abuse@', 'privacy@', 'legal@', 'dmca@'
 ]
 
 const JUNK_DOMAINS = [
-  'example.com',
-  'wixpress.com',
-  'sentry.io',
-  'cloudflare.com',
-  'googleapis.com',
-  'w3.org',
-  'schema.org',
-  'audiomack.com',
-  'spotify.com',
-  'apple.com',
-  'youtube.com',
-  'instagram.com',
-  'facebook.com',
-  'twitter.com',
-  'tiktok.com',
+  'example.com', 'test.com', 'localhost', 'wixpress.com', 'sentry.io',
+  'cloudflare.com', 'googleapis.com', 'w3.org', 'schema.org',
+  'spotify.com', 'apple.com', 'youtube.com', 'instagram.com',
+  'facebook.com', 'twitter.com', 'tiktok.com', 'x.com'
 ]
 
-function isValidEmail(email: string): boolean {
-  if (!email || typeof email !== 'string') return false
+// ============================================================
+// UTILITY FUNCTIONS
+// ============================================================
 
-  const trimmed = email.trim().toLowerCase()
+/**
+ * Fetch a URL with timeout and browser-like headers
+ */
+async function fetchWithTimeout(url: string, timeout: number = FETCH_TIMEOUT): Promise<string> {
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), timeout)
+
+  try {
+    const response = await fetch(url, {
+      headers: FETCH_HEADERS,
+      signal: controller.signal,
+    })
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
+
+    return await response.text()
+  } catch (error: any) {
+    clearTimeout(timeoutId)
+    if (error.name === 'AbortError') {
+      throw new Error('Request timeout')
+    }
+    throw error
+  }
+}
+
+/**
+ * Extract all email addresses from HTML content using regex
+ */
+function extractEmailsFromHTML(html: string): string[] {
+  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
+  const emails = html.match(emailRegex) || []
+
+  // Filter out common false positives
+  return emails.filter(e => {
+    const lower = e.toLowerCase()
+    
+    // Check against junk domains
+    const domain = lower.split('@')[1]
+    if (JUNK_DOMAINS.some(junk => domain === junk || domain.endsWith('.' + junk))) {
+      return false
+    }
+
+    // Check against blocked patterns
+    if (BLOCKED_EMAIL_PATTERNS.some(pattern => lower.includes(pattern))) {
+      return false
+    }
+
+    // Check for file extensions (false positives)
+    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.gif') || 
+        lower.endsWith('.svg') || lower.endsWith('.css') || lower.endsWith('.js')) {
+      return false
+    }
+
+    return true
+  })
+}
+
+/**
+ * Validate that an email was actually present in the fetched content
+ * This prevents AI hallucinations
+ */
+function validateEmail(email: string, rawContent: string): boolean {
+  if (!email || !email.includes('@')) return false
+
+  // Check the email was actually in the fetched content
+  if (!rawContent.toLowerCase().includes(email.toLowerCase())) {
+    console.log(`[Validation Failed] Email "${email}" not found in raw content`)
+    return false
+  }
+
+  // Check it's not a blocked pattern
+  const lower = email.toLowerCase()
+  if (BLOCKED_EMAIL_PATTERNS.some(b => lower.includes(b))) {
+    console.log(`[Validation Failed] Email "${email}" matches blocked pattern`)
+    return false
+  }
+
+  // Check domain is not junk
+  const domain = lower.split('@')[1]
+  if (JUNK_DOMAINS.some(junk => domain === junk || domain.endsWith('.' + junk))) {
+    console.log(`[Validation Failed] Email "${email}" has junk domain`)
+    return false
+  }
 
   // Basic format check
-  if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(trimmed)) return false
-
-  // Check against junk list
-  if (JUNK_EMAILS.some(junk => trimmed.includes(junk))) return false
-
-  // Check domain against junk domains
-  const domain = trimmed.split('@')[1]
-  if (JUNK_DOMAINS.some(junk => domain === junk || domain.endsWith('.' + junk))) return false
-
-  // Check for obfuscated emails (d******@)
-  if (/^[a-z]\*{3,}@/.test(trimmed)) return false
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  if (!emailRegex.test(email)) {
+    console.log(`[Validation Failed] Email "${email}" failed format check`)
+    return false
+  }
 
   return true
 }
 
-function cleanEmail(email: string): string {
-  return email.trim().toLowerCase().replace(/^mailto:/i, '')
+/**
+ * Call Claude to extract email from page content
+ */
+async function extractEmailWithAI(
+  content: string,
+  prompt: string,
+  model: string,
+  anthropicKey: string
+): Promise<{ email: string; source: string; confidence?: string; linktree_urls?: string[] }> {
+  try {
+    const client = new Anthropic({ apiKey: anthropicKey })
+    const response = await client.messages.create({
+      model,
+      max_tokens: 500,
+      messages: [{
+        role: 'user',
+        content: prompt
+      }]
+    })
+
+    const text = response.content[0].type === 'text' ? response.content[0].text : ''
+    const match = text.match(/\{[\s\S]*\}/)
+    
+    if (match) {
+      const parsed = JSON.parse(match[0])
+      return parsed
+    }
+
+    return { email: '', source: 'none' }
+  } catch (error) {
+    console.error('[AI Extraction Error]', error)
+    return { email: '', source: 'none' }
+  }
+}
+
+/**
+ * Delay helper for rate limiting
+ */
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
+}
+
+// ============================================================
+// ENRICHMENT STEPS
+// ============================================================
+
+/**
+ * STEP 1: YouTube About Tab Email (highest hit rate — 45%)
+ */
+async function step1_YouTubeAbout(
+  artist: Artist,
+  anthropicKey: string
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  const socialLinks = artist.social_links || {}
+  let youtubeUrl = ''
+
+  // Find YouTube URL
+  for (const [key, value] of Object.entries(socialLinks)) {
+    if (typeof value === 'string' && (value.includes('youtube.com') || value.includes('youtu.be'))) {
+      youtubeUrl = value
+      break
+    }
+  }
+
+  if (!youtubeUrl) {
+    return { emails: [], confidence: 0, url: '', rawContent: '' }
+  }
+
+  // Ensure we have the channel URL and append /about
+  let aboutUrl = youtubeUrl
+  if (youtubeUrl.includes('/channel/') || youtubeUrl.includes('/@')) {
+    aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
+  } else if (youtubeUrl.includes('/c/')) {
+    aboutUrl = youtubeUrl.replace(/\/$/, '') + '/about'
+  }
+
+  console.log(`[Step 1] Fetching YouTube About: ${aboutUrl}`)
+
+  try {
+    const html = await fetchWithTimeout(aboutUrl)
+    const $ = cheerio.load(html)
+
+    // Extract text content
+    const pageText = $('body').text()
+
+    // Try to extract emails directly from HTML
+    const directEmails = extractEmailsFromHTML(html)
+    if (directEmails.length > 0) {
+      console.log(`[Step 1] Found direct emails: ${directEmails.join(', ')}`)
+      return { emails: directEmails, confidence: 0.85, url: aboutUrl, rawContent: html }
+    }
+
+    // Use AI to extract from page content
+    const prompt = `You are extracting a real email address from a YouTube channel's About page.
+Here is the actual page content from the About tab of "${artist.name}"'s YouTube channel:
+
+---
+${pageText.slice(0, 3000)}
+---
+
+Extract any email address that appears in this content. This must be a real email you can see in the text above.
+If there is no email address visible in the content, return an empty string.
+NEVER guess, infer, or construct an email. Only return what you can literally see in the page content.
+
+Return JSON only: {"email": "found@email.com", "source": "YouTube About tab"}
+If no email found: {"email": "", "source": "none"}`
+
+    const result = await extractEmailWithAI(html, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
+    
+    if (result.email && validateEmail(result.email, html)) {
+      return { emails: [result.email], confidence: 0.85, url: aboutUrl, rawContent: html }
+    }
+
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: html }
+  } catch (error: any) {
+    console.error('[Step 1 Error]', error.message)
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: '' }
+  }
+}
+
+/**
+ * STEP 2: Instagram Bio Email
+ */
+async function step2_InstagramBio(
+  artist: Artist,
+  anthropicKey: string
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls: string[] }> {
+  const handle = artist.instagram_handle
+  if (!handle) {
+    return { emails: [], confidence: 0, url: '', rawContent: '', linktreeUrls: [] }
+  }
+
+  const instagramUrl = `https://www.instagram.com/${handle}/`
+  console.log(`[Step 2] Fetching Instagram: ${instagramUrl}`)
+
+  try {
+    const html = await fetchWithTimeout(instagramUrl)
+    const $ = cheerio.load(html)
+
+    // Extract meta tags
+    const ogDescription = $('meta[property="og:description"]').attr('content') || ''
+    const pageText = $('body').text()
+
+    // Try to extract emails directly
+    const directEmails = extractEmailsFromHTML(html)
+    if (directEmails.length > 0) {
+      console.log(`[Step 2] Found direct emails: ${directEmails.join(', ')}`)
+      return { emails: directEmails, confidence: 0.8, url: instagramUrl, rawContent: html, linktreeUrls: [] }
+    }
+
+    // Extract link-in-bio URLs
+    const linktreePatterns = ['linktr.ee', 'beacons.ai', 'stan.store', 'solo.to', 'lnk.to', 'linkin.bio', 'linkfire', 'fanlink', 'smarturl']
+    const linktreeUrls: string[] = []
+    
+    $('a').each((i, el) => {
+      const href = $(el).attr('href')
+      if (href && linktreePatterns.some(pattern => href.includes(pattern))) {
+        linktreeUrls.push(href)
+      }
+    })
+
+    // Use AI to extract from bio content
+    const prompt = `You are extracting a real email address from an Instagram profile page.
+Here is the actual page content/meta data from @${handle}'s Instagram:
+
+Bio: ${ogDescription}
+Page text: ${pageText.slice(0, 2000)}
+
+Extract any email address that appears in this content.
+Also extract any link-in-bio URLs (linktree, beacons, stan.store, solo.to, lnk.to, etc.)
+NEVER guess or construct an email. Only return what you can literally see.
+
+Return JSON only: {"email": "found@email.com", "source": "Instagram bio", "linktree_urls": ["url1", "url2"]}
+If no email: {"email": "", "source": "none", "linktree_urls": ["any urls found"]}`
+
+    const result = await extractEmailWithAI(html, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
+    
+    const foundLinktreeUrls = result.linktree_urls || linktreeUrls
+
+    if (result.email && validateEmail(result.email, html)) {
+      return { emails: [result.email], confidence: 0.8, url: instagramUrl, rawContent: html, linktreeUrls: foundLinktreeUrls }
+    }
+
+    return { emails: [], confidence: 0, url: instagramUrl, rawContent: html, linktreeUrls: foundLinktreeUrls }
+  } catch (error: any) {
+    console.error('[Step 2 Error]', error.message)
+    return { emails: [], confidence: 0, url: instagramUrl, rawContent: '', linktreeUrls: [] }
+  }
+}
+
+/**
+ * STEP 3: Link-in-Bio Pages (Linktree, Beacons, etc.)
+ */
+async function step3_LinkInBio(
+  artist: Artist,
+  linktreeUrls: string[],
+  anthropicKey: string
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  if (linktreeUrls.length === 0) {
+    return { emails: [], confidence: 0, url: '', rawContent: '' }
+  }
+
+  let allContent = ''
+  let allEmails: string[] = []
+  let lastUrl = ''
+
+  for (const url of linktreeUrls.slice(0, 3)) { // Max 3 link-in-bio pages
+    console.log(`[Step 3] Fetching link-in-bio: ${url}`)
+    
+    try {
+      await delay(1000) // Rate limiting
+      const html = await fetchWithTimeout(url)
+      const $ = cheerio.load(html)
+      
+      allContent += html + '\n\n'
+      lastUrl = url
+
+      // Extract emails directly
+      const directEmails = extractEmailsFromHTML(html)
+      allEmails.push(...directEmails)
+
+      // Look for contact/booking page links
+      const contactLinks: string[] = []
+      $('a').each((i, el) => {
+        const href = $(el).attr('href')
+        const text = $(el).text().toLowerCase()
+        if (href && (text.includes('contact') || text.includes('booking') || text.includes('management'))) {
+          if (href.startsWith('http')) {
+            contactLinks.push(href)
+          }
+        }
+      })
+
+      // Fetch contact pages (max 3)
+      for (const contactUrl of contactLinks.slice(0, 3)) {
+        try {
+          await delay(1000)
+          const contactHtml = await fetchWithTimeout(contactUrl)
+          allContent += contactHtml + '\n\n'
+          const contactEmails = extractEmailsFromHTML(contactHtml)
+          allEmails.push(...contactEmails)
+        } catch (e) {
+          // Continue
+        }
+      }
+    } catch (error: any) {
+      console.error(`[Step 3 Error] ${url}:`, error.message)
+    }
+  }
+
+  // If we found direct emails, return them
+  if (allEmails.length > 0) {
+    console.log(`[Step 3] Found direct emails: ${allEmails.join(', ')}`)
+    return { emails: Array.from(new Set(allEmails)), confidence: 0.75, url: lastUrl, rawContent: allContent }
+  }
+
+  // Use AI to extract
+  if (allContent) {
+    const prompt = `You are extracting a real email address from a music artist's link-in-bio page.
+Artist: "${artist.name}"
+Here is the actual content from their link-in-bio page(s):
+
+---
+${allContent.slice(0, 4000)}
+---
+
+Extract any email address visible in this content. Look for:
+- Direct email addresses in text
+- mailto: links
+- Contact/booking page content
+NEVER guess or construct an email. Only return what you can literally see.
+
+Return JSON only: {"email": "found@email.com", "source": "Linktree/link-in-bio"}
+If no email: {"email": "", "source": "none"}`
+
+    const result = await extractEmailWithAI(allContent, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
+    
+    if (result.email && validateEmail(result.email, allContent)) {
+      return { emails: [result.email], confidence: 0.75, url: lastUrl, rawContent: allContent }
+    }
+  }
+
+  return { emails: [], confidence: 0, url: lastUrl, rawContent: allContent }
+}
+
+/**
+ * STEP 4: Artist Website Contact Page
+ */
+async function step4_WebsiteContact(
+  artist: Artist,
+  anthropicKey: string
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  const socialLinks = artist.social_links || {}
+  let websiteUrl = artist.website || socialLinks.website || ''
+
+  if (!websiteUrl) {
+    return { emails: [], confidence: 0, url: '', rawContent: '' }
+  }
+
+  // Ensure URL has protocol
+  if (!websiteUrl.startsWith('http')) {
+    websiteUrl = 'https://' + websiteUrl
+  }
+
+  console.log(`[Step 4] Fetching website: ${websiteUrl}`)
+
+  let allContent = ''
+  let allEmails: string[] = []
+
+  try {
+    // Fetch homepage
+    const html = await fetchWithTimeout(websiteUrl)
+    const $ = cheerio.load(html)
+    allContent += html + '\n\n'
+
+    // Extract direct emails
+    const directEmails = extractEmailsFromHTML(html)
+    allEmails.push(...directEmails)
+
+    // Find contact/booking/management pages
+    const contactLinks: string[] = []
+    $('a').each((i, el) => {
+      const href = $(el).attr('href')
+      const text = $(el).text().toLowerCase()
+      
+      if (href && (
+        text.includes('contact') || text.includes('booking') || 
+        text.includes('management') || text.includes('about') || 
+        text.includes('press') || href.toLowerCase().includes('contact') ||
+        href.toLowerCase().includes('booking')
+      )) {
+        let fullUrl = href
+        if (href.startsWith('/')) {
+          const base = new URL(websiteUrl)
+          fullUrl = `${base.protocol}//${base.host}${href}`
+        } else if (!href.startsWith('http')) {
+          fullUrl = `${websiteUrl.replace(/\/$/, '')}/${href}`
+        }
+        contactLinks.push(fullUrl)
+      }
+    })
+
+    // Fetch contact pages (max 3)
+    for (const contactUrl of contactLinks.slice(0, 3)) {
+      try {
+        await delay(1000)
+        console.log(`[Step 4] Fetching contact page: ${contactUrl}`)
+        const contactHtml = await fetchWithTimeout(contactUrl)
+        allContent += contactHtml + '\n\n'
+        const contactEmails = extractEmailsFromHTML(contactHtml)
+        allEmails.push(...contactEmails)
+      } catch (e) {
+        // Continue
+      }
+    }
+
+    // If we found direct emails, return them
+    if (allEmails.length > 0) {
+      console.log(`[Step 4] Found direct emails: ${allEmails.join(', ')}`)
+      return { emails: Array.from(new Set(allEmails)), confidence: 0.8, url: websiteUrl, rawContent: allContent }
+    }
+
+    // Use AI to extract
+    const prompt = `You are extracting a real email address from a music artist's website.
+Artist: "${artist.name}"
+Here is the actual content from their website and contact/booking pages:
+
+---
+${allContent.slice(0, 5000)}
+---
+
+Extract any email address visible in this content. Prioritize booking@ or management@ addresses.
+NEVER guess or construct an email. Only return what you can literally see.
+
+Return JSON only: {"email": "found@email.com", "source": "Artist website", "email_type": "booking|management|personal|unknown"}
+If no email: {"email": "", "source": "none"}`
+
+    const result = await extractEmailWithAI(allContent, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
+    
+    if (result.email && validateEmail(result.email, allContent)) {
+      return { emails: [result.email], confidence: 0.8, url: websiteUrl, rawContent: allContent }
+    }
+
+    return { emails: [], confidence: 0, url: websiteUrl, rawContent: allContent }
+  } catch (error: any) {
+    console.error('[Step 4 Error]', error.message)
+    return { emails: [], confidence: 0, url: websiteUrl, rawContent: '' }
+  }
+}
+
+/**
+ * STEP 5: Facebook About Section
+ */
+async function step5_FacebookAbout(
+  artist: Artist,
+  anthropicKey: string
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  const socialLinks = artist.social_links || {}
+  let facebookUrl = ''
+
+  // Find Facebook URL
+  for (const [key, value] of Object.entries(socialLinks)) {
+    if (typeof value === 'string' && (value.includes('facebook.com') || value.includes('fb.com'))) {
+      facebookUrl = value
+      break
+    }
+  }
+
+  if (!facebookUrl) {
+    return { emails: [], confidence: 0, url: '', rawContent: '' }
+  }
+
+  // Ensure we have the about page
+  let aboutUrl = facebookUrl.replace(/\/$/, '') + '/about'
+
+  console.log(`[Step 5] Fetching Facebook About: ${aboutUrl}`)
+
+  try {
+    const html = await fetchWithTimeout(aboutUrl)
+    const $ = cheerio.load(html)
+
+    // Extract text content
+    const pageText = $('body').text()
+
+    // Try to extract emails directly
+    const directEmails = extractEmailsFromHTML(html)
+    if (directEmails.length > 0) {
+      console.log(`[Step 5] Found direct emails: ${directEmails.join(', ')}`)
+      return { emails: directEmails, confidence: 0.7, url: aboutUrl, rawContent: html }
+    }
+
+    // Use AI (Haiku for cost savings on simpler task)
+    const prompt = `Extract any email address from this Facebook page content for artist "${artist.name}":
+
+---
+${pageText.slice(0, 2000)}
+---
+
+Only return emails you can literally see. Never guess.
+Return JSON only: {"email": "found@email.com", "source": "Facebook About"}
+If none: {"email": "", "source": "none"}`
+
+    const result = await extractEmailWithAI(html, prompt, 'claude-haiku-4-5-20251001', anthropicKey)
+    
+    if (result.email && validateEmail(result.email, html)) {
+      return { emails: [result.email], confidence: 0.7, url: aboutUrl, rawContent: html }
+    }
+
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: html }
+  } catch (error: any) {
+    console.error('[Step 5 Error]', error.message)
+    return { emails: [], confidence: 0, url: aboutUrl, rawContent: '' }
+  }
+}
+
+/**
+ * STEP 6: All Remaining Socials Sweep (last resort)
+ */
+async function step6_RemainingSocials(
+  artist: Artist,
+  anthropicKey: string
+): Promise<{ emails: string[]; confidence: number; url: string; rawContent: string }> {
+  const socialLinks = artist.social_links || {}
+  let allContent = ''
+  let allEmails: string[] = []
+  let lastUrl = ''
+
+  const socialUrls: { platform: string; url: string }[] = []
+
+  // Collect remaining social URLs
+  for (const [key, value] of Object.entries(socialLinks)) {
+    if (typeof value === 'string' && value.startsWith('http')) {
+      if (value.includes('twitter.com') || value.includes('x.com')) {
+        socialUrls.push({ platform: 'Twitter/X', url: value })
+      } else if (value.includes('tiktok.com')) {
+        socialUrls.push({ platform: 'TikTok', url: value })
+      } else if (value.includes('spotify.com')) {
+        socialUrls.push({ platform: 'Spotify', url: value })
+      }
+    }
+  }
+
+  if (socialUrls.length === 0) {
+    return { emails: [], confidence: 0, url: '', rawContent: '' }
+  }
+
+  console.log(`[Step 6] Fetching remaining socials: ${socialUrls.map(s => s.platform).join(', ')}`)
+
+  for (const { platform, url } of socialUrls.slice(0, 3)) {
+    try {
+      await delay(1000)
+      const html = await fetchWithTimeout(url)
+      allContent += `\n\n=== ${platform} ===\n${html}\n`
+      lastUrl = url
+
+      const directEmails = extractEmailsFromHTML(html)
+      allEmails.push(...directEmails)
+    } catch (error: any) {
+      console.error(`[Step 6 Error] ${platform}:`, error.message)
+    }
+  }
+
+  // If we found direct emails, return them
+  if (allEmails.length > 0) {
+    console.log(`[Step 6] Found direct emails: ${allEmails.join(', ')}`)
+    return { emails: Array.from(new Set(allEmails)), confidence: 0.6, url: lastUrl, rawContent: allContent }
+  }
+
+  // Use AI for final comprehensive check
+  if (allContent) {
+    const prompt = `You are doing a final sweep to find a contact email for music artist "${artist.name}".
+Here is content collected from their remaining social profiles:
+
+${allContent.slice(0, 4000)}
+
+Extract any email address you can literally see in the content above.
+If you cannot find any real email in this content, return empty string.
+NEVER guess, infer, construct, or derive an email address.
+The email MUST appear as text in the content above.
+
+Return JSON only:
+{
+  "email": "found@email.com or empty string",
+  "source": "where exactly you found it",
+  "email_type": "personal|booking|management|label|unknown",
+  "confidence": "high|medium|low"
+}`
+
+    const result = await extractEmailWithAI(allContent, prompt, 'claude-sonnet-4-5-20250929', anthropicKey)
+    
+    if (result.email && validateEmail(result.email, allContent)) {
+      const confidenceMap: Record<string, number> = { high: 0.7, medium: 0.5, low: 0.3 }
+      const confidence = confidenceMap[result.confidence || 'low'] || 0.5
+      return { emails: [result.email], confidence, url: lastUrl, rawContent: allContent }
+    }
+  }
+
+  return { emails: [], confidence: 0, url: lastUrl, rawContent: allContent }
 }
 
 // ============================================================
@@ -110,7 +726,7 @@ function cleanEmail(email: string): string {
 
 /**
  * Run the full enrichment pipeline on an artist.
- * Stops early when a valid email is found.
+ * Stops early when a validated email is found.
  * Calls onProgress after each step for real-time UI updates.
  */
 export async function enrichArtist(
@@ -121,17 +737,27 @@ export async function enrichArtist(
   onProgress?: ProgressCallback
 ): Promise<EnrichmentSummary> {
   const startTime = Date.now()
+  
+  if (!apiKeys.anthropic) {
+    throw new Error('Anthropic API key is required for enrichment')
+  }
+
   const steps: EnrichmentStep[] = [
-    { method: 'youtube_email', label: 'YouTube Email Extraction', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
-    { method: 'social_media_email', label: 'Social Media Email Scan', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
-    { method: 'instagram_contact', label: 'Instagram Contact Info', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
-    { method: 'instagram_new', label: 'Instagram Deep Search', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'youtube_about', label: 'YouTube About Tab', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'instagram_bio', label: 'Instagram Bio', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'link_in_bio', label: 'Link-in-Bio Pages', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'website_contact', label: 'Website Contact Page', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'facebook_about', label: 'Facebook About', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'remaining_socials', label: 'Remaining Socials Sweep', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
   ]
 
   const allEmails: Array<{ email: string; source: string; confidence: number }> = []
   let bestEmail = ''
   let bestConfidence = 0
   let bestSource = ''
+  let linktreeUrls: string[] = []
+
+  console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -141,32 +767,42 @@ export async function enrichArtist(
     const stepStart = Date.now()
 
     try {
-      let result: { emails: string[]; confidence: number }
+      let result: { emails: string[]; confidence: number; url: string; rawContent: string; linktreeUrls?: string[] }
 
       switch (step.method) {
-        case 'youtube_email':
-          result = await extractYouTubeEmail(artist, apiKeys.anthropic)
+        case 'youtube_about':
+          result = await step1_YouTubeAbout(artist, apiKeys.anthropic)
           break
-        case 'social_media_email':
-          result = await extractSocialMediaEmail(artist, apiKeys.anthropic)
+        case 'instagram_bio':
+          result = await step2_InstagramBio(artist, apiKeys.anthropic)
+          linktreeUrls = result.linktreeUrls || []
           break
-        case 'instagram_contact':
-          result = await extractInstagramContact(artist, apiKeys.anthropic)
+        case 'link_in_bio':
+          result = await step3_LinkInBio(artist, linktreeUrls, apiKeys.anthropic)
           break
-        case 'instagram_new':
-          result = await extractInstagramDeep(artist, apiKeys.anthropic)
+        case 'website_contact':
+          result = await step4_WebsiteContact(artist, apiKeys.anthropic)
+          break
+        case 'facebook_about':
+          result = await step5_FacebookAbout(artist, apiKeys.anthropic)
+          break
+        case 'remaining_socials':
+          result = await step6_RemainingSocials(artist, apiKeys.anthropic)
           break
         default:
-          result = { emails: [], confidence: 0 }
+          result = { emails: [], confidence: 0, url: '', rawContent: '' }
       }
 
       step.duration_ms = Date.now() - stepStart
-      step.emails_found = result.emails.filter(isValidEmail).map(cleanEmail)
+      step.url_fetched = result.url
+      step.emails_found = result.emails
       step.confidence = result.confidence
 
       if (step.emails_found.length > 0) {
         step.status = 'success'
         step.best_email = step.emails_found[0]
+
+        console.log(`[Step ${i + 1} Success] Found: ${step.emails_found.join(', ')}`)
 
         for (const email of step.emails_found) {
           allEmails.push({ email, source: step.method, confidence: result.confidence })
@@ -182,23 +818,31 @@ export async function enrichArtist(
         onProgress?.(step, i)
 
         // Early termination — we found a valid email, skip remaining steps
+        console.log(`[Early Termination] Email found, skipping remaining steps`)
         for (let j = i + 1; j < steps.length; j++) {
           steps[j].status = 'skipped'
         }
         break
       } else {
         step.status = 'failed'
+        console.log(`[Step ${i + 1} Failed] No email found`)
       }
-    } catch (error) {
+    } catch (error: any) {
       step.status = 'failed'
-      step.error = String(error)
+      step.error = error.message
       step.duration_ms = Date.now() - stepStart
+      console.error(`[Step ${i + 1} Error]`, error.message)
     }
 
     onProgress?.(step, i)
+
+    // Rate limiting between steps
+    if (i < steps.length - 1 && steps[i + 1].status !== 'skipped') {
+      await delay(1000)
+    }
   }
 
-  return {
+  const summary: EnrichmentSummary = {
     artist_id: artist.id,
     artist_name: artist.name,
     email_found: bestEmail || null,
@@ -209,316 +853,10 @@ export async function enrichArtist(
     total_duration_ms: Date.now() - startTime,
     is_contactable: !!bestEmail,
   }
-}
 
-// ============================================================
-// STEP 1: YouTube Email Extraction (45.86% hit rate)
-// ============================================================
+  console.log(`[Enrichment Complete] ${bestEmail ? `✅ Found: ${bestEmail}` : '❌ No email found'} (${summary.total_duration_ms}ms)\n`)
 
-/**
- * Extract email from YouTube channel "About" section.
- * This is the highest hit rate method — 45.86% of artists have their email here.
- * 
- * Approach: Find YouTube channel URL from social links, scrape the about page,
- * extract email. If no direct scraping, use AI to analyze available data.
- */
-async function extractYouTubeEmail(
-  artist: Artist,
-  anthropicKey?: string
-): Promise<{ emails: string[]; confidence: number }> {
-  const emails: string[] = []
-
-  // First: check if we already have YouTube data in social_links
-  const socialLinks = artist.social_links || {}
-  const allLinksText = JSON.stringify(socialLinks)
-
-  // Find YouTube URL
-  let youtubeUrl = ''
-  for (const [key, value] of Object.entries(socialLinks)) {
-    if (typeof value === 'string' && (value.includes('youtube.com') || value.includes('youtu.be'))) {
-      youtubeUrl = value
-      break
-    }
-  }
-
-  // Extract any emails already visible in social links data
-  const emailRegex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g
-  const foundInLinks = allLinksText.match(emailRegex) || []
-  emails.push(...foundInLinks)
-
-  if (emails.length > 0) {
-    return { emails: Array.from(new Set(emails)), confidence: 0.85 }
-  }
-
-  // If we have a YouTube URL and an AI key, use Claude to help extract
-  if (youtubeUrl && anthropicKey) {
-    try {
-      const client = new Anthropic({ apiKey: anthropicKey })
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        messages: [{
-          role: 'user',
-          content: `I need to find the contact email for music artist "${artist.name}".
-Their YouTube channel: ${youtubeUrl}
-Their website: ${artist.website || 'none'}
-Their social links: ${JSON.stringify(socialLinks).slice(0, 1500)}
-
-Based on the YouTube channel URL pattern and available information, what is the most likely business/contact email for this artist?
-
-Reply with JSON only: {"emails": ["email@example.com"], "confidence": 0.0_to_1.0, "reasoning": "brief explanation"}`
-        }]
-      })
-
-      const text = response.content[0].type === 'text' ? response.content[0].text : ''
-      const match = text.match(/\{[\s\S]*\}/)
-      if (match) {
-        const parsed = JSON.parse(match[0])
-        const validEmails = (parsed.emails || []).filter(isValidEmail)
-        if (validEmails.length > 0) {
-          return { emails: validEmails, confidence: parsed.confidence || 0.6 }
-        }
-      }
-    } catch (e) {
-      // AI extraction failed, continue
-    }
-  }
-
-  return { emails: [], confidence: 0 }
-}
-
-// ============================================================
-// STEP 2: Social Media Email Scan (+10.83% incremental)
-// ============================================================
-
-/**
- * Scan all social media profiles for email addresses.
- * Covers: website, Linktree, Bandcamp, SoundCloud, Facebook, etc.
- * Second highest performer with 1,911 unique emails.
- */
-async function extractSocialMediaEmail(
-  artist: Artist,
-  anthropicKey?: string
-): Promise<{ emails: string[]; confidence: number }> {
-  const emails: string[] = []
-  const socialLinks = artist.social_links || {}
-
-  // Check biography for emails
-  if (artist.biography) {
-    const bioEmails = artist.biography.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []
-    emails.push(...bioEmails)
-  }
-
-  // Check website field
-  if (artist.website) {
-    const websiteEmails = artist.website.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []
-    emails.push(...websiteEmails)
-  }
-
-  // Scan all social links for non-platform URLs (personal sites, Linktree, etc.)
-  const personalUrls: string[] = []
-  const platformDomains = ['spotify', 'youtube', 'instagram', 'twitter', 'facebook', 'tiktok',
-    'deezer', 'tidal', 'shazam', 'genius', 'musicbrainz', 'allmusic', 'discogs',
-    'wikidata', 'wikipedia', 'napster', 'anghami', 'pandora', 'boomplay', 'melon']
-
-  for (const [key, value] of Object.entries(socialLinks)) {
-    if (typeof value === 'string' && value.startsWith('http')) {
-      const isPlatform = platformDomains.some(p => value.toLowerCase().includes(p))
-      if (!isPlatform) {
-        personalUrls.push(value)
-        // Check URL itself for email patterns
-        const urlEmails = value.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g) || []
-        emails.push(...urlEmails)
-      }
-    }
-  }
-
-  if (emails.length > 0) {
-    return { emails: Array.from(new Set(emails)).filter(isValidEmail), confidence: 0.75 }
-  }
-
-  // AI-powered extraction from available social data
-  if (anthropicKey && (personalUrls.length > 0 || artist.biography)) {
-    try {
-      const client = new Anthropic({ apiKey: anthropicKey })
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        messages: [{
-          role: 'user',
-          content: `Find contact email for music artist "${artist.name}".
-Biography: ${(artist.biography || '').slice(0, 500)}
-Website: ${artist.website || 'none'}
-Personal/non-platform URLs found: ${personalUrls.slice(0, 5).join(', ')}
-Instagram: ${artist.instagram_handle || 'none'}
-Country: ${artist.country || 'unknown'}
-
-What is the most likely business email? Look for patterns like:
-- name@gmail.com, booking@domain.com, management@domain.com
-- Common patterns for indie music artists
-
-Reply with JSON only: {"emails": ["email@example.com"], "confidence": 0.0_to_1.0}`
-        }]
-      })
-
-      const text = response.content[0].type === 'text' ? response.content[0].text : ''
-      const match = text.match(/\{[\s\S]*\}/)
-      if (match) {
-        const parsed = JSON.parse(match[0])
-        const validEmails = (parsed.emails || []).filter(isValidEmail)
-        if (validEmails.length > 0) {
-          return { emails: validEmails, confidence: parsed.confidence || 0.5 }
-        }
-      }
-    } catch (e) {
-      // Continue
-    }
-  }
-
-  return { emails: [], confidence: 0 }
-}
-
-// ============================================================
-// STEP 3: Instagram Contact Info (+7.61% incremental)
-// ============================================================
-
-/**
- * Extract email from Instagram business/creator account contact info.
- * 793 unique emails only this method finds.
- * 
- * Instagram business accounts can have a public email in their contact info.
- * This checks the instagram_handle field and uses AI to determine likely email.
- */
-async function extractInstagramContact(
-  artist: Artist,
-  anthropicKey?: string
-): Promise<{ emails: string[]; confidence: number }> {
-  if (!artist.instagram_handle && !artist.instagram_followers) {
-    return { emails: [], confidence: 0 }
-  }
-
-  // If we have an anthropic key, use AI to deduce email from Instagram presence
-  if (anthropicKey && artist.instagram_handle) {
-    try {
-      const client = new Anthropic({ apiKey: anthropicKey })
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 300,
-        messages: [{
-          role: 'user',
-          content: `Music artist "${artist.name}" has Instagram handle @${artist.instagram_handle} with ${artist.instagram_followers || 0} followers.
-Their genres: ${JSON.stringify(artist.genres || [])}
-Their website: ${artist.website || 'none'}
-Their country: ${artist.country || 'unknown'}
-
-Instagram business accounts often have contact emails. Based on the handle pattern and artist info, what is the most likely email address?
-
-Common patterns for music artists:
-- [handle]@gmail.com
-- [name]booking@gmail.com  
-- [name]music@gmail.com
-- management@[website domain]
-- booking@[website domain]
-- info@[website domain]
-
-Reply with JSON only: {"emails": ["most_likely@example.com"], "confidence": 0.0_to_1.0}`
-        }]
-      })
-
-      const text = response.content[0].type === 'text' ? response.content[0].text : ''
-      const match = text.match(/\{[\s\S]*\}/)
-      if (match) {
-        const parsed = JSON.parse(match[0])
-        const validEmails = (parsed.emails || []).filter(isValidEmail)
-        if (validEmails.length > 0) {
-          return { emails: validEmails, confidence: Math.min(parsed.confidence || 0.4, 0.5) }
-        }
-      }
-    } catch (e) {
-      // Continue
-    }
-  }
-
-  return { emails: [], confidence: 0 }
-}
-
-// ============================================================
-// STEP 4: Instagram Deep Search (+5.17% incremental)
-// ============================================================
-
-/**
- * Deep search for Instagram-related emails.
- * 493 unique emails (80% unique rate — highest unique contribution ratio).
- * Uses alternative approaches: checking linked accounts, Linktree, bio links.
- */
-async function extractInstagramDeep(
-  artist: Artist,
-  anthropicKey?: string
-): Promise<{ emails: string[]; confidence: number }> {
-  if (!artist.instagram_handle) {
-    return { emails: [], confidence: 0 }
-  }
-
-  // Check for Linktree or bio link patterns in social links
-  const socialLinks = artist.social_links || {}
-  const bioLinks: string[] = []
-
-  for (const [key, value] of Object.entries(socialLinks)) {
-    if (typeof value === 'string' && (
-      value.includes('linktr.ee') ||
-      value.includes('linkin.bio') ||
-      value.includes('beacons.ai') ||
-      value.includes('linkfire') ||
-      value.includes('fanlink') ||
-      value.includes('smarturl')
-    )) {
-      bioLinks.push(value)
-    }
-  }
-
-  // Use AI for deep analysis combining all available Instagram-related data
-  if (anthropicKey) {
-    try {
-      const client = new Anthropic({ apiKey: anthropicKey })
-      const response = await client.messages.create({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 400,
-        messages: [{
-          role: 'user',
-          content: `Deep search for contact email of music artist "${artist.name}".
-
-Instagram: @${artist.instagram_handle} (${artist.instagram_followers || 0} followers)
-Bio links found: ${bioLinks.join(', ') || 'none'}
-Website: ${artist.website || 'none'}
-Country: ${artist.country || 'unknown'}
-Genres: ${JSON.stringify(artist.genres || [])}
-All social links: ${JSON.stringify(socialLinks).slice(0, 1000)}
-
-This is a last-resort search. Try these approaches:
-1. Derive email from website domain (booking@domain.com, info@domain.com)
-2. Derive email from Instagram handle pattern
-3. Look for management company references in the social data
-4. Common email patterns for ${artist.country || ''} music artists
-
-Reply with JSON only: {"emails": ["email@example.com"], "confidence": 0.0_to_1.0, "method": "how you found it"}`
-        }]
-      })
-
-      const text = response.content[0].type === 'text' ? response.content[0].text : ''
-      const match = text.match(/\{[\s\S]*\}/)
-      if (match) {
-        const parsed = JSON.parse(match[0])
-        const validEmails = (parsed.emails || []).filter(isValidEmail)
-        if (validEmails.length > 0) {
-          return { emails: validEmails, confidence: Math.min(parsed.confidence || 0.35, 0.45) }
-        }
-      }
-    } catch (e) {
-      // Continue
-    }
-  }
-
-  return { emails: [], confidence: 0 }
+  return summary
 }
 
 // ============================================================
@@ -532,7 +870,7 @@ export async function enrichBatch(
   artists: Artist[],
   apiKeys: { anthropic?: string },
   onArtistComplete?: (summary: EnrichmentSummary, index: number, total: number) => void,
-  delayMs: number = 1000
+  delayMs: number = 2000 // 2 seconds between artists
 ): Promise<{
   results: EnrichmentSummary[]
   total: number
@@ -542,13 +880,15 @@ export async function enrichBatch(
   const results: EnrichmentSummary[] = []
 
   for (let i = 0; i < artists.length; i++) {
+    console.log(`\n========== Enriching Artist ${i + 1}/${artists.length} ==========`)
     const summary = await enrichArtist(artists[i], apiKeys)
     results.push(summary)
     onArtistComplete?.(summary, i, artists.length)
 
     // Delay between artists
     if (i < artists.length - 1) {
-      await new Promise(r => setTimeout(r, delayMs))
+      console.log(`[Rate Limiting] Waiting ${delayMs}ms before next artist...`)
+      await delay(delayMs)
     }
   }
 
