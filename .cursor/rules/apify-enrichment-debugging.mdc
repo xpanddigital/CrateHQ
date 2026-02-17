@@ -1,10 +1,33 @@
 ---
-description: Debugging guidelines for Apify enrichment pipeline issues
+description: Apify enrichment pipeline conventions and known pitfalls
 globs: src/lib/enrichment/**/*.ts
 alwaysApply: false
 ---
 
-# Apify Enrichment Debugging
+# Apify Enrichment Pipeline
+
+## Critical: Actor ID Format
+
+Apify REST API uses TILDE (~) as the namespace separator, NOT slash (/).
+
+```typescript
+// ❌ BAD - slash gets interpreted as URL path separator → 404
+const actor = 'apify/website-content-crawler'
+// URL: .../acts/apify/website-content-crawler/runs → BROKEN
+
+// ✅ GOOD - tilde is the correct separator
+const actor = 'apify~website-content-crawler'
+// URL: .../acts/apify~website-content-crawler/runs → WORKS
+```
+
+## Architecture
+
+Steps try content sources in this order:
+1. Pre-fetched Map (from batched apifyFetchMultiple at start)
+2. Single apifyFetch() call (if no pre-fetched content)
+3. Direct fetchWithTimeout() (last resort, gets blocked by social platforms)
+
+## Debugging
 
 ## Common Issues and Solutions
 
