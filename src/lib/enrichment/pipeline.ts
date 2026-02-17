@@ -402,6 +402,9 @@ async function step2_InstagramBio(
   console.log(`[Step 2] Instagram URL: ${instagramUrl}`)
   console.log(`[Step 2] Fetching Instagram: ${instagramUrl}`)
 
+  // Extract handle for logging/AI prompts
+  const handle = artist.instagram_handle || instagramUrl.split('instagram.com/')[1]?.replace(/\//g, '') || 'artist'
+
   let html = ''
   let apifyUsed = false
   let wasBlocked = false
@@ -422,8 +425,6 @@ async function step2_InstagramBio(
     // TIER 2: Apify fallback if blocked
     if (wasBlocked && apifyFallback) {
       console.log(`[Step 2] Instagram blocked, trying Apify fallback...`)
-      // Extract handle from URL if needed
-      const handle = artist.instagram_handle || instagramUrl.split('instagram.com/')[1]?.replace(/\//g, '') || ''
       const apifyResult = await apifyFallback.scrapeInstagram(handle)
       
       if (apifyResult.success) {
