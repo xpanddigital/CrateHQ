@@ -65,6 +65,9 @@ export interface EnrichmentSummary {
   is_contactable: boolean
   error_details?: string
   discovered_youtube_url?: string
+  discovered_website?: string
+  discovered_management?: string
+  discovered_booking_agent?: string
 }
 
 export type ProgressCallback = (step: EnrichmentStep, stepIndex: number) => void
@@ -828,7 +831,186 @@ async function step6_RemainingSocials(
 }
 
 // ============================================================
-// STEP 7: Perplexity Sonar Pro — Last-Resort Web Search
+// STEP 7: Perplexity YouTube Deep Dive (Focused Extraction)
+// ============================================================
+
+const YOUTUBE_DEEP_DIVE_SYSTEM_PROMPT = `You are a music industry research assistant. Your job is to extract business contact information from a music artist's YouTube presence.
+
+You will be given a specific YouTube channel URL. Your task:
+
+1. GO TO the YouTube channel URL provided
+2. Read the About/Description section — artists often list their booking email, management email, or business inquiries email here
+3. Check for any linked websites in the channel description or About page (often labeled "Website", "Business inquiries", or just a raw URL)
+4. If you find a linked website, GO TO that website and look for a Contact, Booking, or Management page
+5. Check for linked social profiles that might contain email addresses
+6. Look for any email addresses mentioned anywhere on the channel — description, banner, pinned comment on recent videos
+
+WHAT TO RETURN:
+Return a JSON object with the following fields (and nothing else — no markdown, no backticks, no explanation):
+
+{
+  "email": "the best business email found, or null",
+  "email_source": "where you found it (e.g. 'YouTube About page', 'linked website contact page', 'channel description')",
+  "website": "the artist's website URL if found, or null",
+  "additional_emails": ["any other emails found, as an array"],
+  "management": "management company name if visible, or null",
+  "booking_agent": "booking agent or agency name if visible, or null"
+}
+
+PRIORITY ORDER FOR EMAILS:
+1. Booking agent email (e.g. agent@caa.com, name@paradigmagency.com)
+2. Management email (e.g. name@redlightmanagement.com)
+3. Business inquiries email from YouTube About page
+4. Email found on linked website contact page
+5. Any other email found
+
+RULES:
+- Only return emails you actually find on pages you visit — do NOT guess or fabricate
+- If you find no email at all, set "email" to null
+- Do NOT return fan mail addresses unless absolutely nothing else exists
+- Do NOT return emails for a different artist
+- If the YouTube channel doesn't exist or returns a 404, return all fields as null`
+
+interface DeepDiveResult {
+  email: string | null
+  emailSource: string | null
+  website: string | null
+  additionalEmails: string[]
+  management: string | null
+  bookingAgent: string | null
+}
+
+function parseDeepDiveResponse(content: string): DeepDiveResult {
+  const cleaned = content.replace(/```json\n?/g, '').replace(/```\n?/g, '').trim()
+
+  try {
+    const parsed = JSON.parse(cleaned)
+    return {
+      email: parsed.email || null,
+      emailSource: parsed.email_source || null,
+      website: parsed.website || null,
+      additionalEmails: parsed.additional_emails || [],
+      management: parsed.management || null,
+      bookingAgent: parsed.booking_agent || null,
+    }
+  } catch {
+    const emailMatch = cleaned.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/)
+    return {
+      email: emailMatch ? emailMatch[0].toLowerCase() : null,
+      emailSource: 'regex_fallback',
+      website: null,
+      additionalEmails: [],
+      management: null,
+      bookingAgent: null,
+    }
+  }
+}
+
+async function step7_PerplexityYouTubeDeepDive(
+  artist: Artist,
+  discoveredYouTubeUrl?: string
+): Promise<{
+  emails: string[]; confidence: number; url: string; rawContent: string;
+  apifyUsed: boolean; apifyActor: string; wasBlocked: boolean; errorDetails?: string;
+  deepDiveResult?: DeepDiveResult
+}> {
+  const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: 'perplexity-yt-deep-dive', wasBlocked: false }
+
+  const perplexityKey = process.env.PERPLEXITY_API_KEY
+  if (!perplexityKey) {
+    console.log('[Step 7] No PERPLEXITY_API_KEY configured, skipping YouTube deep dive')
+    return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
+  }
+
+  const youtubeUrl = discoveredYouTubeUrl || findYouTubeUrl(artist)
+  if (!youtubeUrl) {
+    console.log('[Step 7] No YouTube URL available, skipping deep dive')
+    return { ...empty, errorDetails: 'No YouTube URL available for deep dive' }
+  }
+
+  console.log(`[Step 7] Perplexity YouTube Deep Dive — "${artist.name}" → ${youtubeUrl}`)
+
+  const userPrompt = `Find business contact information for the music artist "${artist.name}".
+
+YouTube channel: ${youtubeUrl}
+${artist.spotify_url ? `Spotify: ${artist.spotify_url}` : ''}
+
+Start by visiting their YouTube channel and extract all available contact information.`
+
+  try {
+    const res = await fetch('https://api.perplexity.ai/chat/completions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${perplexityKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: 'sonar-pro',
+        messages: [
+          { role: 'system', content: YOUTUBE_DEEP_DIVE_SYSTEM_PROMPT },
+          { role: 'user', content: userPrompt },
+        ],
+        max_tokens: 500,
+        temperature: 0.1,
+        web_search_options: { search_context_size: 'high' },
+      }),
+    })
+
+    if (!res.ok) {
+      const errorText = await res.text()
+      const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
+      console.error(`[Step 7] API error: ${errorDetail}`)
+      return { ...empty, url: youtubeUrl, errorDetails: errorDetail }
+    }
+
+    const data = await res.json()
+    const content = data.choices?.[0]?.message?.content || ''
+    const citations: string[] = data.citations || []
+
+    console.log(`[Step 7] Perplexity deep dive response: "${content.slice(0, 300)}"`)
+    if (citations.length > 0) {
+      console.log(`[Step 7] Citations: ${citations.slice(0, 3).join(', ')}`)
+    }
+
+    const deepDive = parseDeepDiveResponse(content)
+    console.log(`[Step 7] Parsed: email=${deepDive.email}, source=${deepDive.emailSource}, website=${deepDive.website}, mgmt=${deepDive.management}, agent=${deepDive.bookingAgent}`)
+
+    // Collect all emails from the deep dive
+    const allFoundEmails: string[] = []
+    if (deepDive.email && validatePerplexityEmail(deepDive.email)) {
+      allFoundEmails.push(deepDive.email)
+    }
+    for (const extra of deepDive.additionalEmails) {
+      const cleaned = extra.toLowerCase().trim()
+      if (cleaned && validatePerplexityEmail(cleaned) && !allFoundEmails.includes(cleaned)) {
+        allFoundEmails.push(cleaned)
+      }
+    }
+
+    if (allFoundEmails.length > 0) {
+      console.log(`[Step 7] YouTube deep dive found emails: ${allFoundEmails.join(', ')}`)
+      return {
+        emails: allFoundEmails,
+        confidence: 0.75,
+        url: citations[0] || youtubeUrl,
+        rawContent: content,
+        apifyUsed: false,
+        apifyActor: 'perplexity-yt-deep-dive',
+        wasBlocked: false,
+        deepDiveResult: deepDive,
+      }
+    }
+
+    console.log('[Step 7] YouTube deep dive: no valid email found')
+    return { ...empty, url: youtubeUrl, rawContent: content, deepDiveResult: deepDive }
+  } catch (error: any) {
+    console.error(`[Step 7] Perplexity YouTube deep dive error:`, error.message)
+    return { ...empty, url: youtubeUrl, errorDetails: error.message }
+  }
+}
+
+// ============================================================
+// STEP 8: Perplexity Sonar Pro — Last-Resort Generic Web Search
 // ============================================================
 
 const PERPLEXITY_SYSTEM_PROMPT = `You are an email research assistant for a music industry catalog fund.
@@ -885,7 +1067,7 @@ function validatePerplexityEmail(email: string): boolean {
   return true
 }
 
-async function step7_Perplexity(
+async function step8_PerplexityGeneric(
   artist: Artist
 ): Promise<{
   emails: string[]; confidence: number; url: string; rawContent: string;
@@ -896,11 +1078,11 @@ async function step7_Perplexity(
 
   const perplexityKey = process.env.PERPLEXITY_API_KEY
   if (!perplexityKey) {
-    console.log('[Step 7] No PERPLEXITY_API_KEY configured, skipping')
+    console.log('[Step 8] No PERPLEXITY_API_KEY configured, skipping')
     return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
   }
 
-  console.log(`[Step 7] Perplexity Sonar Pro — searching web for "${artist.name}" email`)
+  console.log(`[Step 8] Perplexity Sonar Pro — generic web search for "${artist.name}" email`)
 
   try {
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
@@ -924,7 +1106,7 @@ async function step7_Perplexity(
     if (!res.ok) {
       const errorText = await res.text()
       const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
-      console.error(`[Step 7] API error: ${errorDetail}`)
+      console.error(`[Step 8] API error: ${errorDetail}`)
       return { ...empty, errorDetails: errorDetail }
     }
 
@@ -932,37 +1114,37 @@ async function step7_Perplexity(
     const content = data.choices?.[0]?.message?.content || ''
     const citations: string[] = data.citations || []
 
-    console.log(`[Step 7] Perplexity response: "${content.slice(0, 200)}"`)
+    console.log(`[Step 8] Perplexity response: "${content.slice(0, 200)}"`)
     if (citations.length > 0) {
-      console.log(`[Step 7] Citations: ${citations.slice(0, 3).join(', ')}`)
+      console.log(`[Step 8] Citations: ${citations.slice(0, 3).join(', ')}`)
     }
 
     // Check for NO_EMAIL_FOUND
     if (content.includes('NO_EMAIL_FOUND') || !content.includes('@')) {
-      console.log('[Step 7] Perplexity: no email found')
+      console.log('[Step 8] Perplexity generic: no email found')
       return { ...empty, rawContent: content, citations }
     }
 
     // Extract and validate email
     const email = extractPerplexityEmail(content)
     if (email && validatePerplexityEmail(email)) {
-      console.log(`[Step 7] Perplexity found email: ${email}`)
+      console.log(`[Step 8] Perplexity generic found email: ${email}`)
       return {
         emails: [email],
-        confidence: 0.7,
+        confidence: 0.65,
         url: citations[0] || 'perplexity-web-search',
         rawContent: content,
         apifyUsed: false,
-        apifyActor: 'perplexity-sonar-pro',
+        apifyActor: 'perplexity-sonar-pro-generic',
         wasBlocked: false,
         citations,
       }
     }
 
-    console.log(`[Step 7] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
+    console.log(`[Step 8] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
     return { ...empty, rawContent: content, errorDetails: `Invalid email extracted: ${email || 'none'}`, citations }
   } catch (error: any) {
-    console.error(`[Step 7] Perplexity error:`, error.message)
+    console.error(`[Step 8] Perplexity error:`, error.message)
     return { ...empty, errorDetails: error.message }
   }
 }
@@ -990,7 +1172,8 @@ export async function enrichArtist(
     { method: 'website_contact', label: 'Artist Website (direct fetch / website-content-crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'facebook_about', label: 'Facebook (skipped — requires login)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     { method: 'remaining_socials', label: 'Remaining Socials (skipped — blocked)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
-    { method: 'perplexity_search', label: 'Perplexity Sonar Pro (web search last resort)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'perplexity_yt_deep_dive', label: 'Perplexity YouTube Deep Dive', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+    { method: 'perplexity_search', label: 'Perplexity Generic Web Search (last resort)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
   ]
 
   const allEmails: Array<{ email: string; source: string; confidence: number }> = []
@@ -999,6 +1182,9 @@ export async function enrichArtist(
   let bestSource = ''
   let instagramExternalUrl: string | null = null
   let discoveredYouTubeUrl: string | undefined = undefined
+  let discoveredWebsite: string | undefined = undefined
+  let discoveredManagement: string | undefined = undefined
+  let discoveredBookingAgent: string | undefined = undefined
 
   console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
   console.log(`[Enrichment] YOUTUBE_API_KEY present: ${!!process.env.YOUTUBE_API_KEY}`)
@@ -1025,6 +1211,7 @@ export async function enrichArtist(
         wasBlocked?: boolean
         errorDetails?: string
         discoveredYouTubeUrl?: string
+        deepDiveResult?: DeepDiveResult
       }
 
       switch (step.method) {
@@ -1051,8 +1238,17 @@ export async function enrichArtist(
         case 'remaining_socials':
           result = await step6_RemainingSocials(artist)
           break
+        case 'perplexity_yt_deep_dive':
+          result = await step7_PerplexityYouTubeDeepDive(artist, discoveredYouTubeUrl)
+          // Capture bonus data from deep dive
+          if (result.deepDiveResult) {
+            if (result.deepDiveResult.website) discoveredWebsite = result.deepDiveResult.website
+            if (result.deepDiveResult.management) discoveredManagement = result.deepDiveResult.management
+            if (result.deepDiveResult.bookingAgent) discoveredBookingAgent = result.deepDiveResult.bookingAgent
+          }
+          break
         case 'perplexity_search':
-          result = await step7_Perplexity(artist)
+          result = await step8_PerplexityGeneric(artist)
           break
         default:
           result = { emails: [], confidence: 0, url: '', rawContent: '' }
@@ -1181,6 +1377,9 @@ export async function enrichArtist(
     is_contactable: !!bestEmail,
     error_details: allErrorDetails || undefined,
     discovered_youtube_url: discoveredYouTubeUrl,
+    discovered_website: discoveredWebsite,
+    discovered_management: discoveredManagement,
+    discovered_booking_agent: discoveredBookingAgent,
   }
 
   console.log(`[Enrichment Complete] ${bestEmail ? `Found: ${bestEmail}` : 'No email found'} (${summary.total_duration_ms}ms)\n`)

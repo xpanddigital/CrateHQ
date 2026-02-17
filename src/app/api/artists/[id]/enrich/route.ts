@@ -52,17 +52,35 @@ export async function POST(
       updated_at: new Date().toISOString(),
     }
 
-    // Save discovered YouTube URL to social_links if it's new
+    // Save discovered data to artist profile
+    const currentLinks = artist.social_links || {}
+    let linksUpdated = false
+
     if (result.discovered_youtube_url) {
-      const currentLinks = artist.social_links || {}
       const existingYt = currentLinks.youtube || currentLinks.youtube_url || ''
       if (!existingYt) {
-        updateData.social_links = {
-          ...currentLinks,
-          youtube: result.discovered_youtube_url,
-        }
-        console.log(`[Single Enrich] Saving discovered YouTube URL to profile: ${result.discovered_youtube_url}`)
+        currentLinks.youtube = result.discovered_youtube_url
+        linksUpdated = true
+        console.log(`[Single Enrich] Saving discovered YouTube URL: ${result.discovered_youtube_url}`)
       }
+    }
+
+    if (linksUpdated) {
+      updateData.social_links = currentLinks
+    }
+
+    // Save bonus data from Perplexity YouTube deep dive
+    if (result.discovered_website && !artist.website) {
+      updateData.website = result.discovered_website
+      console.log(`[Single Enrich] Saving discovered website: ${result.discovered_website}`)
+    }
+    if (result.discovered_management) {
+      updateData.management_company = result.discovered_management
+      console.log(`[Single Enrich] Saving discovered management: ${result.discovered_management}`)
+    }
+    if (result.discovered_booking_agent) {
+      updateData.booking_agency = result.discovered_booking_agent
+      console.log(`[Single Enrich] Saving discovered booking agent: ${result.discovered_booking_agent}`)
     }
 
     const { error: updateError } = await supabase

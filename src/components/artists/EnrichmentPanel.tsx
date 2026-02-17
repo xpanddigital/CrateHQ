@@ -34,6 +34,8 @@ export function EnrichmentPanel({ artistId, onEnrichmentComplete }: EnrichmentPa
         return <Facebook className="h-4 w-4" />
       case 'remaining_socials':
         return <SkipForward className="h-4 w-4" />
+      case 'perplexity_yt_deep_dive':
+        return <Radar className="h-4 w-4" />
       case 'perplexity_search':
         return <Radar className="h-4 w-4" />
       default:
@@ -55,7 +57,8 @@ export function EnrichmentPanel({ artistId, onEnrichmentComplete }: EnrichmentPa
       { method: 'website_contact', label: 'Artist Website (direct fetch / crawler)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'facebook_about', label: 'Facebook (skipped)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
       { method: 'remaining_socials', label: 'Remaining Socials (skipped)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
-      { method: 'perplexity_search', label: 'Perplexity Sonar Pro (web search)', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+      { method: 'perplexity_yt_deep_dive', label: 'Perplexity YouTube Deep Dive', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
+      { method: 'perplexity_search', label: 'Perplexity Generic Web Search', status: 'pending', emails_found: [], best_email: '', confidence: 0 },
     ]
     setSteps(initialSteps)
 

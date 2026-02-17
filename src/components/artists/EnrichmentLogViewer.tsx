@@ -294,6 +294,7 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                           {step.method === 'facebook_about' ? 'Skipped — Facebook requires login'
                             : step.method === 'remaining_socials' ? 'Skipped — platforms block scraping'
                             : step.method === 'youtube_about' ? 'Skipped — no YouTube URL available'
+                            : step.method === 'perplexity_yt_deep_dive' ? 'Skipped (email already found or no YouTube URL)'
                             : step.method === 'perplexity_search' ? 'Skipped (email already found)'
                             : 'Skipped (email already found in previous step)'}
                         </div>
