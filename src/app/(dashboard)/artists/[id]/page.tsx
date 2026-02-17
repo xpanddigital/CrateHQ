@@ -19,6 +19,15 @@ import { Artist } from '@/types/database'
 import { formatNumber, formatCurrency, formatDate } from '@/lib/utils'
 import { estimateCatalogValue } from '@/lib/valuation/estimator'
 
+// Extended type for edit mode with temporary URL fields
+interface ArtistEditData extends Partial<Artist> {
+  instagram_url?: string
+  youtube_url?: string
+  facebook_url?: string
+  twitter_url?: string
+  tiktok_url?: string
+}
+
 export default function ArtistDetailPage() {
   const params = useParams()
   const router = useRouter()
@@ -26,7 +35,7 @@ export default function ArtistDetailPage() {
   const [loading, setLoading] = useState(true)
   const [editMode, setEditMode] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [editData, setEditData] = useState<Partial<Artist>>({})
+  const [editData, setEditData] = useState<ArtistEditData>({})
   const [calculatingValue, setCalculatingValue] = useState(false)
   const [valuationResult, setValuationResult] = useState<any>(null)
 
