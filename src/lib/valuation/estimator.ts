@@ -67,7 +67,7 @@ export function estimateCatalogValue(input: EstimateInput): EstimateResult {
 
   // Fallback: derive streams from monthly listeners if missing
   if (streams <= 0 && listeners > 0) {
-    streams = listeners * 2.5
+    streams = Math.round(listeners * 3.5)
   }
 
   if (streams <= 0) {

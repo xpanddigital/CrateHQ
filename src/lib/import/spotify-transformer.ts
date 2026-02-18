@@ -147,6 +147,7 @@ export interface TransformedArtist {
   spotify_followers: number
   spotify_verified: boolean
   streams_last_month: number
+  streams_estimated: boolean
   total_top_track_streams: number
   track_count: number
   genres: string[]
@@ -216,6 +217,13 @@ export function transformSpotifyRaw(row: Record<string, string>): TransformedArt
     totalStreams += parseNum(row[`topTracks/${i}/streamCount`])
   }
 
+  const monthlyListenersRaw = parseNum(row['monthlyListeners'])
+  let streamsEstimatedRaw = false
+  if (totalStreams === 0 && monthlyListenersRaw > 0) {
+    totalStreams = Math.round(monthlyListenersRaw * 3.5)
+    streamsEstimatedRaw = true
+  }
+
   // Top cities
   const topCities: Array<{ city: string; country: string; listeners: number }> = []
   for (let i = 0; i <= 4; i++) {
@@ -269,10 +277,11 @@ export function transformSpotifyRaw(row: Record<string, string>): TransformedArt
     website: null,
     spotify_url: spotifyUrl,
     spotify_id: spotifyId,
-    spotify_monthly_listeners: parseNum(row['monthlyListeners']),
+    spotify_monthly_listeners: monthlyListenersRaw,
     spotify_followers: parseNum(row['followers']),
     spotify_verified: row['verified']?.toLowerCase() === 'true',
     streams_last_month: totalStreams,
+    streams_estimated: streamsEstimatedRaw,
     total_top_track_streams: totalStreams,
     track_count: trackCount,
     genres: [],
@@ -322,8 +331,10 @@ export function transformCrateHQ(row: Record<string, string>): TransformedArtist
 
   // Use best available streams value; fall back to rough estimate from listeners
   let finalStreams = streamsLastMonth || streamsGeneric || 0
+  let streamsEstimated = false
   if (finalStreams === 0 && monthlyListeners > 0) {
-    finalStreams = monthlyListeners * 3
+    finalStreams = Math.round(monthlyListeners * 3.5)
+    streamsEstimated = true
   }
 
   // Track count: sum album_count + single_count if track_count not provided
@@ -413,6 +424,7 @@ export function transformCrateHQ(row: Record<string, string>): TransformedArtist
     spotify_followers: 0,
     spotify_verified: false,
     streams_last_month: finalStreams,
+    streams_estimated: streamsEstimated,
     total_top_track_streams: streamsGeneric || 0,
     track_count: trackCount,
     genres: genreList,

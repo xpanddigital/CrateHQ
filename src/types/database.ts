@@ -38,6 +38,7 @@ export interface Artist {
   cover_art_url: string | null
   spotify_monthly_listeners: number
   streams_last_month: number
+  streams_estimated: boolean
   streams_daily: number
   total_top_track_streams: number
   track_count: number

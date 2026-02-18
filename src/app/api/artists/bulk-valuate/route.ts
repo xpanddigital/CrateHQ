@@ -59,23 +59,37 @@ export async function POST(request: NextRequest) {
           continue
         }
 
+        let streamsForValuation = artist.streams_last_month || 0
+        let streamsEstimated = artist.streams_estimated || false
+
+        if (streamsForValuation <= 0 && artist.spotify_monthly_listeners > 0) {
+          streamsForValuation = Math.round(artist.spotify_monthly_listeners * 3.5)
+          streamsEstimated = true
+        }
+
         const valuation = estimateCatalogValue({
-          streams_last_month: artist.streams_last_month || 0,
+          streams_last_month: streamsForValuation,
           track_count: artist.track_count,
           spotify_monthly_listeners: artist.spotify_monthly_listeners,
           instagram_followers: artist.instagram_followers,
           growth_yoy: artist.growth_yoy,
         })
 
-        // Update artist
+        const updatePayload: Record<string, any> = {
+          estimated_offer: valuation.point_estimate,
+          estimated_offer_low: valuation.range_low,
+          estimated_offer_high: valuation.range_high,
+          updated_at: new Date().toISOString(),
+        }
+
+        if (streamsEstimated && !artist.streams_last_month) {
+          updatePayload.streams_last_month = streamsForValuation
+          updatePayload.streams_estimated = true
+        }
+
         const { error: updateError } = await supabase
           .from('artists')
-          .update({
-            estimated_offer: valuation.point_estimate,
-            estimated_offer_low: valuation.range_low,
-            estimated_offer_high: valuation.range_high,
-            updated_at: new Date().toISOString(),
-          })
+          .update(updatePayload)
           .eq('id', artist.id)
 
         if (updateError) throw updateError

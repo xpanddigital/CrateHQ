@@ -100,6 +100,7 @@ export async function POST(request: NextRequest) {
         spotify_followers: artist.spotify_followers || 0,
         spotify_verified: artist.spotify_verified || false,
         streams_last_month: artist.streams_last_month || 0,
+        streams_estimated: artist.streams_estimated || false,
         total_top_track_streams: artist.total_top_track_streams || 0,
         track_count: artist.track_count || 0,
         genres: artist.genres || [],
