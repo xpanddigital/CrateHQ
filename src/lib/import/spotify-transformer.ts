@@ -9,6 +9,7 @@
  * biographies, and returns a unified array ready for Supabase insert.
  */
 
+import Papa from 'papaparse'
 import { checkEmailQuality } from '@/lib/qualification/email-filter'
 
 // ─── Format Detection ────────────────────────────────────────────────
@@ -36,88 +37,23 @@ export function detectFormat(headers: string[]): ImportFormat {
 // ─── Smart CSV/TSV Parsing ───────────────────────────────────────────
 
 /**
- * Detects delimiter (tab vs comma) and parses a CSV/TSV string into
- * an array of header→value objects. Handles quoted fields with embedded
- * delimiters and newlines.
+ * Parses a CSV or TSV string using Papa Parse. Correctly handles
+ * quoted multi-line fields (e.g. biography columns with newlines).
  */
 export function parseDelimitedText(text: string): { headers: string[]; rows: Record<string, string>[] } {
-  // Detect delimiter from first line
-  const firstLine = text.split('\n')[0] || ''
-  const tabCount = (firstLine.match(/\t/g) || []).length
-  const commaCount = (firstLine.match(/,/g) || []).length
-  const delimiter = tabCount > commaCount ? '\t' : ','
+  const result = Papa.parse<Record<string, string>>(text, {
+    header: true,
+    skipEmptyLines: true,
+    dynamicTyping: false,
+  })
 
-  const rows: Record<string, string>[] = []
-  const lines = splitCSVLines(text, delimiter)
-
-  if (lines.length < 2) return { headers: [], rows: [] }
-
-  const headers = parseCSVLine(lines[0], delimiter)
-
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim()
-    if (!line) continue
-
-    const values = parseCSVLine(line, delimiter)
-    const row: Record<string, string> = {}
-    headers.forEach((h, idx) => {
-      row[h] = (values[idx] || '').trim()
-    })
-    rows.push(row)
-  }
+  const headers = result.meta.fields || []
+  const rows = result.data.filter(row => {
+    // Skip completely empty rows
+    return Object.values(row).some(v => v && v.trim() !== '')
+  })
 
   return { headers, rows }
-}
-
-function splitCSVLines(text: string, _delimiter: string): string[] {
-  const lines: string[] = []
-  let current = ''
-  let inQuotes = false
-
-  for (let i = 0; i < text.length; i++) {
-    const ch = text[i]
-    if (ch === '"') {
-      if (inQuotes && text[i + 1] === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if ((ch === '\n' || ch === '\r') && !inQuotes) {
-      if (ch === '\r' && text[i + 1] === '\n') i++
-      lines.push(current)
-      current = ''
-    } else {
-      current += ch
-    }
-  }
-  if (current.trim()) lines.push(current)
-  return lines
-}
-
-function parseCSVLine(line: string, delimiter: string): string[] {
-  const values: string[] = []
-  let current = ''
-  let inQuotes = false
-
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i]
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') {
-        current += '"'
-        i++
-      } else {
-        inQuotes = !inQuotes
-      }
-    } else if (ch === delimiter && !inQuotes) {
-      values.push(current)
-      current = ''
-    } else {
-      current += ch
-    }
-  }
-  values.push(current)
-  return values
 }
 
 // ─── Biography Email Extraction ──────────────────────────────────────
@@ -336,7 +272,7 @@ export function transformSpotifyRaw(row: Record<string, string>): TransformedArt
     spotify_monthly_listeners: parseNum(row['monthlyListeners']),
     spotify_followers: parseNum(row['followers']),
     spotify_verified: row['verified']?.toLowerCase() === 'true',
-    streams_last_month: 0,
+    streams_last_month: totalStreams,
     total_top_track_streams: totalStreams,
     track_count: trackCount,
     genres: [],
