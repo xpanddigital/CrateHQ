@@ -13,28 +13,42 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { name, limit, filter = 'qualified' } = body
 
-    // Query artists that need enrichment
-    let query = supabase
-      .from('artists')
-      .select('id, name')
-      .is('email', null)
-      .order('created_at', { ascending: true })
+    // Query artists that need enrichment (paginate to bypass Supabase 1000-row default)
+    const maxToQueue = limit || 50000
+    let allArtists: Array<{ id: string; name: string }> = []
+    let page = 0
+    const PAGE_SIZE = 1000
 
-    if (filter === 'qualified') {
-      query = query.in('qualification_status', ['qualified', 'pending'])
+    while (allArtists.length < maxToQueue) {
+      let query = supabase
+        .from('artists')
+        .select('id, name')
+        .is('email', null)
+        .order('created_at', { ascending: true })
+        .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
+
+      if (filter === 'qualified') {
+        query = query.in('qualification_status', ['qualified', 'pending'])
+      }
+
+      const { data: batch, error: queryError } = await query
+
+      if (queryError) {
+        return NextResponse.json({ error: queryError.message }, { status: 500 })
+      }
+
+      if (!batch || batch.length === 0) break
+
+      allArtists.push(...batch)
+      page++
+
+      if (batch.length < PAGE_SIZE) break
     }
 
-    if (limit) {
-      query = query.limit(limit)
-    }
+    // Apply limit
+    const artists = allArtists.slice(0, maxToQueue)
 
-    const { data: artists, error: queryError } = await query
-
-    if (queryError) {
-      return NextResponse.json({ error: queryError.message }, { status: 500 })
-    }
-
-    if (!artists || artists.length === 0) {
+    if (artists.length === 0) {
       return NextResponse.json({ error: 'No artists found matching criteria' }, { status: 404 })
     }
 
