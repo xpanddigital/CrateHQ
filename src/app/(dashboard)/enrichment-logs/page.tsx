@@ -12,6 +12,7 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { FileText, Search, Filter, Calendar, CheckCircle, XCircle, Download, Trash2 } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { useToast } from '@/components/ui/use-toast'
+import { BatchDashboard } from '@/components/enrichment/BatchDashboard'
 
 interface EnrichmentLog {
   id: string
@@ -323,6 +324,9 @@ export default function EnrichmentLogsPage() {
           </Button>
         </div>
       </div>
+
+      {/* Server-Side Batch Enrichment */}
+      <BatchDashboard />
 
       {/* Stats Cards */}
       <div className="grid gap-4 md:grid-cols-4">
