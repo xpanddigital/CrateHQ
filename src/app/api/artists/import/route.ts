@@ -167,21 +167,24 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ── Update existing artists ──────────────────────────────────
+    // ── Update existing artists (parallel batches of 50) ─────────
     let updatedCount = 0
-    for (const { id, data } of toUpdate) {
-      const { error } = await supabase
-        .from('artists')
-        .update(data)
-        .eq('id', id)
-
-      if (!error) updatedCount++
+    for (let i = 0; i < toUpdate.length; i += 50) {
+      const chunk = toUpdate.slice(i, i + 50)
+      const results = await Promise.all(
+        chunk.map(({ id, data }) =>
+          supabase.from('artists').update(data).eq('id', id)
+        )
+      )
+      updatedCount += results.filter(r => !r.error).length
     }
 
-    // ── Run valuation + qualification ────────────────────────────
+    // ── Run valuation + qualification (batched) ─────────────────
     const qualificationSummary = { qualified: 0, not_qualified: 0, review: 0, pending: 0 }
     const allArtists = [...insertedData, ...toUpdate.map(u => ({ id: u.id, ...u.data }))]
 
+    // Compute valuations in-memory (pure function, no DB calls)
+    const valuationUpdates: Array<{ id: string; data: any }> = []
     for (const artist of allArtists) {
       try {
         const result = valuateAndQualify({
@@ -194,13 +197,23 @@ export async function POST(request: NextRequest) {
           streams_last_month: artist.streams_last_month || artist.total_top_track_streams || 0,
           track_count: artist.track_count || 0,
         })
-
-        await supabase.from('artists').update(result).eq('id', artist.id)
+        valuationUpdates.push({ id: artist.id, data: result })
         qualificationSummary[result.qualification_status]++
       } catch (err) {
         console.error(`[Import] Qualification failed for ${artist.name}:`, err)
         qualificationSummary.pending++
       }
+    }
+
+    // Batch update valuations in parallel chunks of 50
+    const PARALLEL_CHUNK = 50
+    for (let i = 0; i < valuationUpdates.length; i += PARALLEL_CHUNK) {
+      const chunk = valuationUpdates.slice(i, i + PARALLEL_CHUNK)
+      await Promise.all(
+        chunk.map(({ id, data }) =>
+          supabase.from('artists').update(data).eq('id', id)
+        )
+      )
     }
 
     // Count bio emails found
