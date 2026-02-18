@@ -27,23 +27,32 @@ export interface Artist {
   id: string
   name: string
   spotify_url: string | null
+  spotify_id: string | null
+  spotify_followers: number
+  spotify_verified: boolean
   country: string | null
   biography: string | null
+  bio_emails: Array<{ email: string; type: string; context: string }> | null
   genres: string[]
   image_url: string | null
+  cover_art_url: string | null
   spotify_monthly_listeners: number
   streams_last_month: number
   streams_daily: number
+  total_top_track_streams: number
   track_count: number
   growth_mom: number
   growth_qoq: number
   growth_yoy: number
   growth_status: string | null
   artist_level: string | null
+  world_rank: number
   instagram_handle: string | null
   instagram_followers: number
   tiktok_handle: string | null
+  tiktok_url: string | null
   twitter_handle: string | null
+  wikipedia_url: string | null
   website: string | null
   social_links: Record<string, string>
   email: string | null
@@ -59,12 +68,16 @@ export interface Artist {
   is_contactable: boolean
   enrichment_attempts: number
   last_enriched_at: string | null
+  latest_release_date: string | null
+  latest_release_name: string | null
+  top_cities: Array<{ city: string; country: string; listeners: number }> | null
   qualification_status: 'qualified' | 'not_qualified' | 'review' | 'pending'
   qualification_reason: string | null
   qualification_date: string | null
   qualification_manual_override: boolean
   email_rejected: boolean
   email_rejection_reason: string | null
+  import_format: string | null
   source: string
   source_batch: string | null
   created_at: string

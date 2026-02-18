@@ -7,8 +7,18 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Upload, FileUp, CheckCircle, AlertCircle } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Upload, FileUp, CheckCircle, AlertCircle, Mail, Music2, Users, Loader2 } from 'lucide-react'
 import { ApifyScraper } from '@/components/artists/ApifyScraper'
+import {
+  detectFormat,
+  parseDelimitedText,
+  transformSpotifyRaw,
+  generatePreviewSummary,
+  type ImportFormat,
+  type ImportPreviewSummary,
+  type TransformedArtist,
+} from '@/lib/import/spotify-transformer'
 
 interface PreviewRow {
   name: string
@@ -37,8 +47,19 @@ export default function ArtistsImportPage() {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+
+  // New state for auto-detection
+  const [detectedFormat, setDetectedFormat] = useState<ImportFormat | null>(null)
+  const [spotifyPreview, setSpotifyPreview] = useState<ImportPreviewSummary | null>(null)
+  const [rawRows, setRawRows] = useState<Record<string, string>[]>([])
+  const [rawHeaders, setRawHeaders] = useState<string[]>([])
+
   const [importResult, setImportResult] = useState<{
     count: number
+    updated?: number
+    duplicates?: number
+    bioEmailsFound?: number
+    format?: string
     qualification?: { qualified: number; not_qualified: number; review: number; pending: number }
   } | null>(null)
 
@@ -47,17 +68,19 @@ export default function ArtistsImportPage() {
     if (selectedFile) {
       setFile(selectedFile)
       setError('')
-      parseCSV(selectedFile)
+      setSuccess(false)
+      setImportResult(null)
+      setDetectedFormat(null)
+      setSpotifyPreview(null)
+      parseFile(selectedFile)
     }
   }
 
-  // Helper function to parse numbers and strip commas
   const parseNumber = (val: string): number => {
     if (!val) return 0
     return parseInt(val.replace(/,/g, '').replace(/\s/g, '')) || 0
   }
 
-  // Map CSV column to row field
   const mapColumnToRow = (header: string, value: string, row: PreviewRow) => {
     if (!value && ![
       'monthly_listeners', 'spotify_monthly_listeners', 'spotify_monthly_listners', 'listeners', 'monthly listeners',
@@ -67,162 +90,102 @@ export default function ArtistsImportPage() {
     ].includes(header)) return
 
     switch (header) {
-      case 'name':
-      case 'artist_name':
-      case 'artist':
-        row.name = value
-        break
-      case 'email':
-        row.email = value
-        break
-      case 'instagram':
-      case 'instagram_handle':
-      case 'ig_handle':
-        row.instagram_handle = value.replace('@', '')
-        break
-      case 'instagram_url':
-      case 'instagram url':
-      case 'ig_url':
-        row.instagram_url = value
-        break
-      case 'instagram_followers':
-      case 'instagram followers':
-      case 'ig_followers':
-        row.instagram_followers = parseNumber(value)
-        break
-      case 'website':
-      case 'url':
-        row.website = value
-        break
-      case 'spotify_url':
-      case 'spotify url':
-      case 'spotify_link':
-      case 'spotify link':
-        row.spotify_url = value
-        break
-      case 'facebook_url':
-      case 'facebook url':
-      case 'facebook':
-        row.facebook_url = value
-        break
-      case 'twitter_url':
-      case 'twitter url':
-      case 'twitter':
-      case 'x_url':
-        row.twitter_url = value
-        break
-      case 'tiktok_url':
-      case 'tiktok url':
-      case 'tiktok':
-        row.tiktok_url = value
-        break
-      case 'youtube_url':
-      case 'youtube url':
-      case 'youtube':
-        row.youtube_url = value
-        break
-      case 'biography':
-      case 'bio':
-      case 'description':
-        row.biography = value
-        break
-      case 'monthly_listeners':
-      case 'spotify_monthly_listeners':
-      case 'spotify_monthly_listners': // Common typo
-      case 'listeners':
-      case 'monthly listeners':
-        row.spotify_monthly_listeners = parseNumber(value)
-        break
-      case 'streams':
-      case 'streams_last_month':
-      case 'streams last month':
-      case 'last_month_streams':
-      case 'monthly_streams':
-      case 'est_streams_month':
-        row.streams_last_month = parseNumber(value)
-        break
-      case 'tracks':
-      case 'track_count':
-      case 'track count':
-      case 'number_of_tracks':
-      case 'total_tracks':
-      case 'album_count':
-      case 'single_count':
-        row.track_count = parseNumber(value)
-        break
-      case 'genres':
-      case 'genre':
-        row.genres = value.split(';').map(g => g.trim()).filter(Boolean)
-        break
-      case 'country':
-      case 'country_name':
-        row.country = value.toUpperCase()
-        break
+      case 'name': case 'artist_name': case 'artist': row.name = value; break
+      case 'email': row.email = value; break
+      case 'instagram': case 'instagram_handle': case 'ig_handle': row.instagram_handle = value.replace('@', ''); break
+      case 'instagram_url': case 'instagram url': case 'ig_url': row.instagram_url = value; break
+      case 'instagram_followers': case 'instagram followers': case 'ig_followers': row.instagram_followers = parseNumber(value); break
+      case 'website': case 'url': row.website = value; break
+      case 'spotify_url': case 'spotify url': case 'spotify_link': case 'spotify link': row.spotify_url = value; break
+      case 'facebook_url': case 'facebook url': case 'facebook': row.facebook_url = value; break
+      case 'twitter_url': case 'twitter url': case 'twitter': case 'x_url': row.twitter_url = value; break
+      case 'tiktok_url': case 'tiktok url': case 'tiktok': row.tiktok_url = value; break
+      case 'youtube_url': case 'youtube url': case 'youtube': row.youtube_url = value; break
+      case 'biography': case 'bio': case 'description': row.biography = value; break
+      case 'monthly_listeners': case 'spotify_monthly_listeners': case 'spotify_monthly_listners':
+      case 'listeners': case 'monthly listeners': row.spotify_monthly_listeners = parseNumber(value); break
+      case 'streams': case 'streams_last_month': case 'streams last month':
+      case 'last_month_streams': case 'monthly_streams': case 'est_streams_month': row.streams_last_month = parseNumber(value); break
+      case 'tracks': case 'track_count': case 'track count': case 'number_of_tracks':
+      case 'total_tracks': case 'album_count': case 'single_count': row.track_count = parseNumber(value); break
+      case 'genres': case 'genre': row.genres = value.split(';').map(g => g.trim()).filter(Boolean); break
+      case 'country': case 'country_name': row.country = value.toUpperCase(); break
     }
   }
 
-  const parseCSV = async (file: File) => {
+  const parseFile = async (file: File) => {
     try {
       const text = await file.text()
-      const lines = text.split('\n').filter(line => line.trim())
-      
-      if (lines.length < 2) {
+
+      // Use the smart parser to detect delimiter and parse
+      const { headers, rows } = parseDelimitedText(text)
+
+      if (headers.length === 0 || rows.length === 0) {
         setError('CSV file must have at least a header row and one data row')
         return
       }
 
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
-      const rows: PreviewRow[] = []
+      setRawHeaders(headers)
+      setRawRows(rows)
 
-      for (let i = 1; i < Math.min(lines.length, 11); i++) {
-        const values = lines[i].split(',').map(v => v.trim())
-        const row: PreviewRow = { name: '' }
+      const format = detectFormat(headers)
+      setDetectedFormat(format)
 
-        headers.forEach((header, index) => {
-          mapColumnToRow(header, values[index], row)
-        })
-
-        if (row.name) {
-          rows.push(row)
-        }
+      if (format === 'unknown') {
+        setError('Unrecognized CSV format. Expected either raw Spotify scrape or CrateHQ format.')
+        return
       }
 
-      setPreview(rows)
+      if (format === 'spotify_raw') {
+        const summary = generatePreviewSummary(format, rows)
+        setSpotifyPreview(summary)
+        setPreview([])
+      } else {
+        // CrateHQ format — use existing parser
+        setSpotifyPreview(null)
+        const previewRows: PreviewRow[] = []
+        for (let i = 0; i < Math.min(rows.length, 10); i++) {
+          const row: PreviewRow = { name: '' }
+          for (const [header, value] of Object.entries(rows[i])) {
+            mapColumnToRow(header.toLowerCase(), value, row)
+          }
+          if (row.name) previewRows.push(row)
+        }
+        setPreview(previewRows)
+      }
     } catch (err) {
-      setError('Failed to parse CSV file')
+      setError('Failed to parse file. Make sure it is a valid CSV or TSV.')
       console.error(err)
     }
   }
 
   const handleImport = async () => {
-    if (!file) return
+    if (!file || !detectedFormat) return
 
     setImporting(true)
     setError('')
 
     try {
-      const text = await file.text()
-      const lines = text.split('\n').filter(line => line.trim())
-      const headers = lines[0].split(',').map(h => h.trim().toLowerCase())
-      const artists: PreviewRow[] = []
+      let artistsToSend: any[]
 
-      for (let i = 1; i < lines.length; i++) {
-        const values = lines[i].split(',').map(v => v.trim())
-        const row: PreviewRow = { name: '' }
-
-        headers.forEach((header, index) => {
-          mapColumnToRow(header, values[index], row)
-        })
-
-        if (row.name) {
-          artists.push(row)
+      if (detectedFormat === 'spotify_raw') {
+        artistsToSend = rawRows.map(transformSpotifyRaw)
+      } else {
+        // CrateHQ format
+        artistsToSend = []
+        for (const row of rawRows) {
+          const mapped: PreviewRow = { name: '' }
+          for (const [header, value] of Object.entries(row)) {
+            mapColumnToRow(header.toLowerCase(), value, mapped)
+          }
+          if (mapped.name) artistsToSend.push(mapped)
         }
       }
 
       const res = await fetch('/api/artists/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artists }),
+        body: JSON.stringify({ artists: artistsToSend, format: detectedFormat }),
       })
 
       if (!res.ok) {
@@ -231,16 +194,35 @@ export default function ArtistsImportPage() {
       }
 
       const data = await res.json()
-      setImportResult({ count: data.count, qualification: data.qualification })
+      setImportResult({
+        count: data.count,
+        updated: data.updated,
+        duplicates: data.duplicates,
+        bioEmailsFound: data.bioEmailsFound,
+        format: data.format,
+        qualification: data.qualification,
+      })
       setSuccess(true)
       setTimeout(() => {
         router.push('/artists')
-      }, 4000)
+      }, 5000)
     } catch (err: any) {
       setError(err.message || 'Failed to import artists')
     } finally {
       setImporting(false)
     }
+  }
+
+  const resetUpload = () => {
+    setFile(null)
+    setPreview([])
+    setDetectedFormat(null)
+    setSpotifyPreview(null)
+    setRawRows([])
+    setRawHeaders([])
+    setError('')
+    setSuccess(false)
+    setImportResult(null)
   }
 
   return (
@@ -263,129 +245,204 @@ export default function ArtistsImportPage() {
             <CardHeader>
               <CardTitle>Upload CSV File</CardTitle>
               <CardDescription>
-                Upload a CSV file with artist data. Supported columns listed below.
+                Upload a CSV or TSV file. Auto-detects raw Spotify scrape exports and CrateHQ format.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
               {error && (
                 <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md text-sm flex items-center gap-2">
-                  <AlertCircle className="h-4 w-4" />
+                  <AlertCircle className="h-4 w-4 flex-shrink-0" />
                   {error}
                 </div>
               )}
 
-              {success && (
-                <div className="bg-green-500/15 text-green-500 px-4 py-3 rounded-md text-sm space-y-1">
-                  <div className="flex items-center gap-2">
+              {success && importResult && (
+                <div className="bg-green-500/15 text-green-500 px-4 py-3 rounded-md text-sm space-y-2">
+                  <div className="flex items-center gap-2 font-medium">
                     <CheckCircle className="h-4 w-4" />
-                    {importResult?.count || 0} artists imported successfully!
+                    Import Complete!
                   </div>
-                  {importResult?.qualification && (
-                    <div className="text-xs text-green-400/80 pl-6">
-                      Qualified: {importResult.qualification.qualified} &middot;
-                      Not qualified: {importResult.qualification.not_qualified} &middot;
-                      Review needed: {importResult.qualification.review}
-                      {importResult.qualification.pending > 0 && ` · Pending: ${importResult.qualification.pending}`}
+                  <div className="pl-6 space-y-1 text-xs text-green-400/80">
+                    <div>
+                      New artists: <strong>{importResult.count}</strong>
+                      {(importResult.updated || 0) > 0 && <> &middot; Updated: <strong>{importResult.updated}</strong></>}
+                      {(importResult.duplicates || 0) > 0 && <> &middot; Duplicates merged: <strong>{importResult.duplicates}</strong></>}
                     </div>
-                  )}
-                  <div className="text-xs text-green-400/60 pl-6">Redirecting...</div>
+                    {(importResult.bioEmailsFound || 0) > 0 && (
+                      <div className="text-blue-400">
+                        Bio emails found (free enrichment!): <strong>{importResult.bioEmailsFound}</strong>
+                      </div>
+                    )}
+                    {importResult.qualification && (
+                      <div>
+                        Qualified: {importResult.qualification.qualified} &middot;
+                        Not qualified: {importResult.qualification.not_qualified} &middot;
+                        Review: {importResult.qualification.review}
+                        {importResult.qualification.pending > 0 && ` · Pending: ${importResult.qualification.pending}`}
+                      </div>
+                    )}
+                  </div>
+                  <div className="text-xs text-green-400/60 pl-6">Redirecting to artists page...</div>
                 </div>
               )}
 
-              <div className="space-y-4">
-                <div className="border-2 border-dashed rounded-lg p-12 text-center">
-                  <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <Input
-                    type="file"
-                    accept=".csv"
-                    onChange={handleFileChange}
-                    className="max-w-xs mx-auto"
-                  />
-                  <p className="text-sm text-muted-foreground mt-4">
-                    {file ? `Selected: ${file.name}` : 'Select a CSV file to upload'}
-                  </p>
-                </div>
+              {/* Upload area */}
+              {!detectedFormat && !success && (
+                <div className="space-y-4">
+                  <div className="border-2 border-dashed rounded-lg p-12 text-center">
+                    <Upload className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                    <Input
+                      type="file"
+                      accept=".csv,.tsv,.txt"
+                      onChange={handleFileChange}
+                      className="max-w-xs mx-auto"
+                    />
+                    <p className="text-sm text-muted-foreground mt-4">
+                      Accepts CSV or TSV. Auto-detects raw Spotify scrape exports.
+                    </p>
+                  </div>
 
-                <div className="bg-muted/50 rounded-lg p-4 text-sm">
-                  <h4 className="font-semibold mb-3">Supported CSV Columns</h4>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">REQUIRED</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">name</code> or <code className="bg-background px-1 rounded">artist_name</code></li>
-                      </ul>
-                    </div>
-                    
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">CONTACT INFO</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">email</code></li>
-                        <li>• <code className="bg-background px-1 rounded">website</code> or <code className="bg-background px-1 rounded">url</code></li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">SOCIAL MEDIA URLs</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">instagram_url</code></li>
-                        <li>• <code className="bg-background px-1 rounded">youtube_url</code> <span className="text-green-500">★</span></li>
-                        <li>• <code className="bg-background px-1 rounded">spotify_url</code></li>
-                        <li>• <code className="bg-background px-1 rounded">facebook_url</code></li>
-                        <li>• <code className="bg-background px-1 rounded">twitter_url</code> or <code className="bg-background px-1 rounded">x_url</code></li>
-                        <li>• <code className="bg-background px-1 rounded">tiktok_url</code></li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">SPOTIFY STATS</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">monthly_listeners</code></li>
-                        <li>• <code className="bg-background px-1 rounded">spotify_monthly_listeners</code></li>
-                        <li>• <code className="bg-background px-1 rounded">streams</code></li>
-                        <li>• <code className="bg-background px-1 rounded">streams_last_month</code></li>
-                        <li>• <code className="bg-background px-1 rounded">est_streams_month</code></li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">INSTAGRAM STATS</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">instagram_followers</code></li>
-                        <li>• <code className="bg-background px-1 rounded">ig_followers</code></li>
-                        <li>• <code className="bg-background px-1 rounded">instagram_handle</code></li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">MUSIC DATA</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">track_count</code></li>
-                        <li>• <code className="bg-background px-1 rounded">album_count</code></li>
-                        <li>• <code className="bg-background px-1 rounded">single_count</code></li>
-                        <li>• <code className="bg-background px-1 rounded">genres</code> (comma-separated)</li>
-                      </ul>
-                    </div>
-
-                    <div>
-                      <p className="font-medium text-xs text-muted-foreground mb-1">OTHER</p>
-                      <ul className="space-y-1 text-xs">
-                        <li>• <code className="bg-background px-1 rounded">country</code> (2-letter code)</li>
-                        <li>• <code className="bg-background px-1 rounded">biography</code> or <code className="bg-background px-1 rounded">bio</code></li>
-                      </ul>
+                  <div className="bg-muted/50 rounded-lg p-4 text-sm">
+                    <h4 className="font-semibold mb-3">Supported Formats</h4>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <p className="font-medium text-xs text-muted-foreground mb-1">RAW SPOTIFY SCRAPE (Apify Play Counter)</p>
+                        <p className="text-xs text-muted-foreground">
+                          Direct export from the Apify Spotify Play Counter actor. Contains ~200 columns including
+                          <code className="bg-background px-1 rounded mx-1">monthlyListeners</code>,
+                          <code className="bg-background px-1 rounded mx-1">externalLinks/0/label</code>,
+                          <code className="bg-background px-1 rounded mx-1">biography</code>.
+                          Emails are automatically extracted from biographies.
+                        </p>
+                      </div>
+                      <div>
+                        <p className="font-medium text-xs text-muted-foreground mb-1">CRATEHQ FORMAT</p>
+                        <p className="text-xs text-muted-foreground">
+                          Standard CrateHQ columns:
+                          <code className="bg-background px-1 rounded mx-1">name</code>,
+                          <code className="bg-background px-1 rounded mx-1">spotify_monthly_listeners</code>,
+                          <code className="bg-background px-1 rounded mx-1">track_count</code>,
+                          <code className="bg-background px-1 rounded mx-1">instagram_url</code>,
+                          <code className="bg-background px-1 rounded mx-1">youtube_url</code>, etc.
+                        </p>
+                      </div>
                     </div>
                   </div>
-                  <p className="text-xs text-muted-foreground mt-3">
-                    <span className="text-green-500">★</span> = Critical for enrichment (YouTube has 45% email discovery rate)
-                  </p>
                 </div>
-              </div>
+              )}
 
-              {preview.length > 0 && (
-                <>
+              {/* ── Spotify Raw Format Detection & Preview ── */}
+              {detectedFormat === 'spotify_raw' && spotifyPreview && !success && (
+                <div className="space-y-4">
+                  {/* Format detection banner */}
+                  <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <Badge variant="secondary" className="bg-blue-500/20 text-blue-400">Auto-Detected</Badge>
+                      <span className="font-medium text-sm">{spotifyPreview.formatLabel}</span>
+                    </div>
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
+                      <div className="flex items-center gap-2 text-sm">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <span><strong>{spotifyPreview.totalRows.toLocaleString()}</strong> artists</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Music2 className="h-4 w-4 text-muted-foreground" />
+                        <span><strong>{spotifyPreview.hasSpotifyData.toLocaleString()}</strong> with Spotify data</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Users className="h-4 w-4 text-muted-foreground" />
+                        <span><strong>{spotifyPreview.hasSocialLinks.toLocaleString()}</strong> with social links</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-sm">
+                        <Mail className="h-4 w-4 text-green-500" />
+                        <span className="text-green-500">
+                          <strong>{spotifyPreview.bioEmailsFound}</strong> bio emails found (free!)
+                        </span>
+                      </div>
+                    </div>
+                    {spotifyPreview.bioEmailArtists.length > 0 && (
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Artists with emails in bio: {spotifyPreview.bioEmailArtists.slice(0, 10).join(', ')}
+                        {spotifyPreview.bioEmailArtists.length > 10 && ` + ${spotifyPreview.bioEmailArtists.length - 10} more`}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Preview table */}
                   <div>
-                    <h3 className="font-semibold mb-2">
-                      Preview (showing first 10 rows)
-                    </h3>
+                    <h3 className="font-semibold mb-2">Preview (first 10 rows)</h3>
+                    <div className="border rounded-lg overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Name</TableHead>
+                            <TableHead>Listeners</TableHead>
+                            <TableHead>Top Track Streams</TableHead>
+                            <TableHead>Releases</TableHead>
+                            <TableHead>Bio Email</TableHead>
+                            <TableHead>Instagram</TableHead>
+                            <TableHead>Spotify</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {spotifyPreview.sampleRows.map((row, index) => (
+                            <TableRow key={index}>
+                              <TableCell className="font-medium">
+                                {row.name}
+                                {row.spotify_verified && <Badge variant="secondary" className="ml-1 text-[10px] px-1">Verified</Badge>}
+                              </TableCell>
+                              <TableCell>{row.spotify_monthly_listeners?.toLocaleString() || '—'}</TableCell>
+                              <TableCell>{row.total_top_track_streams?.toLocaleString() || '—'}</TableCell>
+                              <TableCell>{row.track_count || '—'}</TableCell>
+                              <TableCell>
+                                {row.email ? (
+                                  <span className="text-green-500 text-xs">{row.email}</span>
+                                ) : '—'}
+                              </TableCell>
+                              <TableCell className="text-xs">
+                                {row.instagram_handle || '—'}
+                              </TableCell>
+                              <TableCell className="text-xs truncate max-w-[150px]">
+                                {row.spotify_url ? 'Yes' : '—'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+
+                  {/* Import actions */}
+                  <div className="flex justify-between items-center">
+                    <p className="text-sm text-muted-foreground">
+                      Will extract: artist names, Spotify data, social links, biographies, and emails from bios.
+                      Duplicates will be merged (matched by Spotify ID or name).
+                    </p>
+                    <div className="flex gap-2">
+                      <Button variant="outline" onClick={resetUpload}>Cancel</Button>
+                      <Button onClick={handleImport} disabled={importing}>
+                        {importing ? (
+                          <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
+                        ) : (
+                          <><FileUp className="h-4 w-4 mr-2" /> Import {spotifyPreview.totalRows.toLocaleString()} Artists</>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* ── CrateHQ Format Preview ── */}
+              {detectedFormat === 'cratehq' && preview.length > 0 && !success && (
+                <>
+                  <div className="bg-muted/50 border rounded-lg p-3 flex items-center gap-2">
+                    <Badge variant="secondary">Auto-Detected</Badge>
+                    <span className="text-sm font-medium">CrateHQ Format</span>
+                    <span className="text-sm text-muted-foreground">— {rawRows.length.toLocaleString()} artists</span>
+                  </div>
+
+                  <div>
+                    <h3 className="font-semibold mb-2">Preview (first 10 rows)</h3>
                     <div className="border rounded-lg overflow-x-auto">
                       <Table>
                         <TableHeader>
@@ -404,21 +461,13 @@ export default function ArtistsImportPage() {
                           {preview.map((row, index) => (
                             <TableRow key={index}>
                               <TableCell className="font-medium">{row.name}</TableCell>
-                              <TableCell>
-                                {row.spotify_monthly_listeners?.toLocaleString() || '—'}
-                              </TableCell>
-                              <TableCell>
-                                {row.streams_last_month?.toLocaleString() || '—'}
-                              </TableCell>
-                              <TableCell>
-                                {row.track_count?.toLocaleString() || '—'}
-                              </TableCell>
+                              <TableCell>{row.spotify_monthly_listeners?.toLocaleString() || '—'}</TableCell>
+                              <TableCell>{row.streams_last_month?.toLocaleString() || '—'}</TableCell>
+                              <TableCell>{row.track_count?.toLocaleString() || '—'}</TableCell>
                               <TableCell>{row.country || '—'}</TableCell>
                               <TableCell className="text-sm">{row.email || '—'}</TableCell>
                               <TableCell>{row.instagram_handle || '—'}</TableCell>
-                              <TableCell className="text-sm">
-                                {row.genres?.join(', ') || '—'}
-                              </TableCell>
+                              <TableCell className="text-sm">{row.genres?.join(', ') || '—'}</TableCell>
                             </TableRow>
                           ))}
                         </TableBody>
@@ -427,21 +476,37 @@ export default function ArtistsImportPage() {
                   </div>
 
                   <div className="flex justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      onClick={() => {
-                        setFile(null)
-                        setPreview([])
-                      }}
-                    >
-                      Cancel
-                    </Button>
+                    <Button variant="outline" onClick={resetUpload}>Cancel</Button>
                     <Button onClick={handleImport} disabled={importing}>
-                      <FileUp className="h-4 w-4 mr-2" />
-                      {importing ? 'Importing...' : `Import ${preview.length}+ Artists`}
+                      {importing ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
+                      ) : (
+                        <><FileUp className="h-4 w-4 mr-2" /> Import {rawRows.length.toLocaleString()} Artists</>
+                      )}
                     </Button>
                   </div>
                 </>
+              )}
+
+              {/* CrateHQ format with no preview rows but detected */}
+              {detectedFormat === 'cratehq' && preview.length === 0 && rawRows.length > 0 && !success && (
+                <div className="space-y-4">
+                  <div className="bg-muted/50 border rounded-lg p-3 flex items-center gap-2">
+                    <Badge variant="secondary">Auto-Detected</Badge>
+                    <span className="text-sm font-medium">CrateHQ Format</span>
+                    <span className="text-sm text-muted-foreground">— {rawRows.length.toLocaleString()} rows</span>
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={resetUpload}>Cancel</Button>
+                    <Button onClick={handleImport} disabled={importing}>
+                      {importing ? (
+                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
+                      ) : (
+                        <><FileUp className="h-4 w-4 mr-2" /> Import {rawRows.length.toLocaleString()} Artists</>
+                      )}
+                    </Button>
+                  </div>
+                </div>
               )}
             </CardContent>
           </Card>

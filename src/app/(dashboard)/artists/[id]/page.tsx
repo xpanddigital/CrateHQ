@@ -23,11 +23,10 @@ import { estimateCatalogValue } from '@/lib/valuation/estimator'
 
 // Extended type for edit mode with temporary URL fields
 interface ArtistEditData extends Partial<Artist> {
-  instagram_url?: string
-  youtube_url?: string
-  facebook_url?: string
-  twitter_url?: string
-  tiktok_url?: string
+  instagram_url?: string | null
+  youtube_url?: string | null
+  facebook_url?: string | null
+  twitter_url?: string | null
 }
 
 export default function ArtistDetailPage() {
