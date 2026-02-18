@@ -11,6 +11,7 @@ interface EnrichmentStep {
   label: string
   status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
   emails_found: string[]
+  rejected_emails?: Array<{ email: string; reason: string }>
   best_email: string
   confidence: number
   error?: string
@@ -125,6 +126,13 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                           <CheckCircle className="h-3 w-3 text-green-500" />
                           <span className="text-xs text-green-500 font-medium">
                             Email found: {log.email_found}
+                          </span>
+                        </>
+                      ) : log.error_details?.includes('Rejected emails:') ? (
+                        <>
+                          <AlertCircle className="h-3 w-3 text-yellow-500" />
+                          <span className="text-xs text-yellow-500">
+                            Emails found but rejected (junk)
                           </span>
                         </>
                       ) : (
@@ -252,6 +260,23 @@ export function EnrichmentLogViewer({ logs }: EnrichmentLogViewerProps) {
                               <Badge variant="outline" className="text-xs">
                                 {(step.confidence * 100).toFixed(0)}% confidence
                               </Badge>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Rejected emails */}
+                      {step.rejected_emails && step.rejected_emails.length > 0 && (
+                        <div className="space-y-1">
+                          <p className="text-xs text-destructive font-medium">
+                            Rejected {step.rejected_emails.length} email(s):
+                          </p>
+                          {step.rejected_emails.map((r, rIdx) => (
+                            <div key={rIdx} className="flex items-center gap-2">
+                              <span className="text-xs font-mono bg-destructive/10 text-destructive px-2 py-0.5 rounded line-through">
+                                {r.email}
+                              </span>
+                              <span className="text-xs text-destructive/70">{r.reason}</span>
                             </div>
                           ))}
                         </div>

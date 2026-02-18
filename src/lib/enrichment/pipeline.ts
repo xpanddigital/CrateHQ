@@ -35,6 +35,7 @@ import {
   findWebsiteUrl,
 } from './apify-fetch'
 import { discoverYouTubeChannel, fetchYouTubeDescription } from './youtube-api'
+import { filterEmails } from '@/lib/qualification/email-filter'
 
 // ============================================================
 // TYPES
@@ -45,6 +46,7 @@ export interface EnrichmentStep {
   label: string
   status: 'pending' | 'running' | 'success' | 'failed' | 'skipped'
   emails_found: string[]
+  rejected_emails?: Array<{ email: string; reason: string }>
   best_email: string
   confidence: number
   error?: string
@@ -64,6 +66,7 @@ export interface EnrichmentSummary {
   email_confidence: number
   email_source: string
   all_emails: Array<{ email: string; source: string; confidence: number }>
+  all_rejected_emails: Array<{ email: string; source: string; reason: string }>
   steps: EnrichmentStep[]
   total_duration_ms: number
   is_contactable: boolean
@@ -1386,6 +1389,7 @@ export async function enrichArtist(
   ]
 
   const allEmails: Array<{ email: string; source: string; confidence: number }> = []
+  const allRejectedEmails: Array<{ email: string; source: string; reason: string }> = []
   let bestEmail = ''
   let bestConfidence = 0
   let bestSource = ''
@@ -1496,27 +1500,46 @@ export async function enrichArtist(
       // If it found nothing, mark as failed but continue.
       if (step.method === 'youtube_discovery') {
         if (step.emails_found.length > 0) {
-          step.status = 'success'
-          step.best_email = step.emails_found[0]
-          console.log(`[Step 0 Success] Found email in YouTube description: ${step.emails_found.join(', ')}`)
+          // Quality filter: separate valid from junk emails
+          const { valid, rejected } = filterEmails(step.emails_found)
+          step.rejected_emails = rejected
 
-          for (const email of step.emails_found) {
-            allEmails.push({ email, source: 'youtube_discovery', confidence: result.confidence })
-          }
-          if (result.confidence > bestConfidence) {
-            bestEmail = step.emails_found[0]
-            bestConfidence = result.confidence
-            bestSource = 'youtube_discovery'
+          for (const r of rejected) {
+            console.log(`[Step 0] Email REJECTED: ${r.email} — ${r.reason}`)
+            allRejectedEmails.push({ email: r.email, source: 'youtube_discovery', reason: r.reason })
           }
 
-          onProgress?.(step, i)
+          // Replace emails_found with only valid ones
+          step.emails_found = valid
 
-          // Early termination
-          console.log('[Early Termination] Email found in YouTube description, skipping remaining steps')
-          for (let j = i + 1; j < steps.length; j++) {
-            steps[j].status = 'skipped'
+          if (valid.length > 0) {
+            step.status = 'success'
+            step.best_email = valid[0]
+            console.log(`[Step 0 Success] Found valid email in YouTube description: ${valid.join(', ')}`)
+
+            for (const email of valid) {
+              allEmails.push({ email, source: 'youtube_discovery', confidence: result.confidence })
+            }
+            if (result.confidence > bestConfidence) {
+              bestEmail = valid[0]
+              bestConfidence = result.confidence
+              bestSource = 'youtube_discovery'
+            }
+
+            onProgress?.(step, i)
+
+            // Early termination — valid email found
+            console.log('[Early Termination] Valid email found in YouTube description, skipping remaining steps')
+            for (let j = i + 1; j < steps.length; j++) {
+              steps[j].status = 'skipped'
+            }
+            break
+          } else {
+            // All emails were rejected — continue to next step
+            step.status = 'failed'
+            step.error_details = `Found ${rejected.length} email(s) but all rejected by quality filter`
+            console.log(`[Step 0] All ${rejected.length} email(s) rejected — continuing pipeline`)
           }
-          break
         } else if (discoveredYouTubeUrl) {
           step.status = 'success'
           console.log(`[Step 0] YouTube channel discovered: ${discoveredYouTubeUrl} — proceeding to Step 1 for deep extraction`)
@@ -1537,29 +1560,48 @@ export async function enrichArtist(
       }
 
       if (step.emails_found.length > 0) {
-        step.status = 'success'
-        step.best_email = step.emails_found[0]
+        // Quality filter: separate valid from junk emails
+        const { valid, rejected } = filterEmails(step.emails_found)
+        step.rejected_emails = rejected
 
-        console.log(`[Step ${i} Success] Found: ${step.emails_found.join(', ')} via ${step.apify_actor || 'direct'}`)
-
-        for (const email of step.emails_found) {
-          allEmails.push({ email, source: step.method, confidence: result.confidence })
+        for (const r of rejected) {
+          console.log(`[Step ${i}] Email REJECTED: ${r.email} — ${r.reason}`)
+          allRejectedEmails.push({ email: r.email, source: step.method, reason: r.reason })
         }
 
-        if (result.confidence > bestConfidence) {
-          bestEmail = step.emails_found[0]
-          bestConfidence = result.confidence
-          bestSource = step.method
-        }
+        // Replace emails_found with only valid ones
+        step.emails_found = valid
 
-        onProgress?.(step, i)
+        if (valid.length > 0) {
+          step.status = 'success'
+          step.best_email = valid[0]
 
-        // Early termination
-        console.log('[Early Termination] Email found, skipping remaining steps')
-        for (let j = i + 1; j < steps.length; j++) {
-          steps[j].status = 'skipped'
+          console.log(`[Step ${i} Success] Found valid: ${valid.join(', ')} via ${step.apify_actor || 'direct'}`)
+
+          for (const email of valid) {
+            allEmails.push({ email, source: step.method, confidence: result.confidence })
+          }
+
+          if (result.confidence > bestConfidence) {
+            bestEmail = valid[0]
+            bestConfidence = result.confidence
+            bestSource = step.method
+          }
+
+          onProgress?.(step, i)
+
+          // Early termination — valid email found
+          console.log('[Early Termination] Valid email found, skipping remaining steps')
+          for (let j = i + 1; j < steps.length; j++) {
+            steps[j].status = 'skipped'
+          }
+          break
+        } else {
+          // All emails were rejected — continue to next step
+          step.status = 'failed'
+          step.error_details = `Found ${rejected.length} email(s) but all rejected by quality filter`
+          console.log(`[Step ${i}] All ${rejected.length} email(s) rejected — continuing pipeline`)
         }
-        break
       } else {
         step.status = 'failed'
         console.log(`[Step ${i} Failed] No email found`)
@@ -1592,6 +1634,7 @@ export async function enrichArtist(
     email_confidence: bestConfidence,
     email_source: bestSource,
     all_emails: allEmails,
+    all_rejected_emails: allRejectedEmails,
     steps,
     total_duration_ms: Date.now() - startTime,
     is_contactable: !!bestEmail,
