@@ -230,11 +230,11 @@ export default function ArtistsPage() {
     }
   }
 
-  const [valuationProgress, setValuationProgress] = useState<{ done: number; total: number } | null>(null)
+  const [valuationProgress, setValuationProgress] = useState<{ done: number; total: number; valuated: number; skipped: number } | null>(null)
 
   const runPaginatedValuation = async (revalueAll: boolean) => {
     setValuating(true)
-    setValuationProgress(null)
+    setValuationProgress({ done: 0, total: 0, valuated: 0, skipped: 0 })
     let offset = 0
     let totalValuated = 0
     let totalSkipped = 0
@@ -258,7 +258,10 @@ export default function ArtistsPage() {
         hasMore = data.hasMore
         offset = data.nextOffset || 0
 
-        setValuationProgress({ done: offset > totalCount ? totalCount : offset, total: totalCount })
+        const done = Math.min(offset, totalCount)
+        setValuationProgress({ done, total: totalCount, valuated: totalValuated, skipped: totalSkipped })
+        // Yield to React render cycle so the UI actually updates
+        await new Promise(r => setTimeout(r, 0))
       }
 
       toast({
@@ -517,7 +520,7 @@ export default function ArtistsPage() {
             disabled={valuating}
           >
             <DollarSign className="h-4 w-4 mr-1" />
-            {valuating && valuationProgress ? `${valuationProgress.done.toLocaleString()} / ${valuationProgress.total.toLocaleString()}` : 'Valuate All'}
+            Valuate All
           </Button>
           <Button
             variant="outline"
@@ -526,7 +529,7 @@ export default function ArtistsPage() {
             disabled={valuating}
           >
             <DollarSign className="h-4 w-4 mr-1" />
-            {valuating && valuationProgress ? `${valuationProgress.done.toLocaleString()} / ${valuationProgress.total.toLocaleString()}` : 'Revalue All'}
+            Revalue All
           </Button>
           <Button
             variant="outline"
@@ -557,6 +560,30 @@ export default function ArtistsPage() {
           </Button>
         </div>
       </Card>
+
+      {/* Valuation Progress Banner */}
+      {valuationProgress && valuationProgress.total > 0 && (
+        <Card className="p-4 border-blue-500/30 bg-blue-500/5">
+          <div className="flex items-center gap-3 mb-2">
+            <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+            <span className="font-medium text-sm">
+              Valuating artists: {valuationProgress.done.toLocaleString()} / {valuationProgress.total.toLocaleString()}
+            </span>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {valuationProgress.valuated.toLocaleString()} valuated &middot; {valuationProgress.skipped.toLocaleString()} skipped
+            </span>
+          </div>
+          <div className="w-full bg-muted rounded-full h-2">
+            <div
+              className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${Math.round((valuationProgress.done / valuationProgress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {Math.round((valuationProgress.done / valuationProgress.total) * 100)}% complete — processing 500 artists per batch
+          </p>
+        </Card>
+      )}
 
       {/* Data Health Panel */}
       {showDataHealth && healthData && (
