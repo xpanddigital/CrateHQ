@@ -11,6 +11,7 @@
 
 import Papa from 'papaparse'
 import { checkEmailQuality } from '@/lib/qualification/email-filter'
+import { isGhostRow, isValidEmailFormat } from '@/lib/cleanup/data-cleanup'
 
 // ─── Format Detection ────────────────────────────────────────────────
 
@@ -460,6 +461,7 @@ export interface ImportPreviewSummary {
   format: ImportFormat
   formatLabel: string
   totalRows: number
+  ghostsFiltered: number
   sampleRows: TransformedArtist[]
   bioEmailsFound: number
   bioEmailArtists: string[]
@@ -478,38 +480,55 @@ export function generatePreviewSummary(
       ? 'CrateHQ Format'
       : 'Unknown Format'
 
-  if (format === 'spotify_raw') {
-    const allTransformed = rows.map(transformSpotifyRaw)
-    const sampleRows = allTransformed.slice(0, maxPreview)
-    const bioEmailArtists = allTransformed.filter(a => a.bio_emails && a.bio_emails.length > 0)
-    const bioEmailsFound = allTransformed.reduce((sum, a) => sum + (a.bio_emails?.length || 0), 0)
+  const transformer = format === 'spotify_raw' ? transformSpotifyRaw : transformCrateHQ
+  const allTransformed = rows.map(transformer).filter(a => a.name)
 
-    return {
-      format,
-      formatLabel,
-      totalRows: rows.length,
-      sampleRows,
-      bioEmailsFound,
-      bioEmailArtists: bioEmailArtists.map(a => a.name),
-      hasSpotifyData: allTransformed.filter(a => a.spotify_monthly_listeners > 0).length,
-      hasSocialLinks: allTransformed.filter(a => Object.keys(a.social_links).length > 1).length,
+  // Filter ghost rows and validate emails
+  let ghostsFiltered = 0
+  const cleaned: TransformedArtist[] = []
+
+  for (const artist of allTransformed) {
+    const ghostCheck = isGhostRow({
+      name: artist.name,
+      spotify_monthly_listeners: artist.spotify_monthly_listeners,
+      track_count: artist.track_count,
+      streams_last_month: artist.streams_last_month,
+      instagram_url: artist.instagram_url,
+      spotify_url: artist.spotify_url,
+      youtube_url: artist.youtube_url,
+      facebook_url: artist.facebook_url,
+      twitter_url: artist.twitter_url,
+      website: artist.website,
+    })
+    if (ghostCheck.isGhost) {
+      ghostsFiltered++
+      continue
     }
+
+    // Validate email format
+    if (artist.email && !isValidEmailFormat(artist.email)) {
+      artist.email = null
+      artist.email_source = null
+      artist.email_confidence = 0
+      artist.is_contactable = false
+    }
+
+    cleaned.push(artist)
   }
 
-  // CrateHQ / ChatGPT format
-  const allTransformed = rows.map(transformCrateHQ).filter(a => a.name)
-  const sampleRows = allTransformed.slice(0, maxPreview)
-  const bioEmailArtists = allTransformed.filter(a => a.bio_emails && a.bio_emails.length > 0)
-  const bioEmailsFound = allTransformed.reduce((sum, a) => sum + (a.bio_emails?.length || 0), 0)
+  const sampleRows = cleaned.slice(0, maxPreview)
+  const bioEmailArtists = cleaned.filter(a => a.bio_emails && a.bio_emails.length > 0)
+  const bioEmailsFound = cleaned.reduce((sum, a) => sum + (a.bio_emails?.length || 0), 0)
 
   return {
     format,
     formatLabel,
-    totalRows: allTransformed.length,
+    totalRows: cleaned.length,
+    ghostsFiltered,
     sampleRows,
     bioEmailsFound,
     bioEmailArtists: bioEmailArtists.map(a => a.name),
-    hasSpotifyData: allTransformed.filter(a => a.spotify_monthly_listeners > 0).length,
-    hasSocialLinks: allTransformed.filter(a => Object.keys(a.social_links).length > 1).length,
+    hasSpotifyData: cleaned.filter(a => a.spotify_monthly_listeners > 0).length,
+    hasSocialLinks: cleaned.filter(a => Object.keys(a.social_links).length > 1).length,
   }
 }

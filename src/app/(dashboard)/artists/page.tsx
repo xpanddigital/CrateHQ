@@ -18,7 +18,7 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { TagBadge } from '@/components/shared/TagBadge'
-import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2, Briefcase, ShieldCheck, ShieldX, ShieldAlert, RefreshCw } from 'lucide-react'
+import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2, Briefcase, ShieldCheck, ShieldX, ShieldAlert, RefreshCw, HeartPulse, Ghost, MailX, Mail, Loader2 } from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 import { Artist } from '@/types/database'
 import { formatNumber, formatDate, formatCurrency } from '@/lib/utils'
@@ -44,6 +44,22 @@ export default function ArtistsPage() {
   const [unenrichedCount, setUnenrichedCount] = useState(0)
   const [qualStats, setQualStats] = useState({ total: 0, qualified: 0, not_qualified: 0, review: 0, pending: 0 })
   const [runningQualification, setRunningQualification] = useState(false)
+  const [showDataHealth, setShowDataHealth] = useState(false)
+  const [healthLoading, setHealthLoading] = useState(false)
+  const [healthRunning, setHealthRunning] = useState(false)
+  const [healthData, setHealthData] = useState<{
+    totalScanned: number
+    ghosts: { count: number; details: Array<{ id: string; name: string; reason: string }> }
+    invalidEmails: { count: number; details: Array<{ id: string; name: string; email: string; reason: string }> }
+    junkEmails: { count: number; details: Array<{ id: string; name: string; email: string; reason: string }> }
+    bioEmailCandidates: { count: number; details: Array<{ id: string; name: string; emails: string[] }> }
+  } | null>(null)
+  const [healthResult, setHealthResult] = useState<{
+    ghostsDeleted: number
+    invalidEmailsCleaned: number
+    junkEmailsCleaned: number
+    bioEmailsExtracted: number
+  } | null>(null)
   const { toast } = useToast()
 
   const fetchArtists = useCallback(async () => {
@@ -124,6 +140,57 @@ export default function ArtistsPage() {
       toast({ title: 'Error', description: 'Failed to run qualification', variant: 'destructive' })
     } finally {
       setRunningQualification(false)
+    }
+  }
+
+  const handleScanHealth = async () => {
+    setHealthLoading(true)
+    setHealthResult(null)
+    try {
+      const res = await fetch('/api/artists/cleanup')
+      const data = await res.json()
+      if (data.dryRun) {
+        setHealthData(data)
+        setShowDataHealth(true)
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to scan data health', variant: 'destructive' })
+    } finally {
+      setHealthLoading(false)
+    }
+  }
+
+  const handleRunCleanup = async () => {
+    if (!confirm('This will delete ghost rows, clear invalid emails, and extract bio emails. Continue?')) return
+    setHealthRunning(true)
+    try {
+      const res = await fetch('/api/artists/cleanup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      const data = await res.json()
+      if (data.success) {
+        setHealthResult({
+          ghostsDeleted: data.ghostsDeleted,
+          invalidEmailsCleaned: data.invalidEmailsCleaned,
+          junkEmailsCleaned: data.junkEmailsCleaned,
+          bioEmailsExtracted: data.bioEmailsExtracted,
+        })
+        toast({
+          title: 'Cleanup complete',
+          description: `Deleted ${data.ghostsDeleted} ghosts, cleaned ${data.invalidEmailsCleaned + data.junkEmailsCleaned} emails, extracted ${data.bioEmailsExtracted} bio emails`,
+        })
+        fetchArtists()
+        // Re-scan to update counts
+        const scanRes = await fetch('/api/artists/cleanup')
+        const scanData = await scanRes.json()
+        if (scanData.dryRun) setHealthData(scanData)
+      }
+    } catch (error) {
+      toast({ title: 'Error', description: 'Cleanup failed', variant: 'destructive' })
+    } finally {
+      setHealthRunning(false)
     }
   }
 
@@ -470,8 +537,134 @@ export default function ArtistsPage() {
             <CheckCircle className="h-4 w-4 mr-1" />
             {loadingUnenriched ? 'Loading...' : `Enrich Qualified (${unenrichedCount})`}
           </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleScanHealth}
+            disabled={healthLoading}
+          >
+            <HeartPulse className={`h-4 w-4 mr-1 ${healthLoading ? 'animate-pulse' : ''}`} />
+            {healthLoading ? 'Scanning...' : 'Data Health'}
+          </Button>
         </div>
       </Card>
+
+      {/* Data Health Panel */}
+      {showDataHealth && healthData && (
+        <Card className="p-4 border-blue-500/30 bg-blue-500/5">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-2">
+              <HeartPulse className="h-5 w-5 text-blue-500" />
+              <h3 className="font-semibold">Data Health Report</h3>
+              <span className="text-xs text-muted-foreground">({healthData.totalScanned.toLocaleString()} artists scanned)</span>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleRunCleanup}
+                disabled={healthRunning || (healthData.ghosts.count === 0 && healthData.invalidEmails.count === 0 && healthData.junkEmails.count === 0 && healthData.bioEmailCandidates.count === 0)}
+              >
+                {healthRunning ? <><Loader2 className="h-3 w-3 mr-1 animate-spin" /> Running...</> : 'Run Cleanup'}
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => setShowDataHealth(false)}>Close</Button>
+            </div>
+          </div>
+
+          {healthResult && (
+            <div className="bg-green-500/10 border border-green-500/30 rounded-lg p-3 mb-4 text-sm text-green-500">
+              Cleanup complete: {healthResult.ghostsDeleted} ghosts deleted, {healthResult.invalidEmailsCleaned + healthResult.junkEmailsCleaned} emails cleaned, {healthResult.bioEmailsExtracted} bio emails extracted
+            </div>
+          )}
+
+          <div className="grid gap-3 grid-cols-2 md:grid-cols-4 mb-4">
+            <div className="flex items-center gap-2 p-2 rounded bg-background">
+              <Ghost className="h-4 w-4 text-red-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Ghost Rows</p>
+                <p className="text-lg font-bold text-red-500">{healthData.ghosts.count}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded bg-background">
+              <MailX className="h-4 w-4 text-orange-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Invalid Emails</p>
+                <p className="text-lg font-bold text-orange-500">{healthData.invalidEmails.count}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded bg-background">
+              <XCircle className="h-4 w-4 text-yellow-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Junk Emails</p>
+                <p className="text-lg font-bold text-yellow-500">{healthData.junkEmails.count}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 p-2 rounded bg-background">
+              <Mail className="h-4 w-4 text-green-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Bio Emails Available</p>
+                <p className="text-lg font-bold text-green-500">{healthData.bioEmailCandidates.count}</p>
+              </div>
+            </div>
+          </div>
+
+          {/* Details */}
+          <div className="space-y-3 text-xs max-h-60 overflow-y-auto">
+            {healthData.ghosts.count > 0 && (
+              <div>
+                <p className="font-medium text-red-400 mb-1">Ghost Rows (will be deleted):</p>
+                <div className="space-y-0.5 pl-2">
+                  {healthData.ghosts.details.slice(0, 20).map(g => (
+                    <p key={g.id} className="text-muted-foreground">&ldquo;{g.name.slice(0, 60)}&rdquo; — {g.reason}</p>
+                  ))}
+                  {healthData.ghosts.details.length > 20 && (
+                    <p className="text-muted-foreground">+ {healthData.ghosts.details.length - 20} more</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {healthData.invalidEmails.count > 0 && (
+              <div>
+                <p className="font-medium text-orange-400 mb-1">Invalid Emails (not email format):</p>
+                <div className="space-y-0.5 pl-2">
+                  {healthData.invalidEmails.details.slice(0, 10).map(e => (
+                    <p key={e.id} className="text-muted-foreground">{e.name}: &ldquo;{e.email}&rdquo;</p>
+                  ))}
+                  {healthData.invalidEmails.details.length > 10 && (
+                    <p className="text-muted-foreground">+ {healthData.invalidEmails.details.length - 10} more</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {healthData.junkEmails.count > 0 && (
+              <div>
+                <p className="font-medium text-yellow-400 mb-1">Junk Emails (will be cleared):</p>
+                <div className="space-y-0.5 pl-2">
+                  {healthData.junkEmails.details.slice(0, 10).map(e => (
+                    <p key={e.id} className="text-muted-foreground">{e.name}: {e.email} — {e.reason}</p>
+                  ))}
+                  {healthData.junkEmails.details.length > 10 && (
+                    <p className="text-muted-foreground">+ {healthData.junkEmails.details.length - 10} more</p>
+                  )}
+                </div>
+              </div>
+            )}
+            {healthData.bioEmailCandidates.count > 0 && (
+              <div>
+                <p className="font-medium text-green-400 mb-1">Bio Emails (free enrichment):</p>
+                <div className="space-y-0.5 pl-2">
+                  {healthData.bioEmailCandidates.details.slice(0, 10).map(e => (
+                    <p key={e.id} className="text-muted-foreground">{e.name}: {e.emails.join(', ')}</p>
+                  ))}
+                  {healthData.bioEmailCandidates.details.length > 10 && (
+                    <p className="text-muted-foreground">+ {healthData.bioEmailCandidates.details.length - 10} more</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+      )}
 
       {/* Qualification Stats */}
       {qualStats.total > 0 && (

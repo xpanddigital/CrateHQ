@@ -14,22 +14,32 @@
 const REJECTED_EXACT = [
   'user@domain.com',
   'email@email.com',
+  'realhuman@email.com',
   'privacypolicy@wmg.com',
+  'info@wikimedia.org',
+  'info@viberate.com',
+  'info@ticketweb.com',
 ]
 
 // ---- DOMAIN-LEVEL (reject ANY email @these domains) ----
 const REJECTED_DOMAINS = [
   'wmg.com',
+  'wm.com',
   'umgstores.com',
   'kontrabandstores.com',
   'sonymusic.com',
   'umusic.com',
   'universalmusic.com',
   'warnerrecords.com',
+  'emeraldfulfillment.com',
+  'bravadostores.com',
   'merchbar.com',
   'shopify.com',
   'bigcartel.com',
   'bandmerch.com',
+  'wikimedia.org',
+  'viberate.com',
+  'ticketweb.com',
   'example.com',
   'test.com',
   'domain.com',
@@ -139,6 +149,15 @@ export function checkEmailQuality(email: string): EmailQualityResult {
 
   if (!localPart || !domain || !domain.includes('.')) {
     return { accepted: false, reason: 'Invalid email format' }
+  }
+
+  // 0. Short/gibberish email check
+  const domainBase = domain.split('.')[0]
+  if (localPart.replace(/\./g, '').length <= 2 && domainBase.length <= 4) {
+    return { accepted: false, reason: 'Email too short — likely garbage data' }
+  }
+  if (lower.length < 8) {
+    return { accepted: false, reason: 'Email too short — likely garbage data' }
   }
 
   // 1. Exact match

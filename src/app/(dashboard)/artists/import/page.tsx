@@ -20,6 +20,7 @@ import {
   type ImportPreviewSummary,
   type TransformedArtist,
 } from '@/lib/import/spotify-transformer'
+import { isGhostRow, isValidEmailFormat } from '@/lib/cleanup/data-cleanup'
 
 export default function ArtistsImportPage() {
   const router = useRouter()
@@ -89,13 +90,34 @@ export default function ArtistsImportPage() {
     setError('')
 
     try {
-      let artistsToSend: any[]
+      const transformer = detectedFormat === 'spotify_raw' ? transformSpotifyRaw : transformCrateHQ
+      const allTransformed = rawRows.map(transformer).filter(a => a.name)
 
-      if (detectedFormat === 'spotify_raw') {
-        artistsToSend = rawRows.map(transformSpotifyRaw).filter(a => a.name)
-      } else {
-        artistsToSend = rawRows.map(transformCrateHQ).filter(a => a.name)
-      }
+      // Filter ghost rows and validate emails
+      const artistsToSend = allTransformed.filter(artist => {
+        const ghostCheck = isGhostRow({
+          name: artist.name,
+          spotify_monthly_listeners: artist.spotify_monthly_listeners,
+          track_count: artist.track_count,
+          streams_last_month: artist.streams_last_month,
+          instagram_url: artist.instagram_url,
+          spotify_url: artist.spotify_url,
+          youtube_url: artist.youtube_url,
+          facebook_url: artist.facebook_url,
+          twitter_url: artist.twitter_url,
+          website: artist.website,
+        })
+        if (ghostCheck.isGhost) return false
+
+        if (artist.email && !isValidEmailFormat(artist.email)) {
+          artist.email = null
+          artist.email_source = null
+          artist.email_confidence = 0
+          artist.is_contactable = false
+        }
+
+        return true
+      })
 
       const res = await fetch('/api/artists/import', {
         method: 'POST',
@@ -266,6 +288,14 @@ export default function ArtistsImportPage() {
                         <Users className="h-4 w-4 text-muted-foreground" />
                         <span><strong>{previewSummary.hasSocialLinks.toLocaleString()}</strong> with social links</span>
                       </div>
+                      {previewSummary.ghostsFiltered > 0 && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <AlertCircle className="h-4 w-4 text-yellow-500" />
+                          <span className="text-yellow-500">
+                            <strong>{previewSummary.ghostsFiltered}</strong> ghost rows filtered
+                          </span>
+                        </div>
+                      )}
                       {previewSummary.bioEmailsFound > 0 && (
                         <div className="flex items-center gap-2 text-sm">
                           <Mail className="h-4 w-4 text-green-500" />
