@@ -28,6 +28,14 @@ interface EnrichmentLog {
   created_at: string
   run_by: string
   scout?: { full_name: string }
+  artist?: {
+    spotify_url: string | null
+    website: string | null
+    instagram_handle: string | null
+    social_links: Record<string, string> | null
+    management_company: string | null
+    booking_agency: string | null
+  }
 }
 
 export default function EnrichmentLogsPage() {
@@ -183,6 +191,12 @@ export default function EnrichmentLogsPage() {
       'Error Details',
       'Run By',
       'Created At',
+      'Spotify URL',
+      'Instagram URL',
+      'YouTube URL',
+      'Website',
+      'Management Company',
+      'Booking Agency',
     ]
 
     const rows = filteredLogs.map(log => {
@@ -217,10 +231,17 @@ export default function EnrichmentLogsPage() {
         }
       }
 
+      const sl = log.artist?.social_links || {}
       row.push(
         log.error_details || '',
         log.scout?.full_name || 'Unknown',
-        log.created_at
+        log.created_at,
+        log.artist?.spotify_url || sl.spotify || '',
+        sl.instagram_url || sl.instagram || (log.artist?.instagram_handle ? `https://www.instagram.com/${log.artist.instagram_handle}/` : ''),
+        sl.youtube || sl.youtube_url || '',
+        log.artist?.website || sl.website || '',
+        log.artist?.management_company || '',
+        log.artist?.booking_agency || '',
       )
 
       return row

@@ -65,15 +65,23 @@ export async function GET(request: NextRequest) {
 
     const isAdmin = profile?.role === 'admin'
 
-    // Fetch enrichment logs
+    // Fetch enrichment logs with artist data for full export
     const query = supabase
       .from('enrichment_logs')
       .select(`
         *,
-        scout:profiles!run_by(full_name, email)
+        scout:profiles!run_by(full_name, email),
+        artist:artists!artist_id(
+          spotify_url,
+          website,
+          instagram_handle,
+          social_links,
+          management_company,
+          booking_agency
+        )
       `)
       .order('created_at', { ascending: false })
-      .limit(100)
+      .limit(10000)
 
     // Scouts see only their logs, admins see all
     if (!isAdmin) {
