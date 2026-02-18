@@ -14,45 +14,23 @@ import {
   detectFormat,
   parseDelimitedText,
   transformSpotifyRaw,
+  transformCrateHQ,
   generatePreviewSummary,
   type ImportFormat,
   type ImportPreviewSummary,
   type TransformedArtist,
 } from '@/lib/import/spotify-transformer'
 
-interface PreviewRow {
-  name: string
-  email?: string
-  instagram_handle?: string
-  instagram_url?: string
-  instagram_followers?: number
-  website?: string
-  spotify_url?: string
-  spotify_monthly_listeners?: number
-  streams_last_month?: number
-  track_count?: number
-  genres?: string[]
-  country?: string
-  facebook_url?: string
-  twitter_url?: string
-  tiktok_url?: string
-  youtube_url?: string
-  biography?: string
-}
-
 export default function ArtistsImportPage() {
   const router = useRouter()
   const [file, setFile] = useState<File | null>(null)
-  const [preview, setPreview] = useState<PreviewRow[]>([])
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
 
-  // New state for auto-detection
   const [detectedFormat, setDetectedFormat] = useState<ImportFormat | null>(null)
-  const [spotifyPreview, setSpotifyPreview] = useState<ImportPreviewSummary | null>(null)
+  const [previewSummary, setPreviewSummary] = useState<ImportPreviewSummary | null>(null)
   const [rawRows, setRawRows] = useState<Record<string, string>[]>([])
-  const [rawHeaders, setRawHeaders] = useState<string[]>([])
 
   const [importResult, setImportResult] = useState<{
     count: number
@@ -71,53 +49,14 @@ export default function ArtistsImportPage() {
       setSuccess(false)
       setImportResult(null)
       setDetectedFormat(null)
-      setSpotifyPreview(null)
+      setPreviewSummary(null)
       parseFile(selectedFile)
-    }
-  }
-
-  const parseNumber = (val: string): number => {
-    if (!val) return 0
-    return parseInt(val.replace(/,/g, '').replace(/\s/g, '')) || 0
-  }
-
-  const mapColumnToRow = (header: string, value: string, row: PreviewRow) => {
-    if (!value && ![
-      'monthly_listeners', 'spotify_monthly_listeners', 'spotify_monthly_listners', 'listeners', 'monthly listeners',
-      'streams', 'streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams',
-      'tracks', 'track_count', 'track count', 'number_of_tracks', 'total_tracks',
-      'instagram_followers', 'instagram followers', 'ig_followers'
-    ].includes(header)) return
-
-    switch (header) {
-      case 'name': case 'artist_name': case 'artist': row.name = value; break
-      case 'email': row.email = value; break
-      case 'instagram': case 'instagram_handle': case 'ig_handle': row.instagram_handle = value.replace('@', ''); break
-      case 'instagram_url': case 'instagram url': case 'ig_url': row.instagram_url = value; break
-      case 'instagram_followers': case 'instagram followers': case 'ig_followers': row.instagram_followers = parseNumber(value); break
-      case 'website': case 'url': row.website = value; break
-      case 'spotify_url': case 'spotify url': case 'spotify_link': case 'spotify link': row.spotify_url = value; break
-      case 'facebook_url': case 'facebook url': case 'facebook': row.facebook_url = value; break
-      case 'twitter_url': case 'twitter url': case 'twitter': case 'x_url': row.twitter_url = value; break
-      case 'tiktok_url': case 'tiktok url': case 'tiktok': row.tiktok_url = value; break
-      case 'youtube_url': case 'youtube url': case 'youtube': row.youtube_url = value; break
-      case 'biography': case 'bio': case 'description': row.biography = value; break
-      case 'monthly_listeners': case 'spotify_monthly_listeners': case 'spotify_monthly_listners':
-      case 'listeners': case 'monthly listeners': row.spotify_monthly_listeners = parseNumber(value); break
-      case 'streams': case 'streams_last_month': case 'streams last month':
-      case 'last_month_streams': case 'monthly_streams': case 'est_streams_month': row.streams_last_month = parseNumber(value); break
-      case 'tracks': case 'track_count': case 'track count': case 'number_of_tracks':
-      case 'total_tracks': case 'album_count': case 'single_count': row.track_count = parseNumber(value); break
-      case 'genres': case 'genre': row.genres = value.split(';').map(g => g.trim()).filter(Boolean); break
-      case 'country': case 'country_name': row.country = value.toUpperCase(); break
     }
   }
 
   const parseFile = async (file: File) => {
     try {
       const text = await file.text()
-
-      // Use the smart parser to detect delimiter and parse
       const { headers, rows } = parseDelimitedText(text)
 
       if (headers.length === 0 || rows.length === 0) {
@@ -125,7 +64,6 @@ export default function ArtistsImportPage() {
         return
       }
 
-      setRawHeaders(headers)
       setRawRows(rows)
 
       const format = detectFormat(headers)
@@ -136,23 +74,8 @@ export default function ArtistsImportPage() {
         return
       }
 
-      if (format === 'spotify_raw') {
-        const summary = generatePreviewSummary(format, rows)
-        setSpotifyPreview(summary)
-        setPreview([])
-      } else {
-        // CrateHQ format — use existing parser
-        setSpotifyPreview(null)
-        const previewRows: PreviewRow[] = []
-        for (let i = 0; i < Math.min(rows.length, 10); i++) {
-          const row: PreviewRow = { name: '' }
-          for (const [header, value] of Object.entries(rows[i])) {
-            mapColumnToRow(header.toLowerCase(), value, row)
-          }
-          if (row.name) previewRows.push(row)
-        }
-        setPreview(previewRows)
-      }
+      const summary = generatePreviewSummary(format, rows)
+      setPreviewSummary(summary)
     } catch (err) {
       setError('Failed to parse file. Make sure it is a valid CSV or TSV.')
       console.error(err)
@@ -169,17 +92,9 @@ export default function ArtistsImportPage() {
       let artistsToSend: any[]
 
       if (detectedFormat === 'spotify_raw') {
-        artistsToSend = rawRows.map(transformSpotifyRaw)
+        artistsToSend = rawRows.map(transformSpotifyRaw).filter(a => a.name)
       } else {
-        // CrateHQ format
-        artistsToSend = []
-        for (const row of rawRows) {
-          const mapped: PreviewRow = { name: '' }
-          for (const [header, value] of Object.entries(row)) {
-            mapColumnToRow(header.toLowerCase(), value, mapped)
-          }
-          if (mapped.name) artistsToSend.push(mapped)
-        }
+        artistsToSend = rawRows.map(transformCrateHQ).filter(a => a.name)
       }
 
       const res = await fetch('/api/artists/import', {
@@ -215,11 +130,9 @@ export default function ArtistsImportPage() {
 
   const resetUpload = () => {
     setFile(null)
-    setPreview([])
     setDetectedFormat(null)
-    setSpotifyPreview(null)
+    setPreviewSummary(null)
     setRawRows([])
-    setRawHeaders([])
     setError('')
     setSuccess(false)
     setImportResult(null)
@@ -331,92 +244,94 @@ export default function ArtistsImportPage() {
                 </div>
               )}
 
-              {/* ── Spotify Raw Format Detection & Preview ── */}
-              {detectedFormat === 'spotify_raw' && spotifyPreview && !success && (
+              {/* ── Unified Preview (both formats) ── */}
+              {detectedFormat && previewSummary && !success && (
                 <div className="space-y-4">
                   {/* Format detection banner */}
                   <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-4">
                     <div className="flex items-center gap-2 mb-2">
                       <Badge variant="secondary" className="bg-blue-500/20 text-blue-400">Auto-Detected</Badge>
-                      <span className="font-medium text-sm">{spotifyPreview.formatLabel}</span>
+                      <span className="font-medium text-sm">{previewSummary.formatLabel}</span>
                     </div>
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3">
                       <div className="flex items-center gap-2 text-sm">
                         <Users className="h-4 w-4 text-muted-foreground" />
-                        <span><strong>{spotifyPreview.totalRows.toLocaleString()}</strong> artists</span>
+                        <span><strong>{previewSummary.totalRows.toLocaleString()}</strong> artists</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm">
                         <Music2 className="h-4 w-4 text-muted-foreground" />
-                        <span><strong>{spotifyPreview.hasSpotifyData.toLocaleString()}</strong> with Spotify data</span>
+                        <span><strong>{previewSummary.hasSpotifyData.toLocaleString()}</strong> with Spotify data</span>
                       </div>
                       <div className="flex items-center gap-2 text-sm">
                         <Users className="h-4 w-4 text-muted-foreground" />
-                        <span><strong>{spotifyPreview.hasSocialLinks.toLocaleString()}</strong> with social links</span>
+                        <span><strong>{previewSummary.hasSocialLinks.toLocaleString()}</strong> with social links</span>
                       </div>
-                      <div className="flex items-center gap-2 text-sm">
-                        <Mail className="h-4 w-4 text-green-500" />
-                        <span className="text-green-500">
-                          <strong>{spotifyPreview.bioEmailsFound}</strong> bio emails found (free!)
-                        </span>
-                      </div>
+                      {previewSummary.bioEmailsFound > 0 && (
+                        <div className="flex items-center gap-2 text-sm">
+                          <Mail className="h-4 w-4 text-green-500" />
+                          <span className="text-green-500">
+                            <strong>{previewSummary.bioEmailsFound}</strong> bio emails found (free!)
+                          </span>
+                        </div>
+                      )}
                     </div>
-                    {spotifyPreview.bioEmailArtists.length > 0 && (
+                    {previewSummary.bioEmailArtists.length > 0 && (
                       <div className="mt-2 text-xs text-muted-foreground">
-                        Artists with emails in bio: {spotifyPreview.bioEmailArtists.slice(0, 10).join(', ')}
-                        {spotifyPreview.bioEmailArtists.length > 10 && ` + ${spotifyPreview.bioEmailArtists.length - 10} more`}
+                        Artists with emails in bio: {previewSummary.bioEmailArtists.slice(0, 10).join(', ')}
+                        {previewSummary.bioEmailArtists.length > 10 && ` + ${previewSummary.bioEmailArtists.length - 10} more`}
                       </div>
                     )}
                   </div>
 
                   {/* Preview table */}
-                  <div>
-                    <h3 className="font-semibold mb-2">Preview (first 10 rows)</h3>
-                    <div className="border rounded-lg overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Listeners</TableHead>
-                            <TableHead>Top Track Streams</TableHead>
-                            <TableHead>Releases</TableHead>
-                            <TableHead>Bio Email</TableHead>
-                            <TableHead>Instagram</TableHead>
-                            <TableHead>Spotify</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {spotifyPreview.sampleRows.map((row, index) => (
-                            <TableRow key={index}>
-                              <TableCell className="font-medium">
-                                {row.name}
-                                {row.spotify_verified && <Badge variant="secondary" className="ml-1 text-[10px] px-1">Verified</Badge>}
-                              </TableCell>
-                              <TableCell>{row.spotify_monthly_listeners?.toLocaleString() || '—'}</TableCell>
-                              <TableCell>{row.total_top_track_streams?.toLocaleString() || '—'}</TableCell>
-                              <TableCell>{row.track_count || '—'}</TableCell>
-                              <TableCell>
-                                {row.email ? (
-                                  <span className="text-green-500 text-xs">{row.email}</span>
-                                ) : '—'}
-                              </TableCell>
-                              <TableCell className="text-xs">
-                                {row.instagram_handle || '—'}
-                              </TableCell>
-                              <TableCell className="text-xs truncate max-w-[150px]">
-                                {row.spotify_url ? 'Yes' : '—'}
-                              </TableCell>
+                  {previewSummary.sampleRows.length > 0 && (
+                    <div>
+                      <h3 className="font-semibold mb-2">Preview (first 10 rows)</h3>
+                      <div className="border rounded-lg overflow-x-auto">
+                        <Table>
+                          <TableHeader>
+                            <TableRow>
+                              <TableHead>Name</TableHead>
+                              <TableHead>Listeners</TableHead>
+                              <TableHead>Streams</TableHead>
+                              <TableHead>Tracks</TableHead>
+                              <TableHead>Email</TableHead>
+                              <TableHead>Instagram</TableHead>
+                              <TableHead>Country</TableHead>
                             </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+                          </TableHeader>
+                          <TableBody>
+                            {previewSummary.sampleRows.map((row, index) => (
+                              <TableRow key={index}>
+                                <TableCell className="font-medium">
+                                  {row.name}
+                                  {row.spotify_verified && <Badge variant="secondary" className="ml-1 text-[10px] px-1">Verified</Badge>}
+                                </TableCell>
+                                <TableCell>{row.spotify_monthly_listeners?.toLocaleString() || '—'}</TableCell>
+                                <TableCell>{row.streams_last_month?.toLocaleString() || '—'}</TableCell>
+                                <TableCell>{row.track_count || '—'}</TableCell>
+                                <TableCell>
+                                  {row.email ? (
+                                    <span className="text-green-500 text-xs">{row.email}</span>
+                                  ) : '—'}
+                                </TableCell>
+                                <TableCell className="text-xs">
+                                  {row.instagram_handle || '—'}
+                                </TableCell>
+                                <TableCell>{row.country || '—'}</TableCell>
+                              </TableRow>
+                            ))}
+                          </TableBody>
+                        </Table>
+                      </div>
                     </div>
-                  </div>
+                  )}
 
                   {/* Import actions */}
                   <div className="flex justify-between items-center">
                     <p className="text-sm text-muted-foreground">
-                      Will extract: artist names, Spotify data, social links, biographies, and emails from bios.
                       Duplicates will be merged (matched by Spotify ID or name).
+                      {previewSummary.bioEmailsFound > 0 && ' Emails from biographies will be extracted automatically.'}
                     </p>
                     <div className="flex gap-2">
                       <Button variant="outline" onClick={resetUpload}>Cancel</Button>
@@ -424,87 +339,10 @@ export default function ArtistsImportPage() {
                         {importing ? (
                           <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
                         ) : (
-                          <><FileUp className="h-4 w-4 mr-2" /> Import {spotifyPreview.totalRows.toLocaleString()} Artists</>
+                          <><FileUp className="h-4 w-4 mr-2" /> Import {previewSummary.totalRows.toLocaleString()} Artists</>
                         )}
                       </Button>
                     </div>
-                  </div>
-                </div>
-              )}
-
-              {/* ── CrateHQ Format Preview ── */}
-              {detectedFormat === 'cratehq' && preview.length > 0 && !success && (
-                <>
-                  <div className="bg-muted/50 border rounded-lg p-3 flex items-center gap-2">
-                    <Badge variant="secondary">Auto-Detected</Badge>
-                    <span className="text-sm font-medium">CrateHQ Format</span>
-                    <span className="text-sm text-muted-foreground">— {rawRows.length.toLocaleString()} artists</span>
-                  </div>
-
-                  <div>
-                    <h3 className="font-semibold mb-2">Preview (first 10 rows)</h3>
-                    <div className="border rounded-lg overflow-x-auto">
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Name</TableHead>
-                            <TableHead>Listeners</TableHead>
-                            <TableHead>Streams/Mo</TableHead>
-                            <TableHead>Tracks</TableHead>
-                            <TableHead>Country</TableHead>
-                            <TableHead>Email</TableHead>
-                            <TableHead>Instagram</TableHead>
-                            <TableHead>Genres</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {preview.map((row, index) => (
-                            <TableRow key={index}>
-                              <TableCell className="font-medium">{row.name}</TableCell>
-                              <TableCell>{row.spotify_monthly_listeners?.toLocaleString() || '—'}</TableCell>
-                              <TableCell>{row.streams_last_month?.toLocaleString() || '—'}</TableCell>
-                              <TableCell>{row.track_count?.toLocaleString() || '—'}</TableCell>
-                              <TableCell>{row.country || '—'}</TableCell>
-                              <TableCell className="text-sm">{row.email || '—'}</TableCell>
-                              <TableCell>{row.instagram_handle || '—'}</TableCell>
-                              <TableCell className="text-sm">{row.genres?.join(', ') || '—'}</TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={resetUpload}>Cancel</Button>
-                    <Button onClick={handleImport} disabled={importing}>
-                      {importing ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
-                      ) : (
-                        <><FileUp className="h-4 w-4 mr-2" /> Import {rawRows.length.toLocaleString()} Artists</>
-                      )}
-                    </Button>
-                  </div>
-                </>
-              )}
-
-              {/* CrateHQ format with no preview rows but detected */}
-              {detectedFormat === 'cratehq' && preview.length === 0 && rawRows.length > 0 && !success && (
-                <div className="space-y-4">
-                  <div className="bg-muted/50 border rounded-lg p-3 flex items-center gap-2">
-                    <Badge variant="secondary">Auto-Detected</Badge>
-                    <span className="text-sm font-medium">CrateHQ Format</span>
-                    <span className="text-sm text-muted-foreground">— {rawRows.length.toLocaleString()} rows</span>
-                  </div>
-                  <div className="flex justify-end gap-2">
-                    <Button variant="outline" onClick={resetUpload}>Cancel</Button>
-                    <Button onClick={handleImport} disabled={importing}>
-                      {importing ? (
-                        <><Loader2 className="h-4 w-4 mr-2 animate-spin" /> Importing...</>
-                      ) : (
-                        <><FileUp className="h-4 w-4 mr-2" /> Import {rawRows.length.toLocaleString()} Artists</>
-                      )}
-                    </Button>
                   </div>
                 </div>
               )}

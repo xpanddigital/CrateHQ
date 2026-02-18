@@ -297,6 +297,151 @@ export function transformSpotifyRaw(row: Record<string, string>): TransformedArt
   }
 }
 
+// ─── CrateHQ / ChatGPT-Formatted CSV → Transform ────────────────────
+
+/**
+ * Transforms a row from a CrateHQ-format or ChatGPT-reformatted CSV.
+ * Handles broad column name aliases and runs bio email extraction.
+ */
+export function transformCrateHQ(row: Record<string, string>): TransformedArtist {
+  // Helper: get first non-empty value from multiple possible column names
+  const get = (...keys: string[]): string => {
+    for (const k of keys) {
+      const val = row[k]?.trim()
+      if (val) return val
+    }
+    return ''
+  }
+
+  const name = get('name', 'artist_name', 'artist')
+
+  // Streams: priority order for streams_last_month
+  const streamsLastMonth = parseNum(get('streams_last_month', 'streams last month', 'last_month_streams', 'monthly_streams'))
+  const streamsGeneric = parseNum(get('streams', 'est_streams_month'))
+  const monthlyListeners = parseNum(get('spotify_monthly_listeners', 'monthly_listeners', 'listeners', 'monthly listeners', 'spotify_monthly_listners'))
+
+  // Use best available streams value; fall back to rough estimate from listeners
+  let finalStreams = streamsLastMonth || streamsGeneric || 0
+  if (finalStreams === 0 && monthlyListeners > 0) {
+    finalStreams = monthlyListeners * 3
+  }
+
+  // Track count: sum album_count + single_count if track_count not provided
+  const trackCountDirect = parseNum(get('track_count', 'track count', 'tracks', 'number_of_tracks', 'total_tracks'))
+  const albumCount = parseNum(get('album_count'))
+  const singleCount = parseNum(get('single_count'))
+  const trackCount = trackCountDirect || (albumCount + singleCount) || 0
+
+  // Social URLs
+  const instagramUrl = get('instagram_url', 'instagram url', 'ig_url') || null
+  const facebookUrl = get('facebook_url', 'facebook url', 'facebook') || null
+  const twitterUrl = get('twitter_url', 'twitter url', 'twitter', 'x_url') || null
+  const tiktokUrl = get('tiktok_url', 'tiktok url', 'tiktok') || null
+  const youtubeUrl = get('youtube_url', 'youtube url', 'youtube') || null
+  const spotifyUrl = get('spotify_url', 'spotify url', 'spotify_link', 'spotify link') || null
+  const website = get('website', 'url') || null
+
+  const socialLinks: Record<string, string> = {}
+  if (instagramUrl) socialLinks.instagram = instagramUrl
+  if (facebookUrl) socialLinks.facebook = facebookUrl
+  if (twitterUrl) socialLinks.twitter = twitterUrl
+  if (tiktokUrl) socialLinks.tiktok = tiktokUrl
+  if (youtubeUrl) socialLinks.youtube = youtubeUrl
+  if (spotifyUrl) socialLinks.spotify = spotifyUrl
+  if (website) socialLinks.website = website
+
+  // Instagram handle
+  let instagramHandle: string | null = get('instagram_handle', 'instagram', 'ig_handle') || null
+  if (instagramHandle) instagramHandle = instagramHandle.replace('@', '')
+  if (!instagramHandle && instagramUrl) {
+    const match = instagramUrl.match(/instagram\.com\/([^/?]+)/)
+    if (match) instagramHandle = match[1]
+  }
+
+  // Biography + email extraction
+  const biography = get('biography', 'bio', 'description') || null
+  const bioResult = extractBioEmails(biography)
+
+  // Email: CSV email first, then bio email
+  let csvEmail = get('email') || null
+  let primaryEmail: string | null = null
+  let emailSource: string | null = null
+  let emailConfidence = 0
+
+  if (csvEmail) {
+    const quality = checkEmailQuality(csvEmail)
+    if (quality.accepted) {
+      primaryEmail = csvEmail
+      emailSource = 'csv_import'
+      emailConfidence = 1.0
+    }
+  }
+
+  // If no valid CSV email, try bio emails
+  if (!primaryEmail && bioResult.emails.length > 0) {
+    const mgmt = bioResult.emails.find(e => e.type === 'management')
+    const booking = bioResult.emails.find(e => e.type === 'booking')
+    const best = mgmt || booking || bioResult.emails[0]
+    primaryEmail = best.email
+    emailSource = `spotify_biography_${best.type}`
+    emailConfidence = 0.95
+  }
+
+  const instagramFollowers = parseNum(get('instagram_followers', 'instagram followers', 'ig_followers'))
+  const growthYoy = parseFloat(get('growth_yoy')) || 0
+  const country = get('country', 'country_name') || null
+  const genres = get('genres', 'genre')
+  const genreList = genres ? genres.split(/[;,]/).map(g => g.trim()).filter(Boolean) : []
+
+  // Estimated offers (if pre-calculated in CSV)
+  const estimatedOffer = parseFloat(get('estimated_offer')) || undefined
+  const estimatedOfferLow = parseFloat(get('estimated_offer_low')) || undefined
+  const estimatedOfferHigh = parseFloat(get('estimated_offer_high')) || undefined
+
+  return {
+    name,
+    email: primaryEmail,
+    email_source: emailSource,
+    email_confidence: emailConfidence,
+    instagram_handle: instagramHandle,
+    instagram_url: instagramUrl,
+    instagram_followers: instagramFollowers,
+    website,
+    spotify_url: spotifyUrl,
+    spotify_id: null,
+    spotify_monthly_listeners: monthlyListeners,
+    spotify_followers: 0,
+    spotify_verified: false,
+    streams_last_month: finalStreams,
+    total_top_track_streams: streamsGeneric || 0,
+    track_count: trackCount,
+    genres: genreList,
+    country: country ? country.toUpperCase() : null,
+    biography,
+    bio_emails: bioResult.emails.length > 0 ? bioResult.emails : null,
+    management_company: bioResult.managementCompany,
+    booking_agency: bioResult.bookingAgency,
+    social_links: socialLinks,
+    facebook_url: facebookUrl,
+    twitter_url: twitterUrl,
+    tiktok_url: tiktokUrl,
+    youtube_url: youtubeUrl,
+    wikipedia_url: null,
+    world_rank: 0,
+    cover_art_url: null,
+    latest_release_date: null,
+    latest_release_name: null,
+    top_cities: null,
+    import_format: 'cratehq',
+    is_contactable: !!primaryEmail,
+    // Pass through pre-calculated offers if present
+    ...(estimatedOffer !== undefined ? { estimated_offer: estimatedOffer } : {}),
+    ...(estimatedOfferLow !== undefined ? { estimated_offer_low: estimatedOfferLow } : {}),
+    ...(estimatedOfferHigh !== undefined ? { estimated_offer_high: estimatedOfferHigh } : {}),
+    growth_yoy: growthYoy,
+  } as TransformedArtist & { estimated_offer?: number; estimated_offer_low?: number; estimated_offer_high?: number; growth_yoy?: number }
+}
+
 // ─── Import Preview Summary ──────────────────────────────────────────
 
 export interface ImportPreviewSummary {
@@ -339,15 +484,20 @@ export function generatePreviewSummary(
     }
   }
 
-  // CrateHQ format — return empty summary (existing flow handles preview)
+  // CrateHQ / ChatGPT format
+  const allTransformed = rows.map(transformCrateHQ).filter(a => a.name)
+  const sampleRows = allTransformed.slice(0, maxPreview)
+  const bioEmailArtists = allTransformed.filter(a => a.bio_emails && a.bio_emails.length > 0)
+  const bioEmailsFound = allTransformed.reduce((sum, a) => sum + (a.bio_emails?.length || 0), 0)
+
   return {
     format,
     formatLabel,
-    totalRows: rows.length,
-    sampleRows: [],
-    bioEmailsFound: 0,
-    bioEmailArtists: [],
-    hasSpotifyData: 0,
-    hasSocialLinks: 0,
+    totalRows: allTransformed.length,
+    sampleRows,
+    bioEmailsFound,
+    bioEmailArtists: bioEmailArtists.map(a => a.name),
+    hasSpotifyData: allTransformed.filter(a => a.spotify_monthly_listeners > 0).length,
+    hasSocialLinks: allTransformed.filter(a => Object.keys(a.social_links).length > 1).length,
   }
 }
