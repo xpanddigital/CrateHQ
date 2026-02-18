@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { valuateAndQualify } from '@/lib/qualification/qualifier'
 
 export async function POST(request: NextRequest) {
   try {
@@ -62,10 +63,35 @@ export async function POST(request: NextRequest) {
 
     if (error) throw error
 
+    // Run valuation + qualification on all imported artists
+    const qualificationSummary = { qualified: 0, not_qualified: 0, review: 0, pending: 0 }
+
+    for (const artist of (data || [])) {
+      try {
+        const result = valuateAndQualify({
+          id: artist.id,
+          name: artist.name,
+          estimated_offer: artist.estimated_offer,
+          estimated_offer_low: artist.estimated_offer_low,
+          estimated_offer_high: artist.estimated_offer_high,
+          spotify_monthly_listeners: artist.spotify_monthly_listeners || 0,
+          streams_last_month: artist.streams_last_month || 0,
+          track_count: artist.track_count || 0,
+        })
+
+        await supabase.from('artists').update(result).eq('id', artist.id)
+        qualificationSummary[result.qualification_status]++
+      } catch (err) {
+        console.error(`[Import] Qualification failed for ${artist.name}:`, err)
+        qualificationSummary.pending++
+      }
+    }
+
     return NextResponse.json({
       success: true,
       count: data.length,
       artists: data,
+      qualification: qualificationSummary,
     })
   } catch (error: any) {
     console.error('Error importing artists:', error)

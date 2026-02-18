@@ -25,11 +25,11 @@ export async function POST(request: NextRequest) {
         if (error) throw error
         artists = data || []
       } else {
-        // Get only artists without valuation
+        // Get artists without valuation (null or 0)
         const { data, error } = await supabase
           .from('artists')
           .select('*')
-          .is('estimated_offer', null)
+          .or('estimated_offer.is.null,estimated_offer.eq.0')
 
         if (error) throw error
         artists = data || []

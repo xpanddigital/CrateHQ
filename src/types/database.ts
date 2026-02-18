@@ -59,6 +59,12 @@ export interface Artist {
   is_contactable: boolean
   enrichment_attempts: number
   last_enriched_at: string | null
+  qualification_status: 'qualified' | 'not_qualified' | 'review' | 'pending'
+  qualification_reason: string | null
+  qualification_date: string | null
+  qualification_manual_override: boolean
+  email_rejected: boolean
+  email_rejection_reason: string | null
   source: string
   source_batch: string | null
   created_at: string

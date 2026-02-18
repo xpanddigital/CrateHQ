@@ -37,6 +37,10 @@ export default function ArtistsImportPage() {
   const [importing, setImporting] = useState(false)
   const [error, setError] = useState('')
   const [success, setSuccess] = useState(false)
+  const [importResult, setImportResult] = useState<{
+    count: number
+    qualification?: { qualified: number; not_qualified: number; review: number; pending: number }
+  } | null>(null)
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0]
@@ -227,10 +231,11 @@ export default function ArtistsImportPage() {
       }
 
       const data = await res.json()
+      setImportResult({ count: data.count, qualification: data.qualification })
       setSuccess(true)
       setTimeout(() => {
         router.push('/artists')
-      }, 2000)
+      }, 4000)
     } catch (err: any) {
       setError(err.message || 'Failed to import artists')
     } finally {
@@ -270,9 +275,20 @@ export default function ArtistsImportPage() {
               )}
 
               {success && (
-                <div className="bg-green-500/15 text-green-500 px-4 py-3 rounded-md text-sm flex items-center gap-2">
-                  <CheckCircle className="h-4 w-4" />
-                  Artists imported successfully! Redirecting...
+                <div className="bg-green-500/15 text-green-500 px-4 py-3 rounded-md text-sm space-y-1">
+                  <div className="flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4" />
+                    {importResult?.count || 0} artists imported successfully!
+                  </div>
+                  {importResult?.qualification && (
+                    <div className="text-xs text-green-400/80 pl-6">
+                      Qualified: {importResult.qualification.qualified} &middot;
+                      Not qualified: {importResult.qualification.not_qualified} &middot;
+                      Review needed: {importResult.qualification.review}
+                      {importResult.qualification.pending > 0 && ` · Pending: ${importResult.qualification.pending}`}
+                    </div>
+                  )}
+                  <div className="text-xs text-green-400/60 pl-6">Redirecting...</div>
                 </div>
               )}
 

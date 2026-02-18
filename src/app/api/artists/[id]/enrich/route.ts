@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enrichArtist } from '@/lib/enrichment/pipeline'
+import { checkEmailQuality } from '@/lib/qualification/email-filter'
 
 export async function POST(
   request: NextRequest,
@@ -39,17 +40,33 @@ export async function POST(
     const result = await enrichArtist(artist, apiKeys)
     console.log(`[Single Enrich] Enrichment complete. Email found:`, result.email_found || 'None')
 
+    // Email quality check — reject junk emails before marking contactable
+    let emailRejected = false
+    let emailRejectionReason: string | null = null
+
+    if (result.email_found) {
+      const quality = checkEmailQuality(result.email_found)
+      if (!quality.accepted) {
+        console.log(`[Single Enrich] Email rejected: ${result.email_found} — ${quality.reason}`)
+        emailRejected = true
+        emailRejectionReason = quality.reason
+        result.is_contactable = false
+      }
+    }
+
     // Update artist record
     const updateData: any = {
-      email: result.email_found,
+      email: emailRejected ? null : result.email_found,
       email_confidence: result.email_confidence,
       email_source: result.email_source,
       all_emails_found: result.all_emails,
       is_enriched: true,
-      is_contactable: result.is_contactable,
+      is_contactable: emailRejected ? false : result.is_contactable,
       last_enriched_at: new Date().toISOString(),
-      enrichment_attempts: artist.enrichment_attempts + 1,
+      enrichment_attempts: (artist.enrichment_attempts || 0) + 1,
       updated_at: new Date().toISOString(),
+      email_rejected: emailRejected,
+      email_rejection_reason: emailRejected ? `${emailRejectionReason} (${result.email_found})` : null,
     }
 
     // Save discovered data to artist profile

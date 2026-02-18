@@ -14,7 +14,9 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { TagManager } from '@/components/artists/TagManager'
 import { EnrichmentPanel } from '@/components/artists/EnrichmentPanel'
 import { GrowthTrend } from '@/components/artists/GrowthTrend'
-import { ArrowLeft, Mail, Instagram, Globe, Music, Sparkles, Edit, Save, X, DollarSign, Loader2 } from 'lucide-react'
+import { ArrowLeft, Mail, Instagram, Globe, Music, Sparkles, Edit, Save, X, DollarSign, Loader2, ShieldCheck, ShieldX, ShieldAlert, ShieldQuestion } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useToast } from '@/components/ui/use-toast'
 import { Artist } from '@/types/database'
 import { formatNumber, formatCurrency, formatDate } from '@/lib/utils'
 import { estimateCatalogValue } from '@/lib/valuation/estimator'
@@ -38,6 +40,31 @@ export default function ArtistDetailPage() {
   const [editData, setEditData] = useState<ArtistEditData>({})
   const [calculatingValue, setCalculatingValue] = useState(false)
   const [valuationResult, setValuationResult] = useState<any>(null)
+  const [qualOverrideStatus, setQualOverrideStatus] = useState('')
+  const [qualOverrideReason, setQualOverrideReason] = useState('')
+  const [savingQual, setSavingQual] = useState(false)
+  const { toast } = useToast()
+
+  const handleQualificationOverride = async () => {
+    if (!qualOverrideStatus || !artist) return
+    setSavingQual(true)
+    try {
+      const res = await fetch(`/api/artists/${artist.id}/qualify`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: qualOverrideStatus, reason: qualOverrideReason }),
+      })
+      if (!res.ok) throw new Error('Failed to update')
+      toast({ title: 'Qualification updated', description: `Status set to ${qualOverrideStatus}` })
+      fetchArtist()
+      setQualOverrideStatus('')
+      setQualOverrideReason('')
+    } catch {
+      toast({ title: 'Error', description: 'Failed to update qualification', variant: 'destructive' })
+    } finally {
+      setSavingQual(false)
+    }
+  }
 
   const fetchArtist = useCallback(async () => {
     try {
@@ -688,6 +715,77 @@ export default function ArtistDetailPage() {
                 currentTags={artist.tags || []}
                 onTagsUpdated={fetchArtist}
               />
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                {artist.qualification_status === 'qualified' && <ShieldCheck className="h-4 w-4 text-green-500" />}
+                {artist.qualification_status === 'not_qualified' && <ShieldX className="h-4 w-4 text-red-500" />}
+                {artist.qualification_status === 'review' && <ShieldAlert className="h-4 w-4 text-yellow-500" />}
+                {(!artist.qualification_status || artist.qualification_status === 'pending') && <ShieldQuestion className="h-4 w-4 text-muted-foreground" />}
+                Qualification
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3 text-sm">
+              <div className="flex items-center justify-between">
+                <span className="text-muted-foreground">Status</span>
+                <Badge variant={
+                  artist.qualification_status === 'qualified' ? 'default' :
+                  artist.qualification_status === 'not_qualified' ? 'destructive' :
+                  artist.qualification_status === 'review' ? 'secondary' : 'outline'
+                }>
+                  {(artist.qualification_status || 'pending').replace('_', ' ')}
+                </Badge>
+              </div>
+              {artist.qualification_reason && (
+                <div>
+                  <p className="text-muted-foreground">Reason</p>
+                  <p className="font-medium text-xs">{artist.qualification_reason}</p>
+                </div>
+              )}
+              {artist.qualification_manual_override && (
+                <Badge variant="outline" className="text-xs">Manual override</Badge>
+              )}
+              {artist.email_rejected && (
+                <div className="bg-destructive/10 rounded p-2 text-xs">
+                  <p className="font-medium text-destructive">Email rejected</p>
+                  <p className="text-muted-foreground">{artist.email_rejection_reason}</p>
+                </div>
+              )}
+              <div className="border-t pt-3 space-y-2">
+                <p className="text-xs font-medium text-muted-foreground">Override</p>
+                <Select value={qualOverrideStatus} onValueChange={setQualOverrideStatus}>
+                  <SelectTrigger className="h-8 text-xs">
+                    <SelectValue placeholder="Change status..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="qualified">Qualified</SelectItem>
+                    <SelectItem value="not_qualified">Not Qualified</SelectItem>
+                    <SelectItem value="review">Review</SelectItem>
+                  </SelectContent>
+                </Select>
+                {qualOverrideStatus && (
+                  <>
+                    <Input
+                      placeholder="Reason (optional)"
+                      value={qualOverrideReason}
+                      onChange={(e) => setQualOverrideReason(e.target.value)}
+                      className="h-8 text-xs"
+                    />
+                    <Button
+                      size="sm"
+                      className="w-full h-8 text-xs"
+                      onClick={handleQualificationOverride}
+                      disabled={savingQual}
+                    >
+                      {savingQual ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
+                      Save Override
+                    </Button>
+                  </>
+                )}
+              </div>
             </CardContent>
           </Card>
 

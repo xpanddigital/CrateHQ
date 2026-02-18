@@ -18,7 +18,8 @@ import { Badge } from '@/components/ui/badge'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { TagBadge } from '@/components/shared/TagBadge'
-import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2, Briefcase } from 'lucide-react'
+import { Plus, Search, Upload, Users, CheckCircle, XCircle, DollarSign, Download, Trash2, Briefcase, ShieldCheck, ShieldX, ShieldAlert, RefreshCw } from 'lucide-react'
+import { useToast } from '@/components/ui/use-toast'
 import { Artist } from '@/types/database'
 import { formatNumber, formatDate, formatCurrency } from '@/lib/utils'
 import { ArtistAddModal } from '@/components/artists/ArtistAddModal'
@@ -41,6 +42,9 @@ export default function ArtistsPage() {
   const [creatingDeals, setCreatingDeals] = useState(false)
   const [loadingUnenriched, setLoadingUnenriched] = useState(false)
   const [unenrichedCount, setUnenrichedCount] = useState(0)
+  const [qualStats, setQualStats] = useState({ total: 0, qualified: 0, not_qualified: 0, review: 0, pending: 0 })
+  const [runningQualification, setRunningQualification] = useState(false)
+  const { toast } = useToast()
 
   const fetchArtists = useCallback(async () => {
     setLoading(true)
@@ -69,19 +73,59 @@ export default function ArtistsPage() {
     fetchArtists()
   }, [fetchArtists])
 
-  // Fetch count of unenriched artists on mount
+  // Fetch count of unenriched artists and qualification stats on mount
   useEffect(() => {
-    const fetchUnenrichedCount = async () => {
+    const fetchCounts = async () => {
       try {
-        const res = await fetch('/api/artists/unenriched-count')
-        const data = await res.json()
-        setUnenrichedCount(data.count || 0)
+        const [unenrichedRes, qualRes] = await Promise.all([
+          fetch('/api/artists/unenriched-count'),
+          fetch('/api/artists/qualify'),
+        ])
+        const unenrichedData = await unenrichedRes.json()
+        setUnenrichedCount(unenrichedData.count || 0)
+
+        const qualData = await qualRes.json()
+        if (qualData.stats) setQualStats(qualData.stats)
       } catch (error) {
-        console.error('Error fetching unenriched count:', error)
+        console.error('Error fetching counts:', error)
       }
     }
-    fetchUnenrichedCount()
+    fetchCounts()
   }, [])
+
+  const handleRerunQualification = async () => {
+    setRunningQualification(true)
+    try {
+      const res = await fetch('/api/artists/qualify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ force: false }),
+      })
+      const data = await res.json()
+      if (data.summary) {
+        setQualStats({
+          total: data.summary.total,
+          qualified: data.summary.qualified,
+          not_qualified: data.summary.not_qualified,
+          review: data.summary.review,
+          pending: 0,
+        })
+        toast({
+          title: 'Qualification complete',
+          description: `${data.processed} artists evaluated. Qualified: ${data.summary.qualified}, Not qualified: ${data.summary.not_qualified}, Review: ${data.summary.review}${data.skipped_manual > 0 ? `, ${data.skipped_manual} manual overrides kept` : ''}`,
+        })
+      }
+      // Refresh unenriched count since qualification may have changed who's eligible
+      const countRes = await fetch('/api/artists/unenriched-count')
+      const countData = await countRes.json()
+      setUnenrichedCount(countData.count || 0)
+      fetchArtists()
+    } catch (error) {
+      toast({ title: 'Error', description: 'Failed to run qualification', variant: 'destructive' })
+    } finally {
+      setRunningQualification(false)
+    }
+  }
 
   const handleEnrichAllUnenriched = async () => {
     setLoadingUnenriched(true)
@@ -411,14 +455,65 @@ export default function ArtistsPage() {
           <Button
             variant="outline"
             size="sm"
+            onClick={handleRerunQualification}
+            disabled={runningQualification}
+          >
+            <RefreshCw className={`h-4 w-4 mr-1 ${runningQualification ? 'animate-spin' : ''}`} />
+            {runningQualification ? 'Qualifying...' : 'Run Qualification'}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
             onClick={handleEnrichAllUnenriched}
             disabled={loadingUnenriched || unenrichedCount === 0}
           >
             <CheckCircle className="h-4 w-4 mr-1" />
-            {loadingUnenriched ? 'Loading...' : `Enrich All Unenriched (${unenrichedCount})`}
+            {loadingUnenriched ? 'Loading...' : `Enrich Qualified (${unenrichedCount})`}
           </Button>
         </div>
       </Card>
+
+      {/* Qualification Stats */}
+      {qualStats.total > 0 && (
+        <div className="grid gap-3 grid-cols-2 md:grid-cols-4">
+          <Card className="p-3">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="h-4 w-4 text-green-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Qualified</p>
+                <p className="text-lg font-bold text-green-500">{qualStats.qualified}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-3">
+            <div className="flex items-center gap-2">
+              <ShieldX className="h-4 w-4 text-red-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Not Qualified</p>
+                <p className="text-lg font-bold text-red-500">{qualStats.not_qualified}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-3">
+            <div className="flex items-center gap-2">
+              <ShieldAlert className="h-4 w-4 text-yellow-500" />
+              <div>
+                <p className="text-xs text-muted-foreground">Review Needed</p>
+                <p className="text-lg font-bold text-yellow-500">{qualStats.review}</p>
+              </div>
+            </div>
+          </Card>
+          <Card className="p-3">
+            <div className="flex items-center gap-2">
+              <Users className="h-4 w-4 text-muted-foreground" />
+              <div>
+                <p className="text-xs text-muted-foreground">Pending</p>
+                <p className="text-lg font-bold">{qualStats.pending}</p>
+              </div>
+            </div>
+          </Card>
+        </div>
+      )}
 
       {artists.length === 0 ? (
         <EmptyState
@@ -461,12 +556,20 @@ export default function ArtistsPage() {
                     />
                   </TableCell>
                   <TableCell>
-                    <Link
-                      href={`/artists/${artist.id}`}
-                      className="font-medium hover:text-primary"
-                    >
-                      {artist.name}
-                    </Link>
+                    <div className="flex items-center gap-1.5">
+                      <Link
+                        href={`/artists/${artist.id}`}
+                        className="font-medium hover:text-primary"
+                      >
+                        {artist.name}
+                      </Link>
+                      {artist.qualification_status === 'not_qualified' && (
+                        <span title="Not qualified"><ShieldX className="h-3 w-3 text-red-400 flex-shrink-0" /></span>
+                      )}
+                      {artist.qualification_status === 'review' && (
+                        <span title="Review needed"><ShieldAlert className="h-3 w-3 text-yellow-400 flex-shrink-0" /></span>
+                      )}
+                    </div>
                   </TableCell>
                   <TableCell>
                     {formatNumber(artist.spotify_monthly_listeners)}

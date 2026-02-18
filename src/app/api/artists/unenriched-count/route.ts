@@ -13,11 +13,12 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
-    // Count artists where email is null or empty
+    // Count qualified artists where email is null or empty
     const { count, error } = await supabase
       .from('artists')
       .select('*', { count: 'exact', head: true })
       .or('email.is.null,email.eq.')
+      .in('qualification_status', ['qualified', 'pending'])
 
     if (error) throw error
 
