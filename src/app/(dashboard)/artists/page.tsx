@@ -230,6 +230,51 @@ export default function ArtistsPage() {
     }
   }
 
+  const [valuationProgress, setValuationProgress] = useState<{ done: number; total: number } | null>(null)
+
+  const runPaginatedValuation = async (revalueAll: boolean) => {
+    setValuating(true)
+    setValuationProgress(null)
+    let offset = 0
+    let totalValuated = 0
+    let totalSkipped = 0
+    let totalCount = 0
+
+    try {
+      let hasMore = true
+      while (hasMore) {
+        const res = await fetch('/api/artists/bulk-valuate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ all: true, revalueAll, offset, limit: 500 }),
+        })
+
+        if (!res.ok) throw new Error('Valuation failed')
+
+        const data = await res.json()
+        totalValuated += data.valuated
+        totalSkipped += data.skipped
+        totalCount = data.total
+        hasMore = data.hasMore
+        offset = data.nextOffset || 0
+
+        setValuationProgress({ done: offset > totalCount ? totalCount : offset, total: totalCount })
+      }
+
+      toast({
+        title: 'Valuation complete',
+        description: `Valuated ${totalValuated.toLocaleString()} artists, skipped ${totalSkipped.toLocaleString()} (of ${totalCount.toLocaleString()} total)`,
+      })
+      fetchArtists()
+    } catch (error) {
+      console.error('Error valuating:', error)
+      toast({ title: 'Error', description: 'Valuation failed', variant: 'destructive' })
+    } finally {
+      setValuating(false)
+      setValuationProgress(null)
+    }
+  }
+
   const handleBulkValuate = async () => {
     setValuating(true)
     try {
@@ -242,61 +287,25 @@ export default function ArtistsPage() {
       if (!res.ok) throw new Error('Valuation failed')
 
       const data = await res.json()
-      alert(`Valuated ${data.valuated} artists, skipped ${data.skipped}`)
+      toast({ title: 'Valuation complete', description: `Valuated ${data.valuated} artists, skipped ${data.skipped}` })
       setSelectedIds(new Set())
       fetchArtists()
     } catch (error) {
       console.error('Error valuating:', error)
+      toast({ title: 'Error', description: 'Valuation failed', variant: 'destructive' })
     } finally {
       setValuating(false)
     }
   }
 
   const handleValuateAll = async () => {
-    if (!confirm('Valuate all artists without estimates? This may take a while.')) return
-
-    setValuating(true)
-    try {
-      const res = await fetch('/api/artists/bulk-valuate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true }),
-      })
-
-      if (!res.ok) throw new Error('Valuation failed')
-
-      const data = await res.json()
-      alert(`Valuated ${data.valuated} artists, skipped ${data.skipped}`)
-      fetchArtists()
-    } catch (error) {
-      console.error('Error valuating:', error)
-    } finally {
-      setValuating(false)
-    }
+    if (!confirm('Valuate all artists without estimates? This may take a moment.')) return
+    await runPaginatedValuation(false)
   }
 
   const handleRevalueAll = async () => {
-    if (!confirm('Re-run valuations for ALL artists? This will update all existing valuations and may take a while.')) return
-
-    setValuating(true)
-    try {
-      const res = await fetch('/api/artists/bulk-valuate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ all: true, revalueAll: true }),
-      })
-
-      if (!res.ok) throw new Error('Valuation failed')
-
-      const data = await res.json()
-      alert(`Re-valuated ${data.valuated} artists, skipped ${data.skipped}`)
-      fetchArtists()
-    } catch (error) {
-      console.error('Error valuating:', error)
-      alert('Failed to revalue artists')
-    } finally {
-      setValuating(false)
-    }
+    if (!confirm('Re-run valuations for ALL artists? This will update all existing valuations.')) return
+    await runPaginatedValuation(true)
   }
 
   const handleExport = (type: 'full' | 'valuation') => {
@@ -508,7 +517,7 @@ export default function ArtistsPage() {
             disabled={valuating}
           >
             <DollarSign className="h-4 w-4 mr-1" />
-            Valuate All
+            {valuating && valuationProgress ? `${valuationProgress.done.toLocaleString()} / ${valuationProgress.total.toLocaleString()}` : 'Valuate All'}
           </Button>
           <Button
             variant="outline"
@@ -517,7 +526,7 @@ export default function ArtistsPage() {
             disabled={valuating}
           >
             <DollarSign className="h-4 w-4 mr-1" />
-            Revalue All
+            {valuating && valuationProgress ? `${valuationProgress.done.toLocaleString()} / ${valuationProgress.total.toLocaleString()}` : 'Revalue All'}
           </Button>
           <Button
             variant="outline"
