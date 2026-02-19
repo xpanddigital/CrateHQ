@@ -1,304 +1,702 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import Image from 'next/image'
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { useState, useEffect, useCallback, useRef } from 'react'
+import { createClient } from '@/lib/supabase/client'
+import { Card } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { Mail, CheckCircle, ExternalLink, Filter, Clock } from 'lucide-react'
-import { formatCurrency, formatNumber } from '@/lib/utils'
+import { DEAL_STAGES } from '@/types/database'
+import { formatCurrency } from '@/lib/utils'
+import {
+  Instagram,
+  Mail,
+  Send,
+  ArrowLeft,
+  Clock,
+  CheckCircle,
+  ExternalLink,
+  Music,
+  Globe,
+  Youtube,
+  User,
+  MessageCircle,
+  Filter,
+} from 'lucide-react'
 
-interface InboxItem {
-  id: string
-  body: string
-  ai_classification: string | null
-  ai_confidence: number | null
-  sent_at: string
-  is_read: boolean
-  requires_human_review: boolean
-  deal: {
-    id: string
-    estimated_deal_value: number | null
-    scout: {
-      id: string
-      full_name: string
-      avatar_url: string | null
-    }
-  }
+interface Thread {
+  artist_id: string
   artist: {
     id: string
     name: string
     image_url: string | null
-    estimated_offer_low: number | null
-    estimated_offer_high: number | null
+    instagram_handle: string | null
+    email: string | null
+  } | null
+  deal: {
+    id: string
+    stage: string
+    scout_id: string | null
+  } | null
+  last_message: {
+    text: string
+    channel: string
+    direction: string
+    created_at: string
+    sender: string | null
   }
+  unread_count: number
+  channels: string[]
 }
 
-const CLASSIFICATION_COLORS = {
-  interested: 'bg-green-100 text-green-800 border-green-200',
-  question: 'bg-yellow-100 text-yellow-800 border-yellow-200',
-  objection: 'bg-orange-100 text-orange-800 border-orange-200',
-  not_interested: 'bg-red-100 text-red-800 border-red-200',
-  warm_no: 'bg-blue-100 text-blue-800 border-blue-200',
-  unclear: 'bg-gray-100 text-gray-800 border-gray-200',
+interface Message {
+  id: string
+  artist_id: string | null
+  channel: string
+  direction: string
+  message_text: string
+  sender: string | null
+  ig_account_id: string | null
+  ig_thread_id: string | null
+  ig_message_id: string | null
+  external_id: string | null
+  scout_id: string | null
+  metadata: any
+  read: boolean
+  created_at: string
+  _status?: 'sending' | 'pending'
 }
 
-const CLASSIFICATION_ORDER = {
-  interested: 1,
-  question: 2,
-  objection: 3,
-  warm_no: 4,
-  not_interested: 5,
-  unclear: 6,
+interface ArtistDetail {
+  id: string
+  name: string
+  image_url: string | null
+  spotify_monthly_listeners: number
+  streams_last_month: number
+  track_count: number
+  instagram_handle: string | null
+  website: string | null
+  email: string | null
+  youtube_url: string | null
+  estimated_offer_low: number | null
+  estimated_offer_high: number | null
+  qualification_status: string | null
+  qualification_reason: string | null
+  booking_agency: string | null
+  management_company: string | null
+}
+
+const INBOX_STAGES = [
+  { value: 'replied', label: 'New Reply', color: '#F59E0B' },
+  { value: 'interested', label: 'In Conversation', color: '#D97706' },
+  { value: 'call_scheduled', label: 'Meeting Booked', color: '#10B981' },
+  { value: 'in_negotiation', label: 'Deal In Progress', color: '#4F46E5' },
+  { value: 'closed_won', label: 'Closed Won', color: '#22C55E' },
+  { value: 'closed_lost', label: 'Closed Lost', color: '#EF4444' },
+]
+
+function ChannelIcon({ channel, className }: { channel: string; className?: string }) {
+  if (channel === 'instagram') return <Instagram className={className || 'h-4 w-4'} />
+  return <Mail className={className || 'h-4 w-4'} />
+}
+
+function timeAgo(dateStr: string): string {
+  const now = new Date()
+  const date = new Date(dateStr)
+  const diffMs = now.getTime() - date.getTime()
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'now'
+  if (diffMin < 60) return `${diffMin}m`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h`
+  const diffDay = Math.floor(diffHr / 24)
+  if (diffDay < 7) return `${diffDay}d`
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+}
+
+function formatTimestamp(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+  if (isToday) {
+    return date.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })
+  }
+  return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
+}
+
+function StageBadge({ stage }: { stage: string | null | undefined }) {
+  if (!stage) return null
+  const stageInfo = DEAL_STAGES.find(s => s.value === stage)
+  if (!stageInfo) return null
+  return (
+    <Badge
+      variant="outline"
+      className="text-[10px] px-1.5 py-0 whitespace-nowrap"
+      style={{ borderColor: stageInfo.color, color: stageInfo.color }}
+    >
+      {stageInfo.label}
+    </Badge>
+  )
 }
 
 export default function InboxPage() {
-  const router = useRouter()
-  const [items, setItems] = useState<InboxItem[]>([])
+  const [threads, setThreads] = useState<Thread[]>([])
   const [loading, setLoading] = useState(true)
-  const [filterClassification, setFilterClassification] = useState<string>('all')
-  const [filterScout, setFilterScout] = useState<string>('all')
+  const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null)
+  const [messages, setMessages] = useState<Message[]>([])
+  const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null)
+  const [dealDetail, setDealDetail] = useState<any>(null)
+  const [threadLoading, setThreadLoading] = useState(false)
 
-  const fetchInbox = useCallback(async () => {
+  // Filters
+  const [channelFilter, setChannelFilter] = useState('all')
+  const [stageFilter, setStageFilter] = useState('all')
+  const [unreadOnly, setUnreadOnly] = useState(false)
+
+  // Composer
+  const [replyText, setReplyText] = useState('')
+  const [replyChannel, setReplyChannel] = useState('instagram')
+  const [sending, setSending] = useState(false)
+
+  const threadEndRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  // Fetch threads
+  const fetchThreads = useCallback(async () => {
     try {
       const params = new URLSearchParams()
-      if (filterClassification !== 'all') params.set('classification', filterClassification)
-      if (filterScout !== 'all') params.set('scout_id', filterScout)
+      if (channelFilter !== 'all') params.set('channel', channelFilter)
+      if (unreadOnly) params.set('unread_only', 'true')
 
-      const res = await fetch(`/api/inbox?${params}`)
+      const res = await fetch(`/api/conversations?${params}`)
       const data = await res.json()
-
-      if (data.items) {
-        // Sort by classification priority
-        const sorted = data.items.sort((a: InboxItem, b: InboxItem) => {
-          const aOrder = CLASSIFICATION_ORDER[a.ai_classification as keyof typeof CLASSIFICATION_ORDER] || 999
-          const bOrder = CLASSIFICATION_ORDER[b.ai_classification as keyof typeof CLASSIFICATION_ORDER] || 999
-          return aOrder - bOrder
-        })
-        setItems(sorted)
+      if (data.threads) {
+        let filtered = data.threads
+        if (stageFilter !== 'all') {
+          filtered = filtered.filter((t: Thread) => t.deal?.stage === stageFilter)
+        }
+        setThreads(filtered)
       }
     } catch (error) {
-      console.error('Error fetching inbox:', error)
+      console.error('Failed to fetch threads:', error)
     } finally {
       setLoading(false)
     }
-  }, [filterClassification, filterScout])
+  }, [channelFilter, stageFilter, unreadOnly])
 
   useEffect(() => {
-    fetchInbox()
-  }, [fetchInbox])
+    fetchThreads()
+  }, [fetchThreads])
 
-  const handleMarkRead = async (itemId: string) => {
+  // Fetch single thread
+  const openThread = useCallback(async (artistId: string) => {
+    setSelectedArtistId(artistId)
+    setThreadLoading(true)
     try {
-      const res = await fetch(`/api/inbox/${itemId}/mark-read`, {
-        method: 'POST',
+      const res = await fetch(`/api/conversations?artist_id=${artistId}`)
+      const data = await res.json()
+      setMessages(data.messages || [])
+      setArtistDetail(data.artist || null)
+      setDealDetail(data.deal || null)
+
+      // Default reply channel to most recent inbound channel
+      const lastInbound = [...(data.messages || [])].reverse().find((m: Message) => m.direction === 'inbound')
+      if (lastInbound) {
+        setReplyChannel(lastInbound.channel)
+      }
+
+      // Mark as read
+      await fetch('/api/conversations', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist_id: artistId }),
       })
 
-      if (!res.ok) throw new Error('Failed to mark as read')
-
-      // Remove from inbox
-      setItems(items.filter(item => item.id !== itemId))
+      // Update unread count in thread list
+      setThreads(prev => prev.map(t =>
+        t.artist_id === artistId ? { ...t, unread_count: 0 } : t
+      ))
     } catch (error) {
-      console.error('Error marking as read:', error)
-      alert('Failed to mark as read')
+      console.error('Failed to fetch thread:', error)
+    } finally {
+      setThreadLoading(false)
+    }
+  }, [])
+
+  // Scroll to bottom when messages change
+  useEffect(() => {
+    threadEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages])
+
+  // Realtime subscription
+  useEffect(() => {
+    const supabase = createClient()
+    const subscription = supabase
+      .channel('inbox-realtime')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'conversations' },
+        (payload) => {
+          const newMsg = payload.new as Message
+
+          // Update thread list
+          fetchThreads()
+
+          // If this message belongs to the open thread, add it
+          if (selectedArtistId && newMsg.artist_id === selectedArtistId) {
+            setMessages(prev => {
+              if (prev.some(m => m.id === newMsg.id)) return prev
+              return [...prev, newMsg]
+            })
+          }
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(subscription)
+    }
+  }, [selectedArtistId, fetchThreads])
+
+  // Send reply
+  const handleSend = async () => {
+    if (!replyText.trim() || !selectedArtistId || sending) return
+    setSending(true)
+
+    const optimisticMsg: Message = {
+      id: `temp_${Date.now()}`,
+      artist_id: selectedArtistId,
+      channel: replyChannel,
+      direction: 'outbound',
+      message_text: replyText,
+      sender: null,
+      ig_account_id: null,
+      ig_thread_id: null,
+      ig_message_id: null,
+      external_id: null,
+      scout_id: null,
+      metadata: {},
+      read: true,
+      created_at: new Date().toISOString(),
+      _status: 'sending',
+    }
+
+    setMessages(prev => [...prev, optimisticMsg])
+    setReplyText('')
+
+    try {
+      const res = await fetch('/api/messages/send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          artist_id: selectedArtistId,
+          channel: replyChannel,
+          message_text: replyText,
+        }),
+      })
+
+      const data = await res.json()
+      if (!res.ok) {
+        setMessages(prev => prev.map(m =>
+          m.id === optimisticMsg.id ? { ...m, _status: 'pending' } : m
+        ))
+        console.error('Send failed:', data.error)
+      }
+    } catch (error) {
+      console.error('Send error:', error)
+    } finally {
+      setSending(false)
     }
   }
 
-  const getTimeSince = (date: string) => {
-    const seconds = Math.floor((Date.now() - new Date(date).getTime()) / 1000)
-    
-    if (seconds < 60) return 'just now'
-    if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`
-    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`
-    if (seconds < 604800) return `${Math.floor(seconds / 86400)}d ago`
-    return new Date(date).toLocaleDateString()
+  // Update deal stage
+  const handleStageChange = async (newStage: string) => {
+    if (!dealDetail?.id) return
+    try {
+      const supabase = createClient()
+      await supabase
+        .from('deals')
+        .update({ stage: newStage, stage_changed_at: new Date().toISOString() })
+        .eq('id', dealDetail.id)
+      setDealDetail((prev: any) => prev ? { ...prev, stage: newStage } : prev)
+    } catch (error) {
+      console.error('Stage update error:', error)
+    }
   }
 
-  const getInitials = (name: string) => {
-    return name
-      .split(' ')
-      .map(n => n[0])
-      .join('')
-      .toUpperCase()
-      .substring(0, 2)
+  // Keyboard shortcut: Enter to send, Shift+Enter for newline
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      handleSend()
+    }
   }
 
-  if (loading) {
+  // ── THREAD LIST VIEW ──
+  if (!selectedArtistId) {
     return (
-      <div className="flex items-center justify-center h-full">
-        <LoadingSpinner size="lg" />
+      <div className="space-y-4">
+        <div className="flex items-center justify-between">
+          <h1 className="text-2xl font-bold">Inbox</h1>
+          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <MessageCircle className="h-4 w-4" />
+            {threads.length} conversations
+          </div>
+        </div>
+
+        {/* Filters */}
+        <Card className="p-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            <Filter className="h-4 w-4 text-muted-foreground" />
+            <select
+              value={channelFilter}
+              onChange={(e) => setChannelFilter(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="all">All Channels</option>
+              <option value="instagram">Instagram</option>
+              <option value="email">Email</option>
+            </select>
+            <select
+              value={stageFilter}
+              onChange={(e) => setStageFilter(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
+            >
+              <option value="all">All Stages</option>
+              {INBOX_STAGES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+            <label className="flex items-center gap-1.5 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={unreadOnly}
+                onChange={(e) => setUnreadOnly(e.target.checked)}
+                className="rounded border-input"
+              />
+              Unread only
+            </label>
+          </div>
+        </Card>
+
+        {/* Thread List */}
+        <Card className="divide-y">
+          {loading ? (
+            <div className="p-8 text-center text-muted-foreground">Loading conversations...</div>
+          ) : threads.length === 0 ? (
+            <div className="p-8 text-center text-muted-foreground">
+              <MessageCircle className="h-8 w-8 mx-auto mb-2 opacity-50" />
+              No conversations yet
+            </div>
+          ) : (
+            threads.map((thread) => (
+              <button
+                key={thread.artist_id}
+                onClick={() => openThread(thread.artist_id)}
+                className="w-full flex items-center gap-3 p-3 hover:bg-accent/50 transition-colors text-left"
+              >
+                {/* Avatar */}
+                <div className="h-10 w-10 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+                  {thread.artist?.image_url ? (
+                    <img src={thread.artist.image_url} alt="" className="h-10 w-10 rounded-full object-cover" />
+                  ) : (
+                    <User className="h-5 w-5 text-primary" />
+                  )}
+                </div>
+
+                {/* Content */}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-medium text-sm truncate">
+                      {thread.artist?.name || thread.last_message.sender || 'Unknown'}
+                    </span>
+                    {thread.unread_count > 0 && (
+                      <Badge className="bg-primary text-primary-foreground text-[10px] px-1.5 py-0 h-4 min-w-[16px] flex items-center justify-center">
+                        {thread.unread_count}
+                      </Badge>
+                    )}
+                    <StageBadge stage={thread.deal?.stage} />
+                  </div>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <ChannelIcon channel={thread.last_message.channel} className="h-3 w-3 text-muted-foreground flex-shrink-0" />
+                    <span className="text-xs text-muted-foreground truncate">
+                      {thread.last_message.direction === 'outbound' && 'You: '}
+                      {thread.last_message.text.slice(0, 60)}
+                      {thread.last_message.text.length > 60 ? '...' : ''}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Timestamp */}
+                <span className="text-[11px] text-muted-foreground whitespace-nowrap flex-shrink-0">
+                  {timeAgo(thread.last_message.created_at)}
+                </span>
+              </button>
+            ))
+          )}
+        </Card>
       </div>
     )
   }
 
+  // ── CONVERSATION DETAIL VIEW ──
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold">Inbox</h1>
-          <p className="text-muted-foreground">
-            {items.length} {items.length === 1 ? 'message' : 'messages'} requiring attention
-          </p>
+    <div className="flex h-[calc(100vh-7rem)] gap-4">
+      {/* Sidebar - Artist Info (30%) */}
+      <Card className="w-[30%] min-w-[280px] flex flex-col overflow-hidden">
+        <div className="p-4 border-b flex items-center gap-2">
+          <Button variant="ghost" size="sm" onClick={() => setSelectedArtistId(null)}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h2 className="font-semibold truncate">{artistDetail?.name || 'Artist'}</h2>
         </div>
-      </div>
 
-      {/* Filters */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="flex gap-4 items-center">
-            <Filter className="h-4 w-4 text-muted-foreground" />
-            <Select value={filterClassification} onValueChange={setFilterClassification}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="All Classifications" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Classifications</SelectItem>
-                <SelectItem value="interested">Interested</SelectItem>
-                <SelectItem value="question">Question</SelectItem>
-                <SelectItem value="objection">Objection</SelectItem>
-                <SelectItem value="warm_no">Warm No</SelectItem>
-                <SelectItem value="not_interested">Not Interested</SelectItem>
-                <SelectItem value="unclear">Unclear</SelectItem>
-              </SelectContent>
-            </Select>
-            <Select value={filterScout} onValueChange={setFilterScout}>
-              <SelectTrigger className="w-[200px]">
-                <SelectValue placeholder="All Scouts" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Scouts</SelectItem>
-                {/* TODO: Load scouts dynamically */}
-              </SelectContent>
-            </Select>
+        <div className="flex-1 overflow-y-auto p-4 space-y-4">
+          {/* Artist Avatar & Name */}
+          <div className="flex items-center gap-3">
+            <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
+              {artistDetail?.image_url ? (
+                <img src={artistDetail.image_url} alt="" className="h-14 w-14 rounded-full object-cover" />
+              ) : (
+                <User className="h-7 w-7 text-primary" />
+              )}
+            </div>
+            <div>
+              <h3 className="font-semibold">{artistDetail?.name}</h3>
+              {artistDetail?.qualification_status && (
+                <Badge
+                  variant="outline"
+                  className={`text-[10px] mt-0.5 ${
+                    artistDetail.qualification_status === 'qualified' ? 'text-green-500 border-green-500/30' :
+                    artistDetail.qualification_status === 'not_qualified' ? 'text-red-400 border-red-400/30' :
+                    artistDetail.qualification_status === 'review' ? 'text-yellow-400 border-yellow-400/30' :
+                    'text-muted-foreground'
+                  }`}
+                >
+                  {artistDetail.qualification_status === 'qualified' ? 'Qualified' :
+                   artistDetail.qualification_status === 'not_qualified' ? 'Not Qualified' :
+                   artistDetail.qualification_status === 'review' ? 'Review' : 'Pending'}
+                </Badge>
+              )}
+            </div>
           </div>
-        </CardContent>
+
+          {/* Stats */}
+          <div className="space-y-2 text-sm">
+            {(artistDetail?.spotify_monthly_listeners ?? 0) > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground flex items-center gap-1.5">
+                  <Music className="h-3.5 w-3.5" /> Monthly Listeners
+                </span>
+                <span className="font-medium">{(artistDetail?.spotify_monthly_listeners || 0).toLocaleString()}</span>
+              </div>
+            )}
+            {(artistDetail?.streams_last_month ?? 0) > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Total Streams</span>
+                <span className="font-medium">{(artistDetail?.streams_last_month || 0).toLocaleString()}</span>
+              </div>
+            )}
+            {(artistDetail?.track_count ?? 0) > 0 && (
+              <div className="flex justify-between">
+                <span className="text-muted-foreground">Tracks</span>
+                <span className="font-medium">{artistDetail?.track_count}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Offer Range */}
+          {(artistDetail?.estimated_offer_low || artistDetail?.estimated_offer_high) && (
+            <div className="bg-accent/50 rounded-lg p-3">
+              <div className="text-xs text-muted-foreground mb-1">Estimated Offer</div>
+              <div className="font-semibold">
+                {formatCurrency(artistDetail?.estimated_offer_low || 0)} – {formatCurrency(artistDetail?.estimated_offer_high || 0)}
+              </div>
+            </div>
+          )}
+
+          {/* Social Links */}
+          <div className="space-y-1.5">
+            <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Links</div>
+            {artistDetail?.instagram_handle && (
+              <a
+                href={`https://instagram.com/${artistDetail.instagram_handle}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Instagram className="h-3.5 w-3.5" />
+                @{artistDetail.instagram_handle}
+                <ExternalLink className="h-3 w-3 ml-auto" />
+              </a>
+            )}
+            {artistDetail?.youtube_url && (
+              <a
+                href={artistDetail.youtube_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Youtube className="h-3.5 w-3.5" />
+                YouTube
+                <ExternalLink className="h-3 w-3 ml-auto" />
+              </a>
+            )}
+            {artistDetail?.website && (
+              <a
+                href={artistDetail.website}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <Globe className="h-3.5 w-3.5" />
+                Website
+                <ExternalLink className="h-3 w-3 ml-auto" />
+              </a>
+            )}
+            {artistDetail?.email && (
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Mail className="h-3.5 w-3.5" />
+                <span className="truncate">{artistDetail.email}</span>
+              </div>
+            )}
+          </div>
+
+          {/* Management / Booking */}
+          {(artistDetail?.management_company || artistDetail?.booking_agency) && (
+            <div className="space-y-1.5">
+              <div className="text-xs font-medium text-muted-foreground uppercase tracking-wider">Contacts</div>
+              {artistDetail?.management_company && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Mgmt: </span>
+                  {artistDetail.management_company}
+                </div>
+              )}
+              {artistDetail?.booking_agency && (
+                <div className="text-sm">
+                  <span className="text-muted-foreground">Booking: </span>
+                  {artistDetail.booking_agency}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       </Card>
 
-      {/* Inbox Items */}
-      {items.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Mail className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">All caught up!</h3>
-            <p className="text-muted-foreground">
-              No messages requiring your attention right now.
-            </p>
-          </CardContent>
-        </Card>
-      ) : (
-        <div className="space-y-3">
-          {items.map((item) => (
-            <Card
-              key={item.id}
-              className="hover:shadow-md transition-shadow cursor-pointer"
-              onClick={() => router.push(`/pipeline/${item.deal.id}`)}
+      {/* Main Thread Area (70%) */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* Thread Header */}
+        <Card className="p-3 flex items-center gap-3 mb-3">
+          <h2 className="font-semibold">{artistDetail?.name || 'Conversation'}</h2>
+          <div className="flex-1" />
+          {dealDetail && (
+            <select
+              value={dealDetail.stage || ''}
+              onChange={(e) => handleStageChange(e.target.value)}
+              className="h-8 rounded-md border border-input bg-background px-2 text-sm"
             >
-              <CardContent className="p-4">
-                <div className="flex items-start gap-4">
-                  {/* Artist Avatar */}
-                  <div className="flex-shrink-0">
-                    {item.artist.image_url ? (
-                      <div className="relative h-12 w-12 rounded-full overflow-hidden">
-                        <Image
-                          src={item.artist.image_url}
-                          alt={item.artist.name}
-                          fill
-                          className="object-cover"
+              {INBOX_STAGES.map(s => (
+                <option key={s.value} value={s.value}>{s.label}</option>
+              ))}
+            </select>
+          )}
+        </Card>
+
+        {/* Messages */}
+        <Card className="flex-1 overflow-y-auto p-4 space-y-3">
+          {threadLoading ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              Loading messages...
+            </div>
+          ) : messages.length === 0 ? (
+            <div className="flex items-center justify-center h-full text-muted-foreground">
+              No messages yet
+            </div>
+          ) : (
+            <>
+              {messages.map((msg) => {
+                const isOutbound = msg.direction === 'outbound'
+                return (
+                  <div
+                    key={msg.id}
+                    className={`flex ${isOutbound ? 'justify-end' : 'justify-start'}`}
+                  >
+                    <div
+                      className={`max-w-[75%] rounded-2xl px-4 py-2.5 ${
+                        isOutbound
+                          ? 'bg-primary text-primary-foreground rounded-br-md'
+                          : 'bg-accent rounded-bl-md'
+                      }`}
+                    >
+                      <p className="text-sm whitespace-pre-wrap break-words">{msg.message_text}</p>
+                      <div className={`flex items-center gap-1.5 mt-1 ${
+                        isOutbound ? 'justify-end' : 'justify-start'
+                      }`}>
+                        <ChannelIcon
+                          channel={msg.channel}
+                          className={`h-3 w-3 ${isOutbound ? 'text-primary-foreground/60' : 'text-muted-foreground'}`}
                         />
-                      </div>
-                    ) : (
-                      <Avatar className="h-12 w-12">
-                        <AvatarFallback>
-                          {getInitials(item.artist.name)}
-                        </AvatarFallback>
-                      </Avatar>
-                    )}
-                  </div>
-
-                  {/* Content */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-start justify-between gap-4 mb-2">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <h3 className="font-semibold">{item.artist.name}</h3>
-                        {item.ai_classification && (
-                          <Badge
-                            variant="outline"
-                            className={CLASSIFICATION_COLORS[item.ai_classification as keyof typeof CLASSIFICATION_COLORS] || CLASSIFICATION_COLORS.unclear}
-                          >
-                            {item.ai_classification}
-                          </Badge>
+                        <span className={`text-[10px] ${
+                          isOutbound ? 'text-primary-foreground/60' : 'text-muted-foreground'
+                        }`}>
+                          {formatTimestamp(msg.created_at)}
+                        </span>
+                        {msg._status === 'sending' && (
+                          <Clock className={`h-3 w-3 ${isOutbound ? 'text-primary-foreground/60' : 'text-muted-foreground'}`} />
                         )}
-                        {item.requires_human_review && (
-                          <Badge variant="destructive" className="text-xs">
-                            Review Required
-                          </Badge>
+                        {msg._status === 'pending' && (
+                          <Clock className="h-3 w-3 text-yellow-400" />
                         )}
-                      </div>
-                      <div className="flex items-center gap-2 text-sm text-muted-foreground flex-shrink-0">
-                        <Clock className="h-4 w-4" />
-                        {getTimeSince(item.sent_at)}
-                      </div>
-                    </div>
-
-                    <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
-                      {item.body.substring(0, 150)}
-                      {item.body.length > 150 && '...'}
-                    </p>
-
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-4 text-sm">
-                        <div className="flex items-center gap-2">
-                          <Avatar className="h-6 w-6">
-                            <AvatarImage src={item.deal.scout.avatar_url || undefined} />
-                            <AvatarFallback className="text-xs">
-                              {getInitials(item.deal.scout.full_name)}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span className="text-muted-foreground">
-                            {item.deal.scout.full_name}
-                          </span>
-                        </div>
-                        {item.artist.estimated_offer_low && item.artist.estimated_offer_high && (
-                          <div className="text-muted-foreground">
-                            {formatCurrency(item.artist.estimated_offer_low)} — {formatCurrency(item.artist.estimated_offer_high)}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Quick Actions */}
-                      <div className="flex gap-2" onClick={(e) => e.stopPropagation()}>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleMarkRead(item.id)}
-                        >
-                          <CheckCircle className="h-4 w-4 mr-1" />
-                          Mark Read
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          asChild
-                        >
-                          <Link href={`/pipeline/${item.deal.id}`}>
-                            <ExternalLink className="h-4 w-4 mr-1" />
-                            View Deal
-                          </Link>
-                        </Button>
                       </div>
                     </div>
                   </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
+                )
+              })}
+              <div ref={threadEndRef} />
+            </>
+          )}
+        </Card>
+
+        {/* Composer */}
+        <Card className="mt-3 p-3">
+          <div className="flex items-end gap-2">
+            <select
+              value={replyChannel}
+              onChange={(e) => setReplyChannel(e.target.value)}
+              className="h-9 rounded-md border border-input bg-background px-2 text-sm flex-shrink-0"
+            >
+              <option value="instagram">Instagram</option>
+              <option value="email">Email</option>
+            </select>
+            <textarea
+              ref={textareaRef}
+              value={replyText}
+              onChange={(e) => setReplyText(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Type a message..."
+              rows={1}
+              className="flex-1 resize-none rounded-md border border-input bg-background px-3 py-2 text-sm min-h-[36px] max-h-[120px] focus:outline-none focus:ring-2 focus:ring-ring"
+              style={{ height: 'auto', overflow: 'hidden' }}
+              onInput={(e) => {
+                const target = e.target as HTMLTextAreaElement
+                target.style.height = 'auto'
+                target.style.height = Math.min(target.scrollHeight, 120) + 'px'
+              }}
+            />
+            <Button
+              size="sm"
+              onClick={handleSend}
+              disabled={!replyText.trim() || sending}
+              className="flex-shrink-0"
+            >
+              <Send className="h-4 w-4" />
+            </Button>
+          </div>
+          <p className="text-[10px] text-muted-foreground mt-1.5">
+            Enter to send · Shift+Enter for new line
+          </p>
+        </Card>
+      </div>
     </div>
   )
 }
