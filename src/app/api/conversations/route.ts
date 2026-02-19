@@ -4,8 +4,12 @@ import { createClient } from '@/lib/supabase/server'
 /**
  * GET /api/conversations
  *
- * Returns conversation threads grouped by artist, with last message preview.
- * Query params: channel, unread_only, artist_id (for single thread detail)
+ * Returns conversation threads grouped by artist (or sender for unmatched).
+ * Query params:
+ *   - artist_id: fetch thread for a specific artist
+ *   - thread_key: fetch thread by ig_thread_id (for unmatched conversations)
+ *   - channel: filter by channel
+ *   - unread_only: only show unread inbound
  */
 export async function GET(request: NextRequest) {
   try {
@@ -17,11 +21,12 @@ export async function GET(request: NextRequest) {
 
     const params = request.nextUrl.searchParams
     const artistId = params.get('artist_id')
+    const threadKey = params.get('thread_key')
     const channel = params.get('channel')
     const unreadOnly = params.get('unread_only') === 'true'
 
-    // Single thread: return all messages for an artist
-    if (artistId) {
+    // Single thread by artist_id
+    if (artistId && artistId !== 'null') {
       let query = supabase
         .from('conversations')
         .select('*')
@@ -38,7 +43,6 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ error: 'Failed to fetch thread' }, { status: 500 })
       }
 
-      // Fetch artist details
       const { data: artist } = await supabase
         .from('artists')
         .select(`
@@ -50,7 +54,6 @@ export async function GET(request: NextRequest) {
         .eq('id', artistId)
         .single()
 
-      // Fetch deal for this artist
       const { data: deal } = await supabase
         .from('deals')
         .select('id, stage, scout_id')
@@ -62,7 +65,23 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ messages, artist, deal })
     }
 
-    // Thread list: aggregate conversations by artist
+    // Single thread by ig_thread_id (unmatched conversations)
+    if (threadKey) {
+      const { data: messages, error } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('ig_thread_id', threadKey)
+        .order('created_at', { ascending: true })
+
+      if (error) {
+        console.error('[Conversations] Thread key fetch error:', error)
+        return NextResponse.json({ error: 'Failed to fetch thread' }, { status: 500 })
+      }
+
+      return NextResponse.json({ messages, artist: null, deal: null })
+    }
+
+    // Thread list: aggregate conversations
     let query = supabase
       .from('conversations')
       .select('*')
@@ -82,9 +101,11 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch conversations' }, { status: 500 })
     }
 
-    // Group by artist_id
+    // Group by artist_id when available, otherwise by ig_thread_id or sender
     const threadMap = new Map<string, {
-      artist_id: string
+      artist_id: string | null
+      thread_key: string | null
+      sender_name: string | null
       last_message: any
       last_inbound_at: string | null
       unread_count: number
@@ -92,12 +113,14 @@ export async function GET(request: NextRequest) {
     }>()
 
     for (const msg of allMessages || []) {
-      const key = msg.artist_id || `unknown_${msg.id}`
+      const key = msg.artist_id || msg.ig_thread_id || msg.sender || msg.id
       const existing = threadMap.get(key)
 
       if (!existing) {
         threadMap.set(key, {
           artist_id: msg.artist_id,
+          thread_key: msg.ig_thread_id || null,
+          sender_name: msg.sender,
           last_message: msg,
           last_inbound_at: msg.direction === 'inbound' ? msg.created_at : null,
           unread_count: (!msg.read && msg.direction === 'inbound') ? 1 : 0,
@@ -114,7 +137,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Fetch artist details for all threads
+    // Fetch artist details for matched threads
     const artistIds = Array.from(threadMap.values())
       .map(t => t.artist_id)
       .filter(Boolean) as string[]
@@ -155,8 +178,10 @@ export async function GET(request: NextRequest) {
       })
       .map(t => ({
         artist_id: t.artist_id,
-        artist: artistMap[t.artist_id] || null,
-        deal: dealMap[t.artist_id] || null,
+        thread_key: t.thread_key,
+        sender_name: t.sender_name,
+        artist: t.artist_id ? (artistMap[t.artist_id] || null) : null,
+        deal: t.artist_id ? (dealMap[t.artist_id] || null) : null,
         last_message: {
           text: t.last_message.message_text,
           channel: t.last_message.channel,
@@ -187,17 +212,23 @@ export async function PATCH(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { artist_id } = body
+    const { artist_id, thread_key } = body
 
-    if (!artist_id) {
-      return NextResponse.json({ error: 'Missing artist_id' }, { status: 400 })
+    if (!artist_id && !thread_key) {
+      return NextResponse.json({ error: 'Missing artist_id or thread_key' }, { status: 400 })
     }
 
-    const { error } = await supabase
+    let query = supabase
       .from('conversations')
       .update({ read: true })
-      .eq('artist_id', artist_id)
-      .eq('read', false)
+
+    if (artist_id) {
+      query = query.eq('artist_id', artist_id)
+    } else {
+      query = query.eq('ig_thread_id', thread_key)
+    }
+
+    const { error } = await query.eq('read', false)
 
     if (error) {
       console.error('[Conversations] Mark read error:', error)

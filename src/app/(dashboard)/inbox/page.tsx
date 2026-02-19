@@ -25,7 +25,9 @@ import {
 } from 'lucide-react'
 
 interface Thread {
-  artist_id: string
+  artist_id: string | null
+  thread_key: string | null
+  sender_name: string | null
   artist: {
     id: string
     name: string
@@ -143,10 +145,13 @@ export default function InboxPage() {
   const [threads, setThreads] = useState<Thread[]>([])
   const [loading, setLoading] = useState(true)
   const [selectedArtistId, setSelectedArtistId] = useState<string | null>(null)
+  const [selectedThreadKey, setSelectedThreadKey] = useState<string | null>(null)
+  const [selectedSenderName, setSelectedSenderName] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null)
   const [dealDetail, setDealDetail] = useState<any>(null)
   const [threadLoading, setThreadLoading] = useState(false)
+  const isThreadOpen = selectedArtistId !== null || selectedThreadKey !== null
 
   // Filters
   const [channelFilter, setChannelFilter] = useState('all')
@@ -189,11 +194,18 @@ export default function InboxPage() {
   }, [fetchThreads])
 
   // Fetch single thread
-  const openThread = useCallback(async (artistId: string) => {
+  const openThread = useCallback(async (thread: Thread) => {
+    const artistId = thread.artist_id
+    const threadKey = thread.thread_key
     setSelectedArtistId(artistId)
+    setSelectedThreadKey(threadKey)
+    setSelectedSenderName(thread.sender_name || thread.last_message.sender)
     setThreadLoading(true)
     try {
-      const res = await fetch(`/api/conversations?artist_id=${artistId}`)
+      const queryParam = artistId
+        ? `artist_id=${artistId}`
+        : `thread_key=${threadKey}`
+      const res = await fetch(`/api/conversations?${queryParam}`)
       const data = await res.json()
       setMessages(data.messages || [])
       setArtistDetail(data.artist || null)
@@ -209,12 +221,13 @@ export default function InboxPage() {
       await fetch('/api/conversations', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ artist_id: artistId }),
+        body: JSON.stringify(artistId ? { artist_id: artistId } : { thread_key: threadKey }),
       })
 
       // Update unread count in thread list
+      const matchKey = artistId || threadKey
       setThreads(prev => prev.map(t =>
-        t.artist_id === artistId ? { ...t, unread_count: 0 } : t
+        (t.artist_id || t.thread_key) === matchKey ? { ...t, unread_count: 0 } : t
       ))
     } catch (error) {
       console.error('Failed to fetch thread:', error)
@@ -243,7 +256,9 @@ export default function InboxPage() {
           fetchThreads()
 
           // If this message belongs to the open thread, add it
-          if (selectedArtistId && newMsg.artist_id === selectedArtistId) {
+          const matchesThread = (selectedArtistId && newMsg.artist_id === selectedArtistId) ||
+            (selectedThreadKey && newMsg.ig_thread_id === selectedThreadKey)
+          if (matchesThread) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev
               return [...prev, newMsg]
@@ -256,16 +271,16 @@ export default function InboxPage() {
     return () => {
       supabase.removeChannel(subscription)
     }
-  }, [selectedArtistId, fetchThreads])
+  }, [selectedArtistId, selectedThreadKey, fetchThreads])
 
   // Send reply
   const handleSend = async () => {
-    if (!replyText.trim() || !selectedArtistId || sending) return
+    if (!replyText.trim() || !isThreadOpen || sending) return
     setSending(true)
 
     const optimisticMsg: Message = {
       id: `temp_${Date.now()}`,
-      artist_id: selectedArtistId,
+      artist_id: selectedArtistId || null,
       channel: replyChannel,
       direction: 'outbound',
       message_text: replyText,
@@ -285,6 +300,15 @@ export default function InboxPage() {
     setReplyText('')
 
     try {
+      if (!selectedArtistId) {
+        setMessages(prev => prev.map(m =>
+          m.id === optimisticMsg.id ? { ...m, _status: 'pending' } : m
+        ))
+        console.error('Cannot send: no matched artist')
+        setSending(false)
+        return
+      }
+
       const res = await fetch('/api/messages/send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -332,8 +356,18 @@ export default function InboxPage() {
     }
   }
 
+  const closeThread = () => {
+    setSelectedArtistId(null)
+    setSelectedThreadKey(null)
+    setSelectedSenderName(null)
+    setMessages([])
+    setArtistDetail(null)
+    setDealDetail(null)
+    setReplyText('')
+  }
+
   // ── THREAD LIST VIEW ──
-  if (!selectedArtistId) {
+  if (!isThreadOpen) {
     return (
       <div className="space-y-4">
         <div className="flex items-center justify-between">
@@ -391,8 +425,8 @@ export default function InboxPage() {
           ) : (
             threads.map((thread) => (
               <button
-                key={thread.artist_id}
-                onClick={() => openThread(thread.artist_id)}
+                key={thread.artist_id || thread.thread_key || thread.last_message.created_at}
+                onClick={() => openThread(thread)}
                 className="w-full flex items-center gap-3 p-3 hover:bg-accent/50 transition-colors text-left"
               >
                 {/* Avatar */}
@@ -445,14 +479,14 @@ export default function InboxPage() {
       {/* Sidebar - Artist Info (30%) */}
       <Card className="w-[30%] min-w-[280px] flex flex-col overflow-hidden">
         <div className="p-4 border-b flex items-center gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setSelectedArtistId(null)}>
+          <Button variant="ghost" size="sm" onClick={closeThread}>
             <ArrowLeft className="h-4 w-4" />
           </Button>
-          <h2 className="font-semibold truncate">{artistDetail?.name || 'Artist'}</h2>
+          <h2 className="font-semibold truncate">{artistDetail?.name || selectedSenderName || 'Conversation'}</h2>
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
-          {/* Artist Avatar & Name */}
+          {/* Avatar & Name */}
           <div className="flex items-center gap-3">
             <div className="h-14 w-14 rounded-full bg-primary/10 flex items-center justify-center flex-shrink-0">
               {artistDetail?.image_url ? (
@@ -462,7 +496,7 @@ export default function InboxPage() {
               )}
             </div>
             <div>
-              <h3 className="font-semibold">{artistDetail?.name}</h3>
+              <h3 className="font-semibold">{artistDetail?.name || selectedSenderName || 'Unknown'}</h3>
               {artistDetail?.qualification_status && (
                 <Badge
                   variant="outline"
@@ -587,7 +621,7 @@ export default function InboxPage() {
       <div className="flex-1 flex flex-col min-w-0">
         {/* Thread Header */}
         <Card className="p-3 flex items-center gap-3 mb-3">
-          <h2 className="font-semibold">{artistDetail?.name || 'Conversation'}</h2>
+          <h2 className="font-semibold">{artistDetail?.name || selectedSenderName || 'Conversation'}</h2>
           <div className="flex-1" />
           {dealDetail && (
             <select
