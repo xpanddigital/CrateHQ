@@ -17,6 +17,7 @@ export async function GET(request: NextRequest) {
     const tags = searchParams.get('tags')?.split(',').filter(Boolean) || []
     const isContactable = searchParams.get('is_contactable')
     const isEnriched = searchParams.get('is_enriched')
+    const qualificationStatus = searchParams.get('qualification_status')
 
     const from = (page - 1) * limit
     const to = from + limit - 1
@@ -38,6 +39,10 @@ export async function GET(request: NextRequest) {
 
     if (isEnriched === 'true') {
       query = query.eq('is_enriched', true)
+    }
+
+    if (qualificationStatus && qualificationStatus !== 'all') {
+      query = query.eq('qualification_status', qualificationStatus)
     }
 
     query = query.order('created_at', { ascending: false })

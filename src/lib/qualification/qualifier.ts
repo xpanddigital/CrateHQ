@@ -63,9 +63,9 @@ export function qualifyArtist(artist: QualifiableArtist): QualificationResult {
     return { status: 'review', reason: 'Valuation calculation failed - has real data' }
   }
 
-  // Rule 4: Thin catalog
-  if (tracks > 0 && tracks < 5) {
-    return { status: 'not_qualified', reason: 'Insufficient catalog (fewer than 5 tracks)' }
+  // Rule 4: No catalog at all (0 known tracks, not just unknown)
+  if (tracks === 0 && (listeners > 0 || streams > 0)) {
+    return { status: 'review', reason: 'Has streams/listeners but 0 tracks in database' }
   }
 
   // Rule 5: Below minimum threshold
@@ -84,7 +84,7 @@ export function qualifyArtist(artist: QualifiableArtist): QualificationResult {
   }
 
   // Rule 8: Sweet spot — auto-qualify
-  if (offer >= 10_000 && offer <= 500_000 && tracks >= 5) {
+  if (offer >= 10_000 && offer <= 500_000 && tracks >= 1) {
     return { status: 'qualified', reason: 'Meets all qualification criteria' }
   }
 

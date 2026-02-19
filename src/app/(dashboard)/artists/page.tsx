@@ -31,6 +31,7 @@ export default function ArtistsPage() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [qualFilter, setQualFilter] = useState<string>('all')
   const [page, setPage] = useState(1)
   const [totalPages, setTotalPages] = useState(1)
   const [showAddModal, setShowAddModal] = useState(false)
@@ -69,6 +70,7 @@ export default function ArtistsPage() {
         page: page.toString(),
         limit: '25',
         ...(search && { search }),
+        ...(qualFilter !== 'all' && { qualification_status: qualFilter }),
       })
 
       const res = await fetch(`/api/artists?${params}`)
@@ -83,7 +85,7 @@ export default function ArtistsPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, search])
+  }, [page, search, qualFilter])
 
   useEffect(() => {
     fetchArtists()
@@ -484,8 +486,8 @@ export default function ArtistsPage() {
       />
 
       <Card className="p-4">
-        <div className="flex items-center gap-4">
-          <div className="relative flex-1">
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="relative flex-1 min-w-[200px]">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Search artists..."
@@ -497,6 +499,17 @@ export default function ArtistsPage() {
               className="pl-10"
             />
           </div>
+          <select
+            value={qualFilter}
+            onChange={(e) => { setQualFilter(e.target.value); setPage(1) }}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+          >
+            <option value="all">All Statuses</option>
+            <option value="qualified">Qualified</option>
+            <option value="not_qualified">Not Qualified</option>
+            <option value="review">Review Needed</option>
+            <option value="pending">Pending</option>
+          </select>
           {selectedIds.size > 0 && (
             <div className="flex gap-2">
               <Button
@@ -846,10 +859,10 @@ export default function ArtistsPage() {
                         {artist.name}
                       </Link>
                       {artist.qualification_status === 'not_qualified' && (
-                        <span title="Not qualified"><ShieldX className="h-3 w-3 text-red-400 flex-shrink-0" /></span>
+                        <span title={artist.qualification_reason || 'Not qualified'}><ShieldX className="h-3 w-3 text-red-400 flex-shrink-0" /></span>
                       )}
                       {artist.qualification_status === 'review' && (
-                        <span title="Review needed"><ShieldAlert className="h-3 w-3 text-yellow-400 flex-shrink-0" /></span>
+                        <span title={artist.qualification_reason || 'Review needed'}><ShieldAlert className="h-3 w-3 text-yellow-400 flex-shrink-0" /></span>
                       )}
                     </div>
                   </TableCell>
@@ -879,18 +892,18 @@ export default function ArtistsPage() {
                   <TableCell>
                     <div className="flex gap-1 flex-wrap">
                       {artist.qualification_status === 'qualified' && (
-                        <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30 text-[10px] px-1.5 py-0">
+                        <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30 text-[10px] px-1.5 py-0 cursor-help" title={artist.qualification_reason || 'Meets all qualification criteria'}>
                           Qualified
                         </Badge>
                       )}
                       {artist.qualification_status === 'not_qualified' && (
-                        <Badge variant="outline" className="gap-1 text-red-400 border-red-400/30 text-[10px] px-1.5 py-0">
-                          Not Qualified
+                        <Badge variant="outline" className="gap-1 text-red-400 border-red-400/30 text-[10px] px-1.5 py-0 cursor-help" title={artist.qualification_reason || 'Not qualified'}>
+                          {artist.qualification_reason || 'Not Qualified'}
                         </Badge>
                       )}
                       {artist.qualification_status === 'review' && (
-                        <Badge variant="outline" className="gap-1 text-yellow-400 border-yellow-400/30 text-[10px] px-1.5 py-0">
-                          Review
+                        <Badge variant="outline" className="gap-1 text-yellow-400 border-yellow-400/30 text-[10px] px-1.5 py-0 cursor-help" title={artist.qualification_reason || 'Needs manual review'}>
+                          {artist.qualification_reason || 'Review'}
                         </Badge>
                       )}
                       {(!artist.qualification_status || artist.qualification_status === 'pending') && (
