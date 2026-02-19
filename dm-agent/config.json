@@ -1,0 +1,14 @@
+{
+  "ig_account_id": "acct_01",
+  "ig_username": "your_instagram_username",
+  "ig_password": "your_instagram_password",
+  "proxy": "http://proxyuser:proxypass@proxyhost:proxyport",
+  "cratehq_base_url": "https://your-cratehq-app.vercel.app",
+  "webhook_secret": "whsec_replace_with_random_string",
+  "timezone": "America/Los_Angeles",
+  "active_start_hour": 8,
+  "active_end_hour": 22,
+  "winddown_start_hour": 20,
+  "poll_interval_active_sec": 180,
+  "poll_interval_winddown_sec": 600
+}
