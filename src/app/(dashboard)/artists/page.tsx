@@ -109,29 +109,57 @@ export default function ArtistsPage() {
     fetchCounts()
   }, [])
 
+  const [qualProgress, setQualProgress] = useState<{ done: number; total: number; qualified: number; not_qualified: number; review: number } | null>(null)
+
   const handleRerunQualification = async () => {
     setRunningQualification(true)
+    setQualProgress({ done: 0, total: 0, qualified: 0, not_qualified: 0, review: 0 })
+    let offset = 0
+    let totalQualified = 0
+    let totalNotQualified = 0
+    let totalReview = 0
+    let totalProcessed = 0
+    let totalSkippedManual = 0
+    let totalCount = 0
+
     try {
-      const res = await fetch('/api/artists/qualify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ force: false }),
-      })
-      const data = await res.json()
-      if (data.summary) {
-        setQualStats({
-          total: data.summary.total,
-          qualified: data.summary.qualified,
-          not_qualified: data.summary.not_qualified,
-          review: data.summary.review,
-          pending: 0,
+      let hasMore = true
+      while (hasMore) {
+        const res = await fetch('/api/artists/qualify', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ force: false, offset, limit: 500 }),
         })
-        toast({
-          title: 'Qualification complete',
-          description: `${data.processed} artists evaluated. Qualified: ${data.summary.qualified}, Not qualified: ${data.summary.not_qualified}, Review: ${data.summary.review}${data.skipped_manual > 0 ? `, ${data.skipped_manual} manual overrides kept` : ''}`,
-        })
+
+        if (!res.ok) throw new Error('Qualification failed')
+
+        const data = await res.json()
+        totalQualified += data.summary.qualified
+        totalNotQualified += data.summary.not_qualified
+        totalReview += data.summary.review
+        totalProcessed += data.processed
+        totalSkippedManual += data.skipped_manual
+        totalCount = data.total
+        hasMore = data.hasMore
+        offset = data.nextOffset || 0
+
+        const done = Math.min(offset, totalCount)
+        setQualProgress({ done, total: totalCount, qualified: totalQualified, not_qualified: totalNotQualified, review: totalReview })
+        await new Promise(r => setTimeout(r, 0))
       }
-      // Refresh unenriched count since qualification may have changed who's eligible
+
+      setQualStats({
+        total: totalCount,
+        qualified: totalQualified,
+        not_qualified: totalNotQualified,
+        review: totalReview,
+        pending: totalCount - totalQualified - totalNotQualified - totalReview,
+      })
+      toast({
+        title: 'Qualification complete',
+        description: `${totalProcessed.toLocaleString()} artists evaluated. Qualified: ${totalQualified.toLocaleString()}, Not qualified: ${totalNotQualified.toLocaleString()}, Review: ${totalReview.toLocaleString()}${totalSkippedManual > 0 ? `, ${totalSkippedManual} manual overrides kept` : ''}`,
+      })
+
       const countRes = await fetch('/api/artists/unenriched-count')
       const countData = await countRes.json()
       setUnenrichedCount(countData.count || 0)
@@ -140,6 +168,7 @@ export default function ArtistsPage() {
       toast({ title: 'Error', description: 'Failed to run qualification', variant: 'destructive' })
     } finally {
       setRunningQualification(false)
+      setQualProgress(null)
     }
   }
 
@@ -585,6 +614,30 @@ export default function ArtistsPage() {
         </Card>
       )}
 
+      {/* Qualification Progress Banner */}
+      {qualProgress && qualProgress.total > 0 && (
+        <Card className="p-4 border-green-500/30 bg-green-500/5">
+          <div className="flex items-center gap-3 mb-2">
+            <Loader2 className="h-4 w-4 animate-spin text-green-500" />
+            <span className="font-medium text-sm">
+              Qualifying artists: {qualProgress.done.toLocaleString()} / {qualProgress.total.toLocaleString()}
+            </span>
+            <span className="text-xs text-muted-foreground ml-auto">
+              {qualProgress.qualified.toLocaleString()} qualified &middot; {qualProgress.not_qualified.toLocaleString()} not qualified &middot; {qualProgress.review.toLocaleString()} review
+            </span>
+          </div>
+          <div className="w-full bg-muted rounded-full h-2">
+            <div
+              className="bg-green-500 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${Math.round((qualProgress.done / qualProgress.total) * 100)}%` }}
+            />
+          </div>
+          <p className="text-xs text-muted-foreground mt-1">
+            {Math.round((qualProgress.done / qualProgress.total) * 100)}% complete — processing 500 artists per batch
+          </p>
+        </Card>
+      )}
+
       {/* Data Health Panel */}
       {showDataHealth && healthData && (
         <Card className="p-4 border-blue-500/30 bg-blue-500/5">
@@ -824,15 +877,35 @@ export default function ArtistsPage() {
                     )}
                   </TableCell>
                   <TableCell>
-                    <div className="flex gap-1">
+                    <div className="flex gap-1 flex-wrap">
+                      {artist.qualification_status === 'qualified' && (
+                        <Badge variant="outline" className="gap-1 text-green-500 border-green-500/30 text-[10px] px-1.5 py-0">
+                          Qualified
+                        </Badge>
+                      )}
+                      {artist.qualification_status === 'not_qualified' && (
+                        <Badge variant="outline" className="gap-1 text-red-400 border-red-400/30 text-[10px] px-1.5 py-0">
+                          Not Qualified
+                        </Badge>
+                      )}
+                      {artist.qualification_status === 'review' && (
+                        <Badge variant="outline" className="gap-1 text-yellow-400 border-yellow-400/30 text-[10px] px-1.5 py-0">
+                          Review
+                        </Badge>
+                      )}
+                      {(!artist.qualification_status || artist.qualification_status === 'pending') && (
+                        <Badge variant="outline" className="gap-1 text-muted-foreground text-[10px] px-1.5 py-0">
+                          Pending
+                        </Badge>
+                      )}
                       {artist.is_contactable ? (
-                        <Badge variant="outline" className="gap-1">
-                          <CheckCircle className="h-3 w-3" />
-                          Contactable
+                        <Badge variant="outline" className="gap-1 text-[10px] px-1.5 py-0">
+                          <CheckCircle className="h-2.5 w-2.5" />
+                          Email
                         </Badge>
                       ) : (
-                        <Badge variant="outline" className="gap-1 text-muted-foreground">
-                          <XCircle className="h-3 w-3" />
+                        <Badge variant="outline" className="gap-1 text-muted-foreground text-[10px] px-1.5 py-0">
+                          <XCircle className="h-2.5 w-2.5" />
                           No Email
                         </Badge>
                       )}
