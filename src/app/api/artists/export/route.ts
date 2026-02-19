@@ -53,11 +53,14 @@ export async function GET(request: NextRequest) {
       })
     } else {
       // Full export
-      csv = 'name,spotify_url,spotify_monthly_listeners,streams_last_month,track_count,genres,country,email,instagram_handle,website,estimated_offer_low,estimated_offer,estimated_offer_high,is_enriched,is_contactable,source,created_at\n'
+      csv = 'name,spotify_url,spotify_monthly_listeners,streams_last_month,track_count,genres,country,email,email_secondary,email_management,instagram_handle,instagram_url,website,youtube_url,estimated_offer_low,estimated_offer,estimated_offer_high,qualification_status,qualification_reason,is_enriched,is_contactable,source,created_at\n'
       
       artists?.forEach(artist => {
+        const igUrl = artist.instagram_handle
+          ? `https://instagram.com/${artist.instagram_handle}`
+          : ''
         const row = [
-          `"${artist.name}"`,
+          `"${(artist.name || '').replace(/"/g, '""')}"`,
           artist.spotify_url || '',
           artist.spotify_monthly_listeners || 0,
           artist.streams_last_month || 0,
@@ -65,11 +68,17 @@ export async function GET(request: NextRequest) {
           `"${Array.isArray(artist.genres) ? artist.genres.join(';') : ''}"`,
           artist.country || '',
           artist.email || '',
+          artist.email_secondary || '',
+          artist.email_management || '',
           artist.instagram_handle || '',
+          igUrl,
           artist.website || '',
+          artist.youtube_url || '',
           artist.estimated_offer_low || '',
           artist.estimated_offer || '',
           artist.estimated_offer_high || '',
+          artist.qualification_status || '',
+          `"${(artist.qualification_reason || '').replace(/"/g, '""')}"`,
           artist.is_enriched,
           artist.is_contactable,
           artist.source || '',
