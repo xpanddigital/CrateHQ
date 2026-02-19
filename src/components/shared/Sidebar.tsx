@@ -18,6 +18,7 @@ import {
   X,
   FileText,
   ClipboardList,
+  Wifi,
 } from 'lucide-react'
 import { Profile } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -36,6 +37,7 @@ const navigation = [
   { name: 'Enrichment Logs', href: '/enrichment-logs', icon: ClipboardList, roles: ['admin', 'scout'] },
   { name: 'Scraping', href: '/scraping', icon: Download, roles: ['admin'] },
   { name: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['admin'] },
+  { name: 'DM Agents', href: '/admin/agents', icon: Wifi, roles: ['admin'] },
   { name: 'Scouts', href: '/scouts', icon: Users, roles: ['admin'] },
   { name: 'Settings', href: '/settings', icon: Settings, roles: ['admin', 'scout'] },
 ]
