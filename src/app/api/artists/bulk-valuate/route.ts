@@ -62,17 +62,19 @@ export async function POST(request: NextRequest) {
     const updates: Array<{ id: string; payload: Record<string, any> }> = []
 
     for (const artist of artists) {
-      if (!artist.streams_last_month && !artist.spotify_monthly_listeners) {
-        skipped++
-        continue
-      }
-
       let streamsForValuation = artist.streams_last_month || 0
       let streamsEstimated = artist.streams_estimated || false
 
-      if (streamsForValuation <= 0 && artist.spotify_monthly_listeners > 0) {
+      // Estimate streams from monthly listeners if no stream data
+      if (streamsForValuation <= 0 && (artist.spotify_monthly_listeners || 0) > 0) {
         streamsForValuation = Math.round(artist.spotify_monthly_listeners * 3.5)
         streamsEstimated = true
+      }
+
+      // Only skip if truly no data at all
+      if (streamsForValuation <= 0 && !artist.spotify_monthly_listeners && !artist.track_count) {
+        skipped++
+        continue
       }
 
       const valuation = estimateCatalogValue({
@@ -90,7 +92,8 @@ export async function POST(request: NextRequest) {
         updated_at: new Date().toISOString(),
       }
 
-      if (streamsEstimated && !artist.streams_last_month) {
+      // Persist the estimated streams so future valuations don't re-skip
+      if (streamsEstimated) {
         payload.streams_last_month = streamsForValuation
         payload.streams_estimated = true
       }
