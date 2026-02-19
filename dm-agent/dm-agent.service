@@ -1,0 +1,16 @@
+[Unit]
+Description=CrateHQ Instagram DM Agent
+After=network.target
+
+[Service]
+Type=simple
+User=YOUR_USERNAME
+WorkingDirectory=/home/YOUR_USERNAME/dm-agent
+ExecStart=/home/YOUR_USERNAME/dm-agent/venv/bin/python dm_agent.py
+Restart=always
+RestartSec=30
+StandardOutput=append:/home/YOUR_USERNAME/dm-agent/dm_agent.log
+StandardError=append:/home/YOUR_USERNAME/dm-agent/dm_agent.log
+
+[Install]
+WantedBy=multi-user.target
