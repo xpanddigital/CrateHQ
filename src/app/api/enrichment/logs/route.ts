@@ -66,11 +66,11 @@ export async function GET(request: NextRequest) {
     const isAdmin = profile?.role === 'admin'
 
     // Fetch enrichment logs with artist data for full export
+    // run_by is TEXT (not a FK to profiles), so we don't join profiles here
     const query = supabase
       .from('enrichment_logs')
       .select(`
         *,
-        scout:profiles!run_by(full_name, email),
         artist:artists!artist_id(
           spotify_url,
           website,

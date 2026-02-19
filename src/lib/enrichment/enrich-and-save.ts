@@ -107,6 +107,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
   }
 
   // Save enrichment log
+  // run_by is TEXT — pass user UUID for manual runs, 'cron-worker' for server-side
   const { error: logError } = await supabase
     .from('enrichment_logs')
     .insert({
@@ -124,7 +125,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
     })
 
   if (logError) {
-    console.error(`[Enrich] Failed to save log:`, logError.message)
+    console.error(`[Enrich] Failed to save log:`, logError.message, logError)
   }
 
   return {
