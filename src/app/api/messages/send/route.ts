@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
-import { InstantlyClient } from '@/lib/instantly/client'
 
 export async function POST(request: NextRequest) {
   try {
@@ -115,32 +114,45 @@ async function handleEmailSend(
     return NextResponse.json({ error: 'Artist has no email address' }, { status: 400 })
   }
 
-  // Get Instantly API key from integrations
-  const { data: integration } = await supabase
-    .from('integrations')
-    .select('api_key')
-    .eq('service', 'instantly')
-    .eq('is_active', true)
-    .maybeSingle()
+  // Get Instantly API key: prefer env var, fall back to integrations table
+  let apiKey = process.env.INSTANTLY_API_KEY || ''
+  if (!apiKey) {
+    const { data: integration } = await supabase
+      .from('integrations')
+      .select('api_key')
+      .eq('service', 'instantly')
+      .eq('is_active', true)
+      .maybeSingle()
+    apiKey = integration?.api_key || ''
+  }
 
-  if (!integration?.api_key) {
+  if (!apiKey) {
     return NextResponse.json(
-      { error: 'Instantly integration not configured. Add your API key in Settings.' },
+      { error: 'Instantly API key not configured. Set INSTANTLY_API_KEY env var or add in Settings.' },
       { status: 400 }
     )
   }
 
-  // Send via Instantly V2 reply endpoint
-  const instantly = new InstantlyClient(integration.api_key)
+  // Find the most recent email thread for context (reply_to_uuid)
+  const { data: lastEmail } = await supabase
+    .from('conversations')
+    .select('external_id, metadata')
+    .eq('artist_id', params.artist_id)
+    .eq('channel', 'email')
+    .not('external_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
   try {
     const res = await fetch('https://api.instantly.ai/api/v2/emails/reply', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${integration.api_key}`,
+        'Authorization': `Bearer ${apiKey}`,
       },
       body: JSON.stringify({
-        reply_to_uuid: null,
+        reply_to_uuid: lastEmail?.external_id || null,
         to: artist.email,
         body: params.message_text,
       }),
@@ -164,10 +176,14 @@ async function handleEmailSend(
         channel: 'email',
         direction: 'outbound',
         message_text: params.message_text,
-        sender: params.scout_id,
+        sender: artist.email,
         external_id: result?.id || null,
         scout_id: params.scout_id,
-        metadata: { instantly_response: result },
+        metadata: {
+          to_email: artist.email,
+          instantly_response: result,
+          raw_event: 'manual_send',
+        },
         read: true,
       })
       .select('id')
