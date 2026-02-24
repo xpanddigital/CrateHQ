@@ -9,7 +9,8 @@
  * API docs: https://developer.instantly.ai/
  */
 
-const BASE_URL = 'https://api.instantly.ai/api/v1'
+const BASE_URL_V1 = 'https://api.instantly.ai/api/v1'
+const BASE_URL_V2 = 'https://api.instantly.ai/api/v2'
 
 export interface InstantlyLead {
   email: string
@@ -43,13 +44,33 @@ export class InstantlyClient {
     this.apiKey = apiKey
   }
 
+  private get authHeaders() {
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${this.apiKey}`,
+    }
+  }
+
   /**
-   * Test the API connection
+   * Test the API connection (tries V2 first, falls back to V1)
    */
   async testConnection(): Promise<{ success: boolean; error?: string }> {
     try {
-      const campaigns = await this.listCampaigns()
-      return { success: true }
+      // Try V2 auth first (Bearer token)
+      const v2Res = await fetch(`${BASE_URL_V2}/campaigns?limit=1`, {
+        method: 'GET',
+        headers: this.authHeaders,
+      })
+      if (v2Res.ok) return { success: true }
+
+      // Fall back to V1 auth (query param)
+      const v1Res = await fetch(`${BASE_URL_V1}/campaign/list?api_key=${this.apiKey}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' },
+      })
+      if (v1Res.ok) return { success: true }
+
+      return { success: false, error: `Instantly API error: ${v2Res.status} ${v2Res.statusText}` }
     } catch (error) {
       return { success: false, error: String(error) }
     }
@@ -59,7 +80,18 @@ export class InstantlyClient {
    * List all campaigns
    */
   async listCampaigns(): Promise<InstantlyCampaign[]> {
-    const res = await fetch(`${BASE_URL}/campaign/list?api_key=${this.apiKey}`, {
+    // Try V2 first
+    const v2Res = await fetch(`${BASE_URL_V2}/campaigns?limit=100`, {
+      method: 'GET',
+      headers: this.authHeaders,
+    })
+    if (v2Res.ok) {
+      const data = await v2Res.json()
+      return data.items || data || []
+    }
+
+    // Fall back to V1
+    const res = await fetch(`${BASE_URL_V1}/campaign/list?api_key=${this.apiKey}`, {
       method: 'GET',
       headers: { 'Content-Type': 'application/json' },
     })
@@ -75,13 +107,10 @@ export class InstantlyClient {
    * Create a new campaign
    */
   async createCampaign(name: string): Promise<{ id: string; name: string }> {
-    const res = await fetch(`${BASE_URL}/campaign/create`, {
+    const res = await fetch(`${BASE_URL_V2}/campaigns`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        api_key: this.apiKey,
-        name,
-      }),
+      headers: this.authHeaders,
+      body: JSON.stringify({ name }),
     })
 
     if (!res.ok) {
@@ -115,11 +144,10 @@ export class InstantlyClient {
         ),
       }))
 
-      const res = await fetch(`${BASE_URL}/lead/add`, {
+      const res = await fetch(`${BASE_URL_V2}/leads`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.authHeaders,
         body: JSON.stringify({
-          api_key: this.apiKey,
           campaign_id: campaignId,
           skip_if_in_workspace: true,
           leads: formattedLeads,
@@ -149,10 +177,10 @@ export class InstantlyClient {
    */
   async getCampaignSummary(campaignId: string): Promise<CampaignSummary> {
     const res = await fetch(
-      `${BASE_URL}/analytics/campaign/summary?api_key=${this.apiKey}&id=${campaignId}`,
+      `${BASE_URL_V2}/campaigns/${campaignId}/analytics/summary`,
       {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.authHeaders,
       }
     )
 
@@ -168,10 +196,10 @@ export class InstantlyClient {
    */
   async getCampaignStatus(campaignId: string): Promise<string> {
     const res = await fetch(
-      `${BASE_URL}/campaign/get/status?api_key=${this.apiKey}&id=${campaignId}`,
+      `${BASE_URL_V2}/campaigns/${campaignId}`,
       {
         method: 'GET',
-        headers: { 'Content-Type': 'application/json' },
+        headers: this.authHeaders,
       }
     )
 
