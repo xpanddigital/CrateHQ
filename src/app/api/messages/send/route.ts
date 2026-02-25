@@ -164,24 +164,35 @@ async function handleEmailSend(
     }
   }
 
-  // If we still don't have a sending account, the inbound webhook may not have
-  // stored to_email. Try to get it from Instantly's email accounts API.
-  let eaccount = sendingAccount
-  if (!eaccount) {
-    try {
-      const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-      })
-      if (accountsRes.ok) {
-        const accountsData = await accountsRes.json()
-        const accounts = accountsData.items || accountsData || []
-        if (accounts.length > 0) {
-          eaccount = accounts[0].email || accounts[0].email_address
-        }
-      }
-    } catch (e) {
-      console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
+  // Fetch Instantly's actual email accounts to validate/resolve eaccount
+  let instantlyAccounts: string[] = []
+  try {
+    const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+    if (accountsRes.ok) {
+      const accountsData = await accountsRes.json()
+      const accounts = accountsData.items || accountsData || []
+      instantlyAccounts = accounts
+        .map((a: any) => (a.email || a.email_address || '').toLowerCase())
+        .filter(Boolean)
     }
+  } catch (e) {
+    console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
+  }
+
+  // Validate the resolved sending account against Instantly's real accounts
+  let eaccount = sendingAccount
+  if (eaccount && instantlyAccounts.length > 0) {
+    if (!instantlyAccounts.includes(eaccount.toLowerCase())) {
+      console.log(`[Messages/Send] Resolved account "${eaccount}" is not an Instantly account. Available: ${instantlyAccounts.join(', ')}`)
+      eaccount = null
+    }
+  }
+
+  // Fall back to first Instantly account
+  if (!eaccount && instantlyAccounts.length > 0) {
+    eaccount = instantlyAccounts[0]
   }
 
   if (!eaccount) {
@@ -191,7 +202,7 @@ async function handleEmailSend(
     )
   }
 
-  console.log(`[Messages/Send] Resolved eaccount: ${eaccount} (from ${sendingAccount ? 'conversation history' : 'Instantly API'})`)
+  console.log(`[Messages/Send] Using eaccount: ${eaccount} (validated against Instantly)`)
 
   let instantlyResult: any = null
   let instantlyError: string | null = null
