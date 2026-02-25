@@ -175,28 +175,85 @@ async function handleEmailSend(
     )
   }
 
-  // Always save the conversation first so the reply is never lost
   let instantlyResult: any = null
   let instantlyError: string | null = null
 
+  // Resolve reply_to_uuid: check our records, then search Instantly API
+  let replyToUuid = lastConvo?.metadata?.instantly_uuid || null
+
+  if (!replyToUuid) {
+    // Search all conversations for this artist for any instantly_uuid
+    const { data: allConvos } = await supabase
+      .from('conversations')
+      .select('metadata')
+      .eq('artist_id', params.artist_id)
+      .eq('channel', 'email')
+      .not('metadata->instantly_uuid', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(5)
+
+    for (const c of allConvos || []) {
+      if (c.metadata?.instantly_uuid) {
+        replyToUuid = c.metadata.instantly_uuid
+        break
+      }
+    }
+  }
+
+  if (!replyToUuid) {
+    // Last resort: search Instantly API for emails involving this artist
+    try {
+      const searchRes = await fetch(
+        `https://api.instantly.ai/api/v2/emails?search=${encodeURIComponent(artist.email)}&limit=1`,
+        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      )
+      if (searchRes.ok) {
+        const searchData = await searchRes.json()
+        const emails = searchData.data || searchData.items || searchData || []
+        if (Array.isArray(emails) && emails.length > 0) {
+          replyToUuid = emails[0].id || emails[0].uuid || null
+          console.log(`[Messages/Send] Found Instantly UUID from search: ${replyToUuid}`)
+        }
+      }
+    } catch (e) {
+      console.error('[Messages/Send] Instantly email search failed:', e)
+    }
+  }
+
   try {
-    const requestBody: any = {
-      eaccount,
-      subject,
-      to_address_email_list: artist.email,
-      body: {
-        text: params.message_text,
-        html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
-      },
+    let endpoint: string
+    let requestBody: any
+
+    if (replyToUuid) {
+      // Reply to existing thread
+      endpoint = 'https://api.instantly.ai/api/v2/emails/reply'
+      requestBody = {
+        reply_to_uuid: replyToUuid,
+        eaccount,
+        subject,
+        to_address_email_list: artist.email,
+        body: {
+          text: params.message_text,
+          html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
+        },
+      }
+      console.log(`[Messages/Send] Replying via Instantly: to=${artist.email}, from=${eaccount}, uuid=${replyToUuid}`)
+    } else {
+      // No existing thread — send as a new email
+      endpoint = 'https://api.instantly.ai/api/v2/emails/send'
+      requestBody = {
+        eaccount,
+        subject,
+        to_address_email_list: [artist.email],
+        body: {
+          text: params.message_text,
+          html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
+        },
+      }
+      console.log(`[Messages/Send] Sending new email via Instantly: to=${artist.email}, from=${eaccount}`)
     }
 
-    if (lastConvo?.metadata?.instantly_uuid) {
-      requestBody.reply_to_uuid = lastConvo.metadata.instantly_uuid
-    }
-
-    console.log(`[Messages/Send] Sending via Instantly: to=${artist.email}, from=${eaccount}, subject=${subject}`)
-
-    const res = await fetch('https://api.instantly.ai/api/v2/emails/reply', {
+    const res = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -208,7 +265,7 @@ async function handleEmailSend(
     const result = await res.json()
 
     if (!res.ok) {
-      console.error('[Messages/Send] Instantly reply error:', JSON.stringify(result))
+      console.error('[Messages/Send] Instantly error:', JSON.stringify(result))
       instantlyError = result?.message || result?.error || res.statusText
     } else {
       instantlyResult = result
