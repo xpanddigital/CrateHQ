@@ -22,6 +22,7 @@ import {
   User,
   MessageCircle,
   Filter,
+  RefreshCw,
 } from 'lucide-react'
 
 interface Thread {
@@ -162,6 +163,7 @@ export default function InboxPage() {
   const [replyText, setReplyText] = useState('')
   const [replyChannel, setReplyChannel] = useState('instagram')
   const [sending, setSending] = useState(false)
+  const [syncing, setSyncing] = useState(false)
 
   const threadEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -193,6 +195,30 @@ export default function InboxPage() {
     fetchThreads()
   }, [fetchThreads])
 
+  // Sync emails from Instantly for this artist
+  const syncInstantly = useCallback(async (artistId: string | null) => {
+    if (!artistId) return
+    setSyncing(true)
+    try {
+      const res = await fetch('/api/conversations/sync-instantly', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ artist_id: artistId }),
+      })
+      const data = await res.json()
+      if (data.synced > 0) {
+        // Re-fetch thread to include synced messages
+        const threadRes = await fetch(`/api/conversations?artist_id=${artistId}`)
+        const threadData = await threadRes.json()
+        setMessages(threadData.messages || [])
+      }
+    } catch (error) {
+      console.error('Instantly sync failed:', error)
+    } finally {
+      setSyncing(false)
+    }
+  }, [])
+
   // Fetch single thread
   const openThread = useCallback(async (thread: Thread) => {
     const artistId = thread.artist_id
@@ -202,6 +228,11 @@ export default function InboxPage() {
     setSelectedSenderName(thread.sender_name || thread.last_message.sender)
     setThreadLoading(true)
     try {
+      // Sync Instantly emails in the background (don't block loading)
+      if (artistId) {
+        syncInstantly(artistId)
+      }
+
       const queryParam = artistId
         ? `artist_id=${artistId}`
         : `thread_key=${threadKey}`
@@ -234,7 +265,7 @@ export default function InboxPage() {
     } finally {
       setThreadLoading(false)
     }
-  }, [])
+  }, [syncInstantly])
 
   // Scroll to bottom when messages change
   useEffect(() => {
@@ -622,6 +653,17 @@ export default function InboxPage() {
         {/* Thread Header */}
         <Card className="p-3 flex items-center gap-3 mb-3">
           <h2 className="font-semibold">{artistDetail?.name || selectedSenderName || 'Conversation'}</h2>
+          {selectedArtistId && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => syncInstantly(selectedArtistId)}
+              disabled={syncing}
+              title="Sync emails from Instantly"
+            >
+              <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
+            </Button>
+          )}
           <div className="flex-1" />
           {dealDetail && (
             <select
