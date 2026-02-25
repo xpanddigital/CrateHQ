@@ -164,51 +164,14 @@ async function handleEmailSend(
     }
   }
 
-  // Fetch Instantly's actual email accounts to validate/resolve eaccount
-  let instantlyAccounts: string[] = []
-  try {
-    const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
-      headers: { 'Authorization': `Bearer ${apiKey}` },
-    })
-    if (accountsRes.ok) {
-      const accountsData = await accountsRes.json()
-      const accounts = accountsData.items || accountsData || []
-      instantlyAccounts = accounts
-        .map((a: any) => (a.email || a.email_address || '').toLowerCase())
-        .filter(Boolean)
-    }
-  } catch (e) {
-    console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
-  }
-
-  // Validate the resolved sending account against Instantly's real accounts
-  let eaccount = sendingAccount
-  if (eaccount && instantlyAccounts.length > 0) {
-    if (!instantlyAccounts.includes(eaccount.toLowerCase())) {
-      console.log(`[Messages/Send] Resolved account "${eaccount}" is not an Instantly account. Available: ${instantlyAccounts.join(', ')}`)
-      eaccount = null
-    }
-  }
-
-  // Fall back to first Instantly account
-  if (!eaccount && instantlyAccounts.length > 0) {
-    eaccount = instantlyAccounts[0]
-  }
-
-  if (!eaccount) {
-    return NextResponse.json(
-      { error: 'No sending email account found. Configure an email account in Instantly.' },
-      { status: 400 }
-    )
-  }
-
-  console.log(`[Messages/Send] Using eaccount: ${eaccount} (validated against Instantly)`)
-
   let instantlyResult: any = null
   let instantlyError: string | null = null
 
-  // Resolve reply_to_uuid from conversation history
+  // Resolve reply_to_uuid AND the original sending account from Instantly
   let replyToUuid: string | null = null
+  let instantlySenderAccount: string | null = null
+
+  // Check conversation history first
   for (const convo of recentConvos || []) {
     if (convo.metadata?.instantly_uuid) {
       replyToUuid = convo.metadata.instantly_uuid
@@ -216,25 +179,87 @@ async function handleEmailSend(
     }
   }
 
-  if (!replyToUuid) {
-    // Last resort: search Instantly API for emails involving this artist
+  // Search Instantly API for the email thread — this gives us both the UUID
+  // and the original sender (our actual sending account)
+  try {
+    const searchRes = await fetch(
+      `https://api.instantly.ai/api/v2/emails?search=${encodeURIComponent(artist.email)}&limit=5`,
+      { headers: { 'Authorization': `Bearer ${apiKey}` } }
+    )
+    if (searchRes.ok) {
+      const searchData = await searchRes.json()
+      const emails = searchData.data || searchData.items || searchData || []
+      console.log(`[Messages/Send] Instantly email search returned ${Array.isArray(emails) ? emails.length : 0} results`)
+
+      if (Array.isArray(emails)) {
+        for (const em of emails) {
+          // Log the structure so we can see what fields are available
+          console.log(`[Messages/Send] Instantly email entry: id=${em.id}, from=${em.from_address_email || em.from_email || em.from || em.eaccount}, to=${em.to_address_email || em.to_email || em.to}`)
+
+          if (!replyToUuid) {
+            replyToUuid = em.id || em.uuid || null
+          }
+
+          // Extract the sending account: the "from" on outbound emails
+          // (emails sent TO the artist are FROM our account)
+          const fromAddr = (em.from_address_email || em.from_email || em.from || em.eaccount || '').toLowerCase().trim()
+          const toAddr = (em.to_address_email || em.to_email || em.to || '').toLowerCase().trim()
+
+          if (fromAddr && fromAddr !== artist.email.toLowerCase()) {
+            instantlySenderAccount = fromAddr
+            console.log(`[Messages/Send] Found original sender from Instantly: ${instantlySenderAccount}`)
+            break
+          }
+          if (toAddr && toAddr !== artist.email.toLowerCase()) {
+            instantlySenderAccount = toAddr
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('[Messages/Send] Instantly email search failed:', e)
+  }
+
+  // Determine eaccount with priority:
+  // 1. Original sender from Instantly email search (most reliable)
+  // 2. Sending account from conversation history (but NOT the artist's own email)
+  // 3. Fetch from Instantly accounts API (excluding artist's email)
+  let eaccount = instantlySenderAccount
+
+  if (!eaccount && sendingAccount && sendingAccount.toLowerCase() !== artist.email.toLowerCase()) {
+    eaccount = sendingAccount
+  }
+
+  if (!eaccount) {
     try {
-      const searchRes = await fetch(
-        `https://api.instantly.ai/api/v2/emails?search=${encodeURIComponent(artist.email)}&limit=1`,
-        { headers: { 'Authorization': `Bearer ${apiKey}` } }
-      )
-      if (searchRes.ok) {
-        const searchData = await searchRes.json()
-        const emails = searchData.data || searchData.items || searchData || []
-        if (Array.isArray(emails) && emails.length > 0) {
-          replyToUuid = emails[0].id || emails[0].uuid || null
-          console.log(`[Messages/Send] Found Instantly UUID from search: ${replyToUuid}`)
+      const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+      })
+      if (accountsRes.ok) {
+        const accountsData = await accountsRes.json()
+        const accounts = accountsData.items || accountsData || []
+        console.log(`[Messages/Send] Instantly accounts: ${JSON.stringify(accounts.map((a: any) => a.email || a.email_address)).slice(0, 500)}`)
+        for (const acct of accounts) {
+          const email = (acct.email || acct.email_address || '').toLowerCase()
+          if (email && email !== artist.email.toLowerCase()) {
+            eaccount = email
+            break
+          }
         }
       }
     } catch (e) {
-      console.error('[Messages/Send] Instantly email search failed:', e)
+      console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
     }
   }
+
+  if (!eaccount) {
+    return NextResponse.json(
+      { error: 'No sending email account found. All Instantly accounts match the recipient.' },
+      { status: 400 }
+    )
+  }
+
+  console.log(`[Messages/Send] Using eaccount: ${eaccount} (source: ${instantlySenderAccount ? 'Instantly email search' : sendingAccount ? 'conversation history' : 'Instantly accounts API'})`)
 
   try {
     let endpoint: string
