@@ -63,6 +63,17 @@ async function handleReply(supabase: any, body: any) {
   const campaignName = body.campaign_name || null
   const timestamp = body.timestamp || new Date().toISOString()
 
+  // Extract our sending account from available fields
+  // Instantly may provide it as to_email, from_address_email, or in the reply text
+  let ourAccount = (body.to_email || body.from_address_email || body.eaccount || '').toLowerCase().trim()
+  if (!ourAccount && body.reply_text) {
+    // Try to extract from quoted "On ... <email> wrote:" pattern
+    const match = body.reply_text.match(/<([^>]+@[^>]+)>\s*wrote:/)
+    if (match) {
+      ourAccount = match[1].toLowerCase().trim()
+    }
+  }
+
   // Build a stable dedup key from available fields
   const dedupKey = `instantly_${senderEmail}_${timestamp}`
 
@@ -131,6 +142,7 @@ async function handleReply(supabase: any, body: any) {
         campaign_id: campaignId,
         campaign_name: campaignName,
         from_email: senderEmail,
+        to_email: ourAccount || null,
         timestamp,
         event_type: body.event_type,
         full_reply: replyText,

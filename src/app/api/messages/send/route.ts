@@ -133,25 +133,41 @@ async function handleEmailSend(
     )
   }
 
-  // Find the most recent conversation for context (subject, sending account)
-  const { data: lastConvo } = await supabase
+  // Find conversation context: subject and our sending account
+  // Look at recent conversations to determine the correct eaccount
+  const { data: recentConvos } = await supabase
     .from('conversations')
-    .select('external_id, metadata')
+    .select('direction, metadata')
     .eq('artist_id', params.artist_id)
     .eq('channel', 'email')
     .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+    .limit(10)
 
-  const subject = lastConvo?.metadata?.subject
-    ? (lastConvo.metadata.subject.startsWith('Re:') ? lastConvo.metadata.subject : `Re: ${lastConvo.metadata.subject}`)
-    : 'Following up'
-  const sendingAccount = lastConvo?.metadata?.from_email || lastConvo?.metadata?.to_email || null
+  let subject = 'Following up'
+  let sendingAccount: string | null = null
 
-  // First, try to find a valid Instantly eaccount
+  for (const convo of recentConvos || []) {
+    // Get subject from any conversation
+    if (subject === 'Following up' && convo.metadata?.subject) {
+      const s = convo.metadata.subject
+      subject = s.startsWith('Re:') ? s : `Re: ${s}`
+    }
+
+    // For sending account: outbound from_email is always our account
+    if (!sendingAccount && convo.direction === 'outbound' && convo.metadata?.from_email) {
+      sendingAccount = convo.metadata.from_email
+    }
+
+    // For inbound messages, to_email is our account (the one the lead replied to)
+    if (!sendingAccount && convo.direction === 'inbound' && convo.metadata?.to_email) {
+      sendingAccount = convo.metadata.to_email
+    }
+  }
+
+  // If we still don't have a sending account, the inbound webhook may not have
+  // stored to_email. Try to get it from Instantly's email accounts API.
   let eaccount = sendingAccount
   if (!eaccount) {
-    // Try to get the first email account from Instantly
     try {
       const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
         headers: { 'Authorization': `Bearer ${apiKey}` },
@@ -175,28 +191,17 @@ async function handleEmailSend(
     )
   }
 
+  console.log(`[Messages/Send] Resolved eaccount: ${eaccount} (from ${sendingAccount ? 'conversation history' : 'Instantly API'})`)
+
   let instantlyResult: any = null
   let instantlyError: string | null = null
 
-  // Resolve reply_to_uuid: check our records, then search Instantly API
-  let replyToUuid = lastConvo?.metadata?.instantly_uuid || null
-
-  if (!replyToUuid) {
-    // Search all conversations for this artist for any instantly_uuid
-    const { data: allConvos } = await supabase
-      .from('conversations')
-      .select('metadata')
-      .eq('artist_id', params.artist_id)
-      .eq('channel', 'email')
-      .not('metadata->instantly_uuid', 'is', null)
-      .order('created_at', { ascending: false })
-      .limit(5)
-
-    for (const c of allConvos || []) {
-      if (c.metadata?.instantly_uuid) {
-        replyToUuid = c.metadata.instantly_uuid
-        break
-      }
+  // Resolve reply_to_uuid from conversation history
+  let replyToUuid: string | null = null
+  for (const convo of recentConvos || []) {
+    if (convo.metadata?.instantly_uuid) {
+      replyToUuid = convo.metadata.instantly_uuid
+      break
     }
   }
 
