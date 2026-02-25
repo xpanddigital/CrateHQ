@@ -65,17 +65,30 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ messages, artist, deal })
     }
 
-    // Single thread by ig_thread_id (unmatched conversations)
-    if (threadKey) {
-      const { data: messages, error } = await supabase
+    // Single thread by ig_thread_id or sender (unmatched conversations)
+    if (threadKey && threadKey !== 'null') {
+      // Could be an ig_thread_id or a sender email — try both
+      let messages: any[] = []
+
+      const { data: igMessages, error: igErr } = await supabase
         .from('conversations')
         .select('*')
         .eq('ig_thread_id', threadKey)
         .order('created_at', { ascending: true })
 
-      if (error) {
-        console.error('[Conversations] Thread key fetch error:', error)
-        return NextResponse.json({ error: 'Failed to fetch thread' }, { status: 500 })
+      if (!igErr && igMessages && igMessages.length > 0) {
+        messages = igMessages
+      } else {
+        // Try matching by sender (for unmatched email conversations)
+        const { data: senderMessages, error: senderErr } = await supabase
+          .from('conversations')
+          .select('*')
+          .or(`sender.ilike.${threadKey},metadata->>from_email.ilike.${threadKey}`)
+          .order('created_at', { ascending: true })
+
+        if (!senderErr && senderMessages) {
+          messages = senderMessages
+        }
       }
 
       return NextResponse.json({ messages, artist: null, deal: null })
@@ -119,7 +132,7 @@ export async function GET(request: NextRequest) {
       if (!existing) {
         threadMap.set(key, {
           artist_id: msg.artist_id,
-          thread_key: msg.ig_thread_id || null,
+          thread_key: msg.ig_thread_id || msg.sender || null,
           sender_name: msg.sender,
           last_message: msg,
           last_inbound_at: msg.direction === 'inbound' ? msg.created_at : null,
@@ -224,8 +237,9 @@ export async function PATCH(request: NextRequest) {
 
     if (artist_id) {
       query = query.eq('artist_id', artist_id)
-    } else {
-      query = query.eq('ig_thread_id', thread_key)
+    } else if (thread_key) {
+      // thread_key could be ig_thread_id or sender email
+      query = query.or(`ig_thread_id.eq.${thread_key},sender.ilike.${thread_key}`)
     }
 
     const { error } = await query.eq('read', false)
