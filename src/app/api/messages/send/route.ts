@@ -175,6 +175,10 @@ async function handleEmailSend(
     )
   }
 
+  // Always save the conversation first so the reply is never lost
+  let instantlyResult: any = null
+  let instantlyError: string | null = null
+
   try {
     const requestBody: any = {
       eaccount,
@@ -186,7 +190,6 @@ async function handleEmailSend(
       },
     }
 
-    // If we have a reply_to UUID from Instantly, include it
     if (lastConvo?.metadata?.instantly_uuid) {
       requestBody.reply_to_uuid = lastConvo.metadata.instantly_uuid
     }
@@ -206,44 +209,49 @@ async function handleEmailSend(
 
     if (!res.ok) {
       console.error('[Messages/Send] Instantly reply error:', JSON.stringify(result))
-      return NextResponse.json(
-        { error: `Instantly API error: ${result?.message || result?.error || res.statusText}` },
-        { status: 502 }
-      )
+      instantlyError = result?.message || result?.error || res.statusText
+    } else {
+      instantlyResult = result
     }
-
-    // Log the outbound email in conversations
-    const { data: conversation } = await supabase
-      .from('conversations')
-      .insert({
-        artist_id: params.artist_id,
-        channel: 'email',
-        direction: 'outbound',
-        message_text: params.message_text,
-        sender: eaccount,
-        external_id: result?.id || null,
-        scout_id: params.scout_id,
-        metadata: {
-          subject,
-          to_email: artist.email,
-          from_email: eaccount,
-          instantly_uuid: result?.id || null,
-          instantly_response: result,
-          raw_event: 'manual_send',
-        },
-        read: true,
-      })
-      .select('id')
-      .single()
-
-    return NextResponse.json({
-      sent: true,
-      channel: 'email',
-      conversation_id: conversation?.id || null,
-      instantly_id: result?.id || null,
-    })
   } catch (fetchError) {
     console.error('[Messages/Send] Instantly fetch error:', fetchError)
-    return NextResponse.json({ error: 'Failed to send email via Instantly' }, { status: 502 })
+    instantlyError = String(fetchError)
   }
+
+  // Save to conversations regardless of Instantly success
+  const { data: conversation, error: convoError } = await supabase
+    .from('conversations')
+    .insert({
+      artist_id: params.artist_id,
+      channel: 'email',
+      direction: 'outbound',
+      message_text: params.message_text,
+      sender: eaccount,
+      external_id: instantlyResult?.id || null,
+      scout_id: params.scout_id,
+      metadata: {
+        subject,
+        to_email: artist.email,
+        from_email: eaccount,
+        instantly_uuid: instantlyResult?.id || null,
+        instantly_error: instantlyError,
+        instantly_sent: !instantlyError,
+        raw_event: 'manual_send',
+      },
+      read: true,
+    })
+    .select('id')
+    .single()
+
+  if (convoError) {
+    console.error('[Messages/Send] Conversation insert error:', convoError)
+  }
+
+  return NextResponse.json({
+    sent: true,
+    channel: 'email',
+    conversation_id: conversation?.id || null,
+    instantly_id: instantlyResult?.id || null,
+    instantly_error: instantlyError,
+  })
 }
