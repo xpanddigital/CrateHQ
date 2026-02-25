@@ -307,6 +307,7 @@ export default function InboxPage() {
   // Send reply
   const handleSend = async () => {
     if (!replyText.trim() || !isThreadOpen || sending) return
+    const textToSend = replyText.trim()
     setSending(true)
 
     const optimisticMsg: Message = {
@@ -314,7 +315,7 @@ export default function InboxPage() {
       artist_id: selectedArtistId || null,
       channel: replyChannel,
       direction: 'outbound',
-      message_text: replyText,
+      message_text: textToSend,
       sender: null,
       ig_account_id: null,
       ig_thread_id: null,
@@ -346,7 +347,7 @@ export default function InboxPage() {
         body: JSON.stringify({
           artist_id: selectedArtistId,
           channel: replyChannel,
-          message_text: replyText,
+          message_text: textToSend,
         }),
       })
 
@@ -356,9 +357,19 @@ export default function InboxPage() {
           m.id === optimisticMsg.id ? { ...m, _status: 'pending' } : m
         ))
         console.error('Send failed:', data.error)
+      } else {
+        // Replace optimistic message with confirmed version
+        setMessages(prev => prev.map(m =>
+          m.id === optimisticMsg.id
+            ? { ...m, id: data.conversation_id || m.id, _status: undefined }
+            : m
+        ))
       }
     } catch (error) {
       console.error('Send error:', error)
+      setMessages(prev => prev.map(m =>
+        m.id === optimisticMsg.id ? { ...m, _status: 'pending' } : m
+      ))
     } finally {
       setSending(false)
     }

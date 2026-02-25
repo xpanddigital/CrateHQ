@@ -67,9 +67,9 @@ export async function GET(request: NextRequest) {
 
     // Single thread by ig_thread_id or sender (unmatched conversations)
     if (threadKey && threadKey !== 'null') {
-      // Could be an ig_thread_id or a sender email — try both
       let messages: any[] = []
 
+      // Try ig_thread_id first
       const { data: igMessages, error: igErr } = await supabase
         .from('conversations')
         .select('*')
@@ -79,15 +79,30 @@ export async function GET(request: NextRequest) {
       if (!igErr && igMessages && igMessages.length > 0) {
         messages = igMessages
       } else {
-        // Try matching by sender (for unmatched email conversations)
+        // Try matching by sender email (for unmatched email conversations)
         const { data: senderMessages, error: senderErr } = await supabase
           .from('conversations')
           .select('*')
-          .or(`sender.ilike.${threadKey},metadata->>from_email.ilike.${threadKey}`)
+          .ilike('sender', threadKey)
           .order('created_at', { ascending: true })
 
-        if (!senderErr && senderMessages) {
+        if (senderErr) {
+          console.error('[Conversations] Sender lookup error:', senderErr)
+        }
+
+        if (!senderErr && senderMessages && senderMessages.length > 0) {
           messages = senderMessages
+        } else {
+          // Last resort: check metadata->from_email via RPC-safe filter
+          const { data: metaMessages } = await supabase
+            .from('conversations')
+            .select('*')
+            .filter('metadata->>from_email', 'ilike', threadKey)
+            .order('created_at', { ascending: true })
+
+          if (metaMessages && metaMessages.length > 0) {
+            messages = metaMessages
+          }
         }
       }
 
@@ -238,8 +253,7 @@ export async function PATCH(request: NextRequest) {
     if (artist_id) {
       query = query.eq('artist_id', artist_id)
     } else if (thread_key) {
-      // thread_key could be ig_thread_id or sender email
-      query = query.or(`ig_thread_id.eq.${thread_key},sender.ilike.${thread_key}`)
+      query = query.or(`ig_thread_id.eq.${thread_key},sender.eq.${thread_key}`)
     }
 
     const { error } = await query.eq('read', false)
