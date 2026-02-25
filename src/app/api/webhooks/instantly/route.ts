@@ -1,50 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
-const WEBHOOK_SECRET = process.env.INSTANTLY_WEBHOOK_SECRET
-
 /**
  * POST /api/webhooks/instantly
  *
- * Handles Instantly webhook events:
- *   - reply_received: inbound email from lead → create conversation entry
- *   - email_sent: outbound email sent → create conversation entry
- *   - email_opened: lead opened email → update metadata
- *   - email_bounced: email bounced → update metadata
+ * Instantly sends a flat JSON payload (no nested "data" object).
+ * Key fields: event_type, lead_email, email, reply_text, campaign_id, etc.
+ *
+ * Reply events: event_type = "lead_interested" or "reply_received"
+ * Sent events: event_type = "email_sent"
+ * Open events: event_type = "email_opened"
+ * Bounce events: event_type = "email_bounced"
  */
 export async function POST(request: NextRequest) {
   try {
-    // Verify webhook secret
-    const authHeader = request.headers.get('authorization') || request.headers.get('x-webhook-secret')
-    const providedSecret = authHeader?.startsWith('Bearer ')
-      ? authHeader.slice(7)
-      : authHeader
-
-    if (!WEBHOOK_SECRET || providedSecret !== WEBHOOK_SECRET) {
-      return NextResponse.json({ error: 'Invalid webhook secret' }, { status: 401 })
-    }
-
     const body = await request.json()
-    const { event_type, data } = body
 
-    if (!event_type || !data) {
-      return NextResponse.json({ error: 'Missing event_type or data' }, { status: 400 })
+    // Instantly sends event_type at the top level
+    const eventType = body.event_type
+    if (!eventType) {
+      console.error('[Webhook/Instantly] No event_type in payload:', JSON.stringify(body).slice(0, 500))
+      return NextResponse.json({ error: 'Missing event_type' }, { status: 400 })
     }
+
+    console.log(`[Webhook/Instantly] Received event: ${eventType}, lead: ${body.lead_email || body.email || 'unknown'}`)
 
     const supabase = createServiceClient()
 
-    switch (event_type) {
-      case 'reply_received':
-        return await handleReplyReceived(supabase, data)
-      case 'email_sent':
-        return await handleEmailSent(supabase, data)
-      case 'email_opened':
-        return await handleEmailOpened(supabase, data)
-      case 'email_bounced':
-        return await handleEmailBounced(supabase, data)
-      default:
-        return NextResponse.json({ received: true, event_type, handled: false })
+    // Reply events (Instantly uses "lead_interested" for replies)
+    if (eventType === 'lead_interested' || eventType === 'reply_received' || eventType === 'reply') {
+      return await handleReply(supabase, body)
     }
+
+    if (eventType === 'email_sent' || eventType === 'sent') {
+      return await handleEmailSent(supabase, body)
+    }
+
+    if (eventType === 'email_opened' || eventType === 'opened') {
+      return await handleEmailOpened(supabase, body)
+    }
+
+    if (eventType === 'email_bounced' || eventType === 'bounced' || eventType === 'bounce') {
+      return await handleEmailBounced(supabase, body)
+    }
+
+    // Unknown event — accept it but don't process
+    return NextResponse.json({ received: true, event_type: eventType, handled: false })
   } catch (error) {
     console.error('[Webhook/Instantly] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
@@ -52,42 +53,45 @@ export async function POST(request: NextRequest) {
 }
 
 /**
- * reply_received — inbound email reply from a lead/artist
+ * Handle inbound reply from a lead/artist
  */
-async function handleReplyReceived(supabase: any, data: any) {
-  const senderEmail = (data.from_email || data.email || '').toLowerCase().trim()
-  const messageText = data.text_body || data.body || data.message || ''
-  const subject = data.subject || ''
-  const messageId = data.message_id || data.id || null
-  const campaignId = data.campaign_id || null
-  const timestamp = data.timestamp || data.received_at || new Date().toISOString()
+async function handleReply(supabase: any, body: any) {
+  const senderEmail = (body.lead_email || body.email || body.from_email || '').toLowerCase().trim()
+  const replyText = body.reply_text_snippet || body.reply_text || body.text_body || body.body || ''
+  const subject = body.reply_subject || body.subject || ''
+  const campaignId = body.campaign_id || null
+  const campaignName = body.campaign_name || null
+  const timestamp = body.timestamp || new Date().toISOString()
+
+  // Build a stable dedup key from available fields
+  const dedupKey = `instantly_${senderEmail}_${timestamp}`
 
   if (!senderEmail) {
+    console.error('[Webhook/Instantly] Reply missing sender email:', JSON.stringify(body).slice(0, 500))
     return NextResponse.json({ error: 'Missing sender email' }, { status: 400 })
   }
 
-  // Dedup by external_id
-  if (messageId) {
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('external_id', messageId)
-      .maybeSingle()
+  // Dedup check
+  const { data: existing } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('external_id', dedupKey)
+    .maybeSingle()
 
-    if (existing) {
-      return NextResponse.json({ received: true, duplicate: true })
-    }
+  if (existing) {
+    return NextResponse.json({ received: true, duplicate: true })
   }
 
-  // Match sender to artist (case-insensitive)
-  const { data: artist } = await supabase
+  // Match sender to artist (check primary, secondary, management emails)
+  let matchedArtist = null
+
+  const { data: primaryMatch } = await supabase
     .from('artists')
     .select('id, name')
     .ilike('email', senderEmail)
     .maybeSingle()
+  matchedArtist = primaryMatch
 
-  // Also try secondary/management emails if primary didn't match
-  let matchedArtist = artist
   if (!matchedArtist) {
     const { data: secMatch } = await supabase
       .from('artists')
@@ -96,6 +100,7 @@ async function handleReplyReceived(supabase: any, data: any) {
       .maybeSingle()
     matchedArtist = secMatch
   }
+
   if (!matchedArtist) {
     const { data: mgmtMatch } = await supabase
       .from('artists')
@@ -105,6 +110,12 @@ async function handleReplyReceived(supabase: any, data: any) {
     matchedArtist = mgmtMatch
   }
 
+  // Strip quoted reply text (everything after "On ... wrote:")
+  const cleanReply = replyText
+    .replace(/On .+wrote:\n?>[\s\S]*/m, '')
+    .replace(/------[\s\S]*$/m, '')
+    .trim()
+
   // Insert conversation
   const { data: conversation, error: insertError } = await supabase
     .from('conversations')
@@ -112,15 +123,17 @@ async function handleReplyReceived(supabase: any, data: any) {
       artist_id: matchedArtist?.id || null,
       channel: 'email',
       direction: 'inbound',
-      message_text: messageText,
+      message_text: cleanReply || replyText,
       sender: senderEmail,
-      external_id: messageId,
+      external_id: dedupKey,
       metadata: {
         subject,
         campaign_id: campaignId,
+        campaign_name: campaignName,
         from_email: senderEmail,
         timestamp,
-        raw_event: 'reply_received',
+        event_type: body.event_type,
+        full_reply: replyText,
       },
       read: false,
     })
@@ -148,9 +161,11 @@ async function handleReplyReceived(supabase: any, data: any) {
     }
   }
 
+  console.log(`[Webhook/Instantly] Reply stored: ${conversation.id}, artist: ${matchedArtist?.name || 'unmatched'}, from: ${senderEmail}`)
+
   return NextResponse.json({
     received: true,
-    event_type: 'reply_received',
+    event_type: body.event_type,
     conversation_id: conversation.id,
     artist_matched: !!matchedArtist,
     artist_name: matchedArtist?.name || null,
@@ -158,33 +173,31 @@ async function handleReplyReceived(supabase: any, data: any) {
 }
 
 /**
- * email_sent — outbound email was sent by Instantly
+ * Handle outbound email sent by Instantly
  */
-async function handleEmailSent(supabase: any, data: any) {
-  const toEmail = (data.to_email || data.email || '').toLowerCase().trim()
-  const messageText = data.text_body || data.body || data.message || ''
-  const subject = data.subject || ''
-  const messageId = data.message_id || data.id || null
-  const campaignId = data.campaign_id || null
+async function handleEmailSent(supabase: any, body: any) {
+  const toEmail = (body.lead_email || body.email || body.to_email || '').toLowerCase().trim()
+  const messageText = body.email_body || body.text_body || body.body || ''
+  const subject = body.subject || ''
+  const campaignId = body.campaign_id || null
+  const timestamp = body.timestamp || new Date().toISOString()
+  const dedupKey = `instantly_sent_${toEmail}_${timestamp}`
 
   if (!toEmail) {
-    return NextResponse.json({ error: 'Missing recipient email' }, { status: 400 })
+    return NextResponse.json({ received: true, handled: false })
   }
 
   // Dedup
-  if (messageId) {
-    const { data: existing } = await supabase
-      .from('conversations')
-      .select('id')
-      .eq('external_id', messageId)
-      .maybeSingle()
+  const { data: existing } = await supabase
+    .from('conversations')
+    .select('id')
+    .eq('external_id', dedupKey)
+    .maybeSingle()
 
-    if (existing) {
-      return NextResponse.json({ received: true, duplicate: true })
-    }
+  if (existing) {
+    return NextResponse.json({ received: true, duplicate: true })
   }
 
-  // Match recipient to artist
   const { data: artist } = await supabase
     .from('artists')
     .select('id, name')
@@ -198,14 +211,15 @@ async function handleEmailSent(supabase: any, data: any) {
       channel: 'email',
       direction: 'outbound',
       message_text: messageText,
-      sender: data.from_email || null,
-      external_id: messageId,
+      sender: body.from_email || body.from || null,
+      external_id: dedupKey,
       metadata: {
         subject,
         campaign_id: campaignId,
         to_email: toEmail,
-        from_email: data.from_email || null,
-        raw_event: 'email_sent',
+        event_type: body.event_type,
+        step: body.step || null,
+        variant: body.variant || null,
       },
       read: true,
     })
@@ -219,34 +233,28 @@ async function handleEmailSent(supabase: any, data: any) {
 
   return NextResponse.json({
     received: true,
-    event_type: 'email_sent',
+    event_type: body.event_type,
     conversation_id: conversation.id,
     artist_matched: !!artist,
   })
 }
 
 /**
- * email_opened — lead opened an email
+ * Handle email opened event
  */
-async function handleEmailOpened(supabase: any, data: any) {
-  const toEmail = (data.to_email || data.email || '').toLowerCase().trim()
+async function handleEmailOpened(supabase: any, body: any) {
+  const toEmail = (body.lead_email || body.email || '').toLowerCase().trim()
   if (!toEmail) {
     return NextResponse.json({ received: true, handled: false })
   }
 
   const { data: artist } = await supabase
     .from('artists')
-    .select('id, emails_opened')
+    .select('id')
     .ilike('email', toEmail)
     .maybeSingle()
 
   if (artist) {
-    await supabase
-      .from('artists')
-      .update({ updated_at: new Date().toISOString() })
-      .eq('id', artist.id)
-
-    // Update deal emails_opened count if deal exists
     const { data: deal } = await supabase
       .from('deals')
       .select('id, emails_opened')
@@ -263,18 +271,14 @@ async function handleEmailOpened(supabase: any, data: any) {
     }
   }
 
-  return NextResponse.json({
-    received: true,
-    event_type: 'email_opened',
-    artist_matched: !!artist,
-  })
+  return NextResponse.json({ received: true, event_type: body.event_type, artist_matched: !!artist })
 }
 
 /**
- * email_bounced — email bounced
+ * Handle email bounced event
  */
-async function handleEmailBounced(supabase: any, data: any) {
-  const toEmail = (data.to_email || data.email || '').toLowerCase().trim()
+async function handleEmailBounced(supabase: any, body: any) {
+  const toEmail = (body.lead_email || body.email || '').toLowerCase().trim()
   if (!toEmail) {
     return NextResponse.json({ received: true, handled: false })
   }
@@ -290,15 +294,11 @@ async function handleEmailBounced(supabase: any, data: any) {
       .from('artists')
       .update({
         email_rejected: true,
-        email_rejection_reason: `Bounced: ${data.bounce_type || 'unknown'}`,
+        email_rejection_reason: `Bounced: ${body.bounce_type || 'unknown'}`,
         updated_at: new Date().toISOString(),
       })
       .eq('id', artist.id)
   }
 
-  return NextResponse.json({
-    received: true,
-    event_type: 'email_bounced',
-    artist_matched: !!artist,
-  })
+  return NextResponse.json({ received: true, event_type: body.event_type, artist_matched: !!artist })
 }
