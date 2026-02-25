@@ -133,37 +133,81 @@ async function handleEmailSend(
     )
   }
 
-  // Find the most recent email thread for context (reply_to_uuid)
-  const { data: lastEmail } = await supabase
+  // Find the most recent conversation for context (subject, sending account)
+  const { data: lastConvo } = await supabase
     .from('conversations')
     .select('external_id, metadata')
     .eq('artist_id', params.artist_id)
     .eq('channel', 'email')
-    .not('external_id', 'is', null)
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
+  const subject = lastConvo?.metadata?.subject
+    ? (lastConvo.metadata.subject.startsWith('Re:') ? lastConvo.metadata.subject : `Re: ${lastConvo.metadata.subject}`)
+    : 'Following up'
+  const sendingAccount = lastConvo?.metadata?.from_email || lastConvo?.metadata?.to_email || null
+
+  // First, try to find a valid Instantly eaccount
+  let eaccount = sendingAccount
+  if (!eaccount) {
+    // Try to get the first email account from Instantly
+    try {
+      const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
+        headers: { 'Authorization': `Bearer ${apiKey}` },
+      })
+      if (accountsRes.ok) {
+        const accountsData = await accountsRes.json()
+        const accounts = accountsData.items || accountsData || []
+        if (accounts.length > 0) {
+          eaccount = accounts[0].email || accounts[0].email_address
+        }
+      }
+    } catch (e) {
+      console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
+    }
+  }
+
+  if (!eaccount) {
+    return NextResponse.json(
+      { error: 'No sending email account found. Configure an email account in Instantly.' },
+      { status: 400 }
+    )
+  }
+
   try {
+    const requestBody: any = {
+      eaccount,
+      subject,
+      to_address_email_list: artist.email,
+      body: {
+        text: params.message_text,
+        html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
+      },
+    }
+
+    // If we have a reply_to UUID from Instantly, include it
+    if (lastConvo?.metadata?.instantly_uuid) {
+      requestBody.reply_to_uuid = lastConvo.metadata.instantly_uuid
+    }
+
+    console.log(`[Messages/Send] Sending via Instantly: to=${artist.email}, from=${eaccount}, subject=${subject}`)
+
     const res = await fetch('https://api.instantly.ai/api/v2/emails/reply', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         'Authorization': `Bearer ${apiKey}`,
       },
-      body: JSON.stringify({
-        reply_to_uuid: lastEmail?.external_id || null,
-        to: artist.email,
-        body: params.message_text,
-      }),
+      body: JSON.stringify(requestBody),
     })
 
     const result = await res.json()
 
     if (!res.ok) {
-      console.error('[Messages/Send] Instantly reply error:', result)
+      console.error('[Messages/Send] Instantly reply error:', JSON.stringify(result))
       return NextResponse.json(
-        { error: `Instantly API error: ${result?.message || res.statusText}` },
+        { error: `Instantly API error: ${result?.message || result?.error || res.statusText}` },
         { status: 502 }
       )
     }
@@ -176,11 +220,14 @@ async function handleEmailSend(
         channel: 'email',
         direction: 'outbound',
         message_text: params.message_text,
-        sender: artist.email,
+        sender: eaccount,
         external_id: result?.id || null,
         scout_id: params.scout_id,
         metadata: {
+          subject,
           to_email: artist.email,
+          from_email: eaccount,
+          instantly_uuid: result?.id || null,
           instantly_response: result,
           raw_event: 'manual_send',
         },
@@ -193,6 +240,7 @@ async function handleEmailSend(
       sent: true,
       channel: 'email',
       conversation_id: conversation?.id || null,
+      instantly_id: result?.id || null,
     })
   } catch (fetchError) {
     console.error('[Messages/Send] Instantly fetch error:', fetchError)
