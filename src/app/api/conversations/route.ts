@@ -4,12 +4,11 @@ import { createClient } from '@/lib/supabase/server'
 /**
  * GET /api/conversations
  *
- * Returns conversation threads grouped by artist (or sender for unmatched).
  * Query params:
- *   - artist_id: fetch thread for a specific artist
- *   - thread_key: fetch thread by ig_thread_id (for unmatched conversations)
- *   - channel: filter by channel
- *   - unread_only: only show unread inbound
+ *   - artist_id: fetch all messages for a specific artist
+ *   - thread_key: fetch by ig_thread_id or sender email (unmatched conversations)
+ *   - channel: filter by channel ('email' | 'instagram')
+ *   - unread_only: only return threads with unread inbound messages
  */
 export async function GET(request: NextRequest) {
   try {
@@ -25,8 +24,8 @@ export async function GET(request: NextRequest) {
     const channel = params.get('channel')
     const unreadOnly = params.get('unread_only') === 'true'
 
-    // Single thread by artist_id
-    if (artistId && artistId !== 'null') {
+    // ── Single thread by artist_id ──
+    if (artistId && artistId !== 'null' && artistId !== 'undefined') {
       let query = supabase
         .from('conversations')
         .select('*')
@@ -62,54 +61,34 @@ export async function GET(request: NextRequest) {
         .limit(1)
         .maybeSingle()
 
-      return NextResponse.json({ messages, artist, deal })
+      return NextResponse.json({ messages: messages || [], artist, deal })
     }
 
-    // Single thread by ig_thread_id or sender (unmatched conversations)
-    if (threadKey && threadKey !== 'null') {
-      let messages: any[] = []
-
+    // ── Single thread by thread_key (ig_thread_id or sender email) ──
+    if (threadKey && threadKey !== 'null' && threadKey !== 'undefined') {
       // Try ig_thread_id first
-      const { data: igMessages, error: igErr } = await supabase
+      const { data: igMessages } = await supabase
         .from('conversations')
         .select('*')
         .eq('ig_thread_id', threadKey)
         .order('created_at', { ascending: true })
 
-      if (!igErr && igMessages && igMessages.length > 0) {
-        messages = igMessages
-      } else {
-        // Try matching by sender email (for unmatched email conversations)
-        const { data: senderMessages, error: senderErr } = await supabase
-          .from('conversations')
-          .select('*')
-          .ilike('sender', threadKey)
-          .order('created_at', { ascending: true })
-
-        if (senderErr) {
-          console.error('[Conversations] Sender lookup error:', senderErr)
-        }
-
-        if (!senderErr && senderMessages && senderMessages.length > 0) {
-          messages = senderMessages
-        } else {
-          // Last resort: check metadata->from_email via RPC-safe filter
-          const { data: metaMessages } = await supabase
-            .from('conversations')
-            .select('*')
-            .filter('metadata->>from_email', 'ilike', threadKey)
-            .order('created_at', { ascending: true })
-
-          if (metaMessages && metaMessages.length > 0) {
-            messages = metaMessages
-          }
-        }
+      if (igMessages && igMessages.length > 0) {
+        return NextResponse.json({ messages: igMessages, artist: null, deal: null })
       }
 
-      return NextResponse.json({ messages, artist: null, deal: null })
+      // Try sender email — match on sender field OR metadata from_email/to_email
+      // This catches both inbound (sender = lead email) and outbound (sender = our account)
+      const { data: allForThread } = await supabase
+        .from('conversations')
+        .select('*')
+        .or(`sender.eq.${threadKey},metadata->>from_email.eq.${threadKey},metadata->>to_email.eq.${threadKey}`)
+        .order('created_at', { ascending: true })
+
+      return NextResponse.json({ messages: allForThread || [], artist: null, deal: null })
     }
 
-    // Thread list: aggregate conversations
+    // ── Thread list ──
     let query = supabase
       .from('conversations')
       .select('*')
@@ -129,7 +108,8 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch conversations' }, { status: 500 })
     }
 
-    // Group by artist_id when available, otherwise by ig_thread_id or sender
+    // Group messages into threads.
+    // Priority for grouping key: artist_id > ig_thread_id > sender email
     const threadMap = new Map<string, {
       artist_id: string | null
       thread_key: string | null
@@ -145,10 +125,15 @@ export async function GET(request: NextRequest) {
       const existing = threadMap.get(key)
 
       if (!existing) {
+        // For sender_name, prefer inbound sender (the lead) over outbound sender (us)
+        const senderName = msg.direction === 'inbound'
+          ? msg.sender
+          : (msg.metadata?.to_email || msg.sender)
+
         threadMap.set(key, {
           artist_id: msg.artist_id,
-          thread_key: msg.ig_thread_id || msg.sender || null,
-          sender_name: msg.sender,
+          thread_key: msg.artist_id ? null : (msg.ig_thread_id || msg.sender || null),
+          sender_name: senderName,
           last_message: msg,
           last_inbound_at: msg.direction === 'inbound' ? msg.created_at : null,
           unread_count: (!msg.read && msg.direction === 'inbound') ? 1 : 0,
@@ -162,10 +147,14 @@ export async function GET(request: NextRequest) {
         if (msg.direction === 'inbound' && (!existing.last_inbound_at || msg.created_at > existing.last_inbound_at)) {
           existing.last_inbound_at = msg.created_at
         }
+        // Update sender_name from inbound messages (more useful than outbound sender)
+        if (msg.direction === 'inbound' && msg.sender) {
+          existing.sender_name = msg.sender
+        }
       }
     }
 
-    // Fetch artist details for matched threads
+    // Fetch artist details
     const artistIds = Array.from(threadMap.values())
       .map(t => t.artist_id)
       .filter(Boolean) as string[]
@@ -182,7 +171,7 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Fetch deals for pipeline stage
+    // Fetch deals
     let dealMap: Record<string, any> = {}
     if (artistIds.length > 0) {
       const { data: deals } = await supabase
@@ -197,7 +186,6 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Build thread list sorted by most recent inbound first
     const threads = Array.from(threadMap.values())
       .sort((a, b) => {
         const aTime = a.last_inbound_at || a.last_message.created_at
@@ -211,7 +199,7 @@ export async function GET(request: NextRequest) {
         artist: t.artist_id ? (artistMap[t.artist_id] || null) : null,
         deal: t.artist_id ? (dealMap[t.artist_id] || null) : null,
         last_message: {
-          text: t.last_message.message_text,
+          text: t.last_message.message_text || '',
           channel: t.last_message.channel,
           direction: t.last_message.direction,
           created_at: t.last_message.created_at,

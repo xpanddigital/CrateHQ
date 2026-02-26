@@ -242,10 +242,13 @@ export default function InboxPage() {
       setArtistDetail(data.artist || null)
       setDealDetail(data.deal || null)
 
-      // Default reply channel to most recent inbound channel
-      const lastInbound = [...(data.messages || [])].reverse().find((m: Message) => m.direction === 'inbound')
+      // Default reply channel to the channel used in this thread
+      const msgs = data.messages || []
+      const lastInbound = [...msgs].reverse().find((m: Message) => m.direction === 'inbound')
       if (lastInbound) {
         setReplyChannel(lastInbound.channel)
+      } else if (msgs.length > 0) {
+        setReplyChannel(msgs[msgs.length - 1].channel)
       }
 
       // Mark as read
@@ -283,12 +286,13 @@ export default function InboxPage() {
         (payload) => {
           const newMsg = payload.new as Message
 
-          // Update thread list
           fetchThreads()
 
-          // If this message belongs to the open thread, add it
-          const matchesThread = (selectedArtistId && newMsg.artist_id === selectedArtistId) ||
-            (selectedThreadKey && newMsg.ig_thread_id === selectedThreadKey)
+          // Check if this message belongs to the currently open thread
+          const matchesThread =
+            (selectedArtistId && newMsg.artist_id === selectedArtistId) ||
+            (selectedThreadKey && newMsg.ig_thread_id === selectedThreadKey) ||
+            (selectedThreadKey && (newMsg.sender === selectedThreadKey || (newMsg.metadata as any)?.from_email === selectedThreadKey))
           if (matchesThread) {
             setMessages(prev => {
               if (prev.some(m => m.id === newMsg.id)) return prev
@@ -358,12 +362,15 @@ export default function InboxPage() {
         ))
         console.error('Send failed:', data.error)
       } else {
-        // Replace optimistic message with confirmed version
+        // Message was saved to DB. Update optimistic message with real ID.
         setMessages(prev => prev.map(m =>
           m.id === optimisticMsg.id
             ? { ...m, id: data.conversation_id || m.id, _status: undefined }
             : m
         ))
+        if (data.instantly_error) {
+          console.warn('Message saved but Instantly delivery failed:', data.instantly_error)
+        }
       }
     } catch (error) {
       console.error('Send error:', error)

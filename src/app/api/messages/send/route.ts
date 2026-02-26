@@ -4,7 +4,6 @@ import { createServiceClient } from '@/lib/supabase/service'
 
 export async function POST(request: NextRequest) {
   try {
-    // Auth: normal CrateHQ user session
     const userSupabase = await createClient()
     const { data: { user }, error: authError } = await userSupabase.auth.getUser()
     if (authError || !user) {
@@ -45,7 +44,6 @@ async function handleInstagramSend(
   supabase: any,
   params: { artist_id: string; message_text: string; scout_id: string }
 ) {
-  // Find the most recent inbound IG conversation for this artist to get thread context
   const { data: lastInbound, error: lookupError } = await supabase
     .from('conversations')
     .select('ig_account_id, ig_thread_id')
@@ -68,7 +66,6 @@ async function handleInstagramSend(
     )
   }
 
-  // Queue the outbound message
   const { data: queued, error: queueError } = await supabase
     .from('pending_outbound_messages')
     .insert({
@@ -99,7 +96,7 @@ async function handleEmailSend(
   supabase: any,
   params: { artist_id: string; message_text: string; scout_id: string }
 ) {
-  // Get artist email
+  // ── Step 1: Get artist ──
   const { data: artist, error: artistError } = await supabase
     .from('artists')
     .select('id, name, email')
@@ -109,12 +106,13 @@ async function handleEmailSend(
   if (artistError || !artist) {
     return NextResponse.json({ error: 'Artist not found' }, { status: 404 })
   }
-
   if (!artist.email) {
     return NextResponse.json({ error: 'Artist has no email address' }, { status: 400 })
   }
 
-  // Get Instantly API key: prefer env var, fall back to integrations table
+  const artistEmailLower = artist.email.toLowerCase()
+
+  // ── Step 2: Get Instantly API key ──
   let apiKey = process.env.INSTANTLY_API_KEY || ''
   if (!apiKey) {
     const { data: integration } = await supabase
@@ -125,148 +123,135 @@ async function handleEmailSend(
       .maybeSingle()
     apiKey = integration?.api_key || ''
   }
-
   if (!apiKey) {
     return NextResponse.json(
-      { error: 'Instantly API key not configured. Set INSTANTLY_API_KEY env var or add in Settings.' },
+      { error: 'Instantly API key not configured.' },
       { status: 400 }
     )
   }
 
-  // Find conversation context: subject and our sending account
-  // Look at recent conversations to determine the correct eaccount
+  // ── Step 3: Get conversation context (subject) ──
   const { data: recentConvos } = await supabase
     .from('conversations')
-    .select('direction, metadata')
+    .select('direction, sender, metadata')
     .eq('artist_id', params.artist_id)
     .eq('channel', 'email')
     .order('created_at', { ascending: false })
-    .limit(10)
+    .limit(20)
 
   let subject = 'Following up'
-  let sendingAccount: string | null = null
+  let replyToUuid: string | null = null
 
   for (const convo of recentConvos || []) {
-    // Get subject from any conversation
     if (subject === 'Following up' && convo.metadata?.subject) {
       const s = convo.metadata.subject
       subject = s.startsWith('Re:') ? s : `Re: ${s}`
     }
-
-    // For sending account: outbound from_email is always our account
-    if (!sendingAccount && convo.direction === 'outbound' && convo.metadata?.from_email) {
-      sendingAccount = convo.metadata.from_email
-    }
-
-    // For inbound messages, to_email is our account (the one the lead replied to)
-    if (!sendingAccount && convo.direction === 'inbound' && convo.metadata?.to_email) {
-      sendingAccount = convo.metadata.to_email
-    }
-  }
-
-  let instantlyResult: any = null
-  let instantlyError: string | null = null
-
-  // Resolve reply_to_uuid AND the original sending account from Instantly
-  let replyToUuid: string | null = null
-  let instantlySenderAccount: string | null = null
-
-  // Check conversation history first
-  for (const convo of recentConvos || []) {
-    if (convo.metadata?.instantly_uuid) {
+    if (!replyToUuid && convo.metadata?.instantly_uuid) {
       replyToUuid = convo.metadata.instantly_uuid
-      break
     }
   }
 
-  // Search Instantly API for the email thread — this gives us both the UUID
-  // and the original sender (our actual sending account)
+  // ── Step 4: Determine eaccount (our Instantly sending account) ──
+  // The ONLY reliable source is the Instantly accounts API.
+  // We fetch the list and pick the right one, excluding the artist's email.
+  let eaccount: string | null = null
+  let allInstantlyAccounts: string[] = []
+
   try {
-    const searchRes = await fetch(
-      `https://api.instantly.ai/api/v2/emails?search=${encodeURIComponent(artist.email)}&limit=5`,
-      { headers: { 'Authorization': `Bearer ${apiKey}` } }
-    )
-    if (searchRes.ok) {
-      const searchData = await searchRes.json()
-      const emails = searchData.data || searchData.items || searchData || []
-      console.log(`[Messages/Send] Instantly email search returned ${Array.isArray(emails) ? emails.length : 0} results`)
+    const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
+      headers: { 'Authorization': `Bearer ${apiKey}` },
+    })
+    if (accountsRes.ok) {
+      const accountsData = await accountsRes.json()
+      const accounts = accountsData.items || accountsData || []
+      allInstantlyAccounts = accounts
+        .map((a: any) => (a.email || a.email_address || '').toLowerCase().trim())
+        .filter(Boolean)
 
-      if (Array.isArray(emails)) {
-        for (const em of emails) {
-          // Log the structure so we can see what fields are available
-          console.log(`[Messages/Send] Instantly email entry: id=${em.id}, from=${em.from_address_email || em.from_email || em.from || em.eaccount}, to=${em.to_address_email || em.to_email || em.to}`)
+      console.log(`[Messages/Send] Instantly accounts: [${allInstantlyAccounts.join(', ')}]`)
 
-          if (!replyToUuid) {
-            replyToUuid = em.id || em.uuid || null
-          }
+      // Prefer the account that was used in prior conversation
+      for (const convo of recentConvos || []) {
+        const outFrom = convo.direction === 'outbound'
+          ? (convo.metadata?.from_email || convo.sender || '').toLowerCase()
+          : null
+        const inTo = convo.direction === 'inbound'
+          ? (convo.metadata?.to_email || '').toLowerCase()
+          : null
 
-          // Extract the sending account: the "from" on outbound emails
-          // (emails sent TO the artist are FROM our account)
-          const fromAddr = (em.from_address_email || em.from_email || em.from || em.eaccount || '').toLowerCase().trim()
-          const toAddr = (em.to_address_email || em.to_email || em.to || '').toLowerCase().trim()
-
-          if (fromAddr && fromAddr !== artist.email.toLowerCase()) {
-            instantlySenderAccount = fromAddr
-            console.log(`[Messages/Send] Found original sender from Instantly: ${instantlySenderAccount}`)
-            break
-          }
-          if (toAddr && toAddr !== artist.email.toLowerCase()) {
-            instantlySenderAccount = toAddr
-          }
+        const candidate = outFrom || inTo
+        if (candidate && candidate !== artistEmailLower && allInstantlyAccounts.includes(candidate)) {
+          eaccount = candidate
+          break
         }
+      }
+
+      // Otherwise pick the first account that isn't the artist
+      if (!eaccount) {
+        eaccount = allInstantlyAccounts.find(a => a !== artistEmailLower) || null
       }
     }
   } catch (e) {
-    console.error('[Messages/Send] Instantly email search failed:', e)
-  }
-
-  // Determine eaccount with priority:
-  // 1. Original sender from Instantly email search (most reliable)
-  // 2. Sending account from conversation history (but NOT the artist's own email)
-  // 3. Fetch from Instantly accounts API (excluding artist's email)
-  let eaccount = instantlySenderAccount
-
-  if (!eaccount && sendingAccount && sendingAccount.toLowerCase() !== artist.email.toLowerCase()) {
-    eaccount = sendingAccount
-  }
-
-  if (!eaccount) {
-    try {
-      const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
-        headers: { 'Authorization': `Bearer ${apiKey}` },
-      })
-      if (accountsRes.ok) {
-        const accountsData = await accountsRes.json()
-        const accounts = accountsData.items || accountsData || []
-        console.log(`[Messages/Send] Instantly accounts: ${JSON.stringify(accounts.map((a: any) => a.email || a.email_address)).slice(0, 500)}`)
-        for (const acct of accounts) {
-          const email = (acct.email || acct.email_address || '').toLowerCase()
-          if (email && email !== artist.email.toLowerCase()) {
-            eaccount = email
-            break
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
-    }
+    console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
   }
 
   if (!eaccount) {
     return NextResponse.json(
-      { error: 'No sending email account found. All Instantly accounts match the recipient.' },
+      { error: `No valid sending account. Instantly accounts: [${allInstantlyAccounts.join(', ')}]. Artist: ${artistEmailLower}` },
       { status: 400 }
     )
   }
 
-  console.log(`[Messages/Send] Using eaccount: ${eaccount} (source: ${instantlySenderAccount ? 'Instantly email search' : sendingAccount ? 'conversation history' : 'Instantly accounts API'})`)
+  console.log(`[Messages/Send] Using eaccount: ${eaccount}`)
+
+  // ── Step 5: Find reply_to_uuid from Instantly if we don't have one ──
+  if (!replyToUuid) {
+    try {
+      const searchRes = await fetch(
+        `https://api.instantly.ai/api/v2/unibox/emails?email_type=all&lead_email=${encodeURIComponent(artist.email)}&limit=5`,
+        { headers: { 'Authorization': `Bearer ${apiKey}` } }
+      )
+      if (searchRes.ok) {
+        const searchData = await searchRes.json()
+        const emails = searchData.data || searchData.items || searchData || []
+        if (Array.isArray(emails) && emails.length > 0) {
+          // Log the full structure of the first result so we know the field names
+          console.log(`[Messages/Send] Instantly unibox result keys: ${Object.keys(emails[0]).join(', ')}`)
+          console.log(`[Messages/Send] Instantly unibox first entry: ${JSON.stringify(emails[0]).slice(0, 500)}`)
+          replyToUuid = emails[0].id || emails[0].iid || emails[0].uuid || null
+        }
+      } else {
+        // Fallback to the search endpoint
+        const fallbackRes = await fetch(
+          `https://api.instantly.ai/api/v2/emails?search=${encodeURIComponent(artist.email)}&limit=1`,
+          { headers: { 'Authorization': `Bearer ${apiKey}` } }
+        )
+        if (fallbackRes.ok) {
+          const fallbackData = await fallbackRes.json()
+          const emails = fallbackData.data || fallbackData.items || fallbackData || []
+          if (Array.isArray(emails) && emails.length > 0) {
+            console.log(`[Messages/Send] Instantly search result keys: ${Object.keys(emails[0]).join(', ')}`)
+            replyToUuid = emails[0].id || emails[0].uuid || null
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[Messages/Send] Instantly email search failed:', e)
+    }
+  }
+
+  console.log(`[Messages/Send] reply_to_uuid: ${replyToUuid || 'none'}`)
+
+  // ── Step 6: Send via Instantly ──
+  let instantlyResult: any = null
+  let instantlyError: string | null = null
 
   try {
     let endpoint: string
     let requestBody: any
 
     if (replyToUuid) {
-      // Reply to existing thread
       endpoint = 'https://api.instantly.ai/api/v2/emails/reply'
       requestBody = {
         reply_to_uuid: replyToUuid,
@@ -278,9 +263,7 @@ async function handleEmailSend(
           html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
         },
       }
-      console.log(`[Messages/Send] Replying via Instantly: to=${artist.email}, from=${eaccount}, uuid=${replyToUuid}`)
     } else {
-      // No existing thread — send as a new email
       endpoint = 'https://api.instantly.ai/api/v2/emails/send'
       requestBody = {
         eaccount,
@@ -291,8 +274,10 @@ async function handleEmailSend(
           html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
         },
       }
-      console.log(`[Messages/Send] Sending new email via Instantly: to=${artist.email}, from=${eaccount}`)
     }
+
+    console.log(`[Messages/Send] ${replyToUuid ? 'Replying' : 'Sending new'}: to=${artist.email}, from=${eaccount}, endpoint=${endpoint}`)
+    console.log(`[Messages/Send] Request body: ${JSON.stringify(requestBody).slice(0, 500)}`)
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -306,17 +291,49 @@ async function handleEmailSend(
     const result = await res.json()
 
     if (!res.ok) {
-      console.error('[Messages/Send] Instantly error:', JSON.stringify(result))
-      instantlyError = result?.message || result?.error || res.statusText
+      console.error(`[Messages/Send] Instantly ${res.status} error:`, JSON.stringify(result))
+      instantlyError = result?.message || result?.error || `${res.status} ${res.statusText}`
+
+      // If reply fails with 404 (account not found), retry as new send
+      if (res.status === 404 && replyToUuid) {
+        console.log('[Messages/Send] Reply failed with 404, retrying as new email send...')
+        const retryBody = {
+          eaccount,
+          subject,
+          to_address_email_list: [artist.email],
+          body: {
+            text: params.message_text,
+            html: `<div>${params.message_text.replace(/\n/g, '<br>')}</div>`,
+          },
+        }
+        const retryRes = await fetch('https://api.instantly.ai/api/v2/emails/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${apiKey}`,
+          },
+          body: JSON.stringify(retryBody),
+        })
+        const retryResult = await retryRes.json()
+        if (retryRes.ok) {
+          console.log('[Messages/Send] Retry as new send succeeded')
+          instantlyResult = retryResult
+          instantlyError = null
+        } else {
+          console.error('[Messages/Send] Retry also failed:', JSON.stringify(retryResult))
+          instantlyError = retryResult?.message || retryResult?.error || `${retryRes.status}`
+        }
+      }
     } else {
       instantlyResult = result
+      console.log(`[Messages/Send] Instantly success: ${JSON.stringify(result).slice(0, 300)}`)
     }
   } catch (fetchError) {
     console.error('[Messages/Send] Instantly fetch error:', fetchError)
     instantlyError = String(fetchError)
   }
 
-  // Save to conversations regardless of Instantly success
+  // ── Step 7: ALWAYS save to conversations ──
   const { data: conversation, error: convoError } = await supabase
     .from('conversations')
     .insert({
@@ -342,14 +359,22 @@ async function handleEmailSend(
     .single()
 
   if (convoError) {
-    console.error('[Messages/Send] Conversation insert error:', convoError)
+    console.error('[Messages/Send] CRITICAL: Conversation insert failed:', convoError)
+    return NextResponse.json({
+      error: 'Failed to save message to database',
+      instantly_error: instantlyError,
+      db_error: convoError.message,
+    }, { status: 500 })
   }
 
+  console.log(`[Messages/Send] Conversation saved: ${conversation.id}, instantly_sent: ${!instantlyError}`)
+
+  // Return 200 with details — frontend should check instantly_error
   return NextResponse.json({
     sent: true,
     channel: 'email',
-    conversation_id: conversation?.id || null,
-    instantly_id: instantlyResult?.id || null,
+    conversation_id: conversation.id,
+    instantly_sent: !instantlyError,
     instantly_error: instantlyError,
   })
 }
