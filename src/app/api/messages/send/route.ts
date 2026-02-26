@@ -159,13 +159,16 @@ async function handleEmailSend(
   let allInstantlyAccounts: string[] = []
 
   try {
-    const accountsRes = await fetch('https://api.instantly.ai/api/v2/emails/accounts', {
+    const accountsRes = await fetch('https://api.instantly.ai/api/v2/accounts?limit=100', {
       headers: { 'Authorization': `Bearer ${apiKey}` },
     })
+    const accountsRaw = await accountsRes.text()
+    console.log(`[Messages/Send] Instantly accounts API ${accountsRes.status}: ${accountsRaw.slice(0, 500)}`)
+
     if (accountsRes.ok) {
-      const accountsData = await accountsRes.json()
+      const accountsData = JSON.parse(accountsRaw)
       const accounts = accountsData.items || accountsData || []
-      allInstantlyAccounts = accounts
+      allInstantlyAccounts = (Array.isArray(accounts) ? accounts : [])
         .map((a: any) => (a.email || a.email_address || '').toLowerCase().trim())
         .filter(Boolean)
 
@@ -209,31 +212,18 @@ async function handleEmailSend(
   if (!replyToUuid) {
     try {
       const searchRes = await fetch(
-        `https://api.instantly.ai/api/v2/unibox/emails?email_type=all&lead_email=${encodeURIComponent(artist.email)}&limit=5`,
+        `https://api.instantly.ai/api/v2/emails?lead=${encodeURIComponent(artist.email)}&limit=5`,
         { headers: { 'Authorization': `Bearer ${apiKey}` } }
       )
+      const searchRaw = await searchRes.text()
+      console.log(`[Messages/Send] Instantly emails search ${searchRes.status}: ${searchRaw.slice(0, 500)}`)
+
       if (searchRes.ok) {
-        const searchData = await searchRes.json()
-        const emails = searchData.data || searchData.items || searchData || []
+        const searchData = JSON.parse(searchRaw)
+        const emails = searchData.items || []
         if (Array.isArray(emails) && emails.length > 0) {
-          // Log the full structure of the first result so we know the field names
-          console.log(`[Messages/Send] Instantly unibox result keys: ${Object.keys(emails[0]).join(', ')}`)
-          console.log(`[Messages/Send] Instantly unibox first entry: ${JSON.stringify(emails[0]).slice(0, 500)}`)
-          replyToUuid = emails[0].id || emails[0].iid || emails[0].uuid || null
-        }
-      } else {
-        // Fallback to the search endpoint
-        const fallbackRes = await fetch(
-          `https://api.instantly.ai/api/v2/emails?search=${encodeURIComponent(artist.email)}&limit=1`,
-          { headers: { 'Authorization': `Bearer ${apiKey}` } }
-        )
-        if (fallbackRes.ok) {
-          const fallbackData = await fallbackRes.json()
-          const emails = fallbackData.data || fallbackData.items || fallbackData || []
-          if (Array.isArray(emails) && emails.length > 0) {
-            console.log(`[Messages/Send] Instantly search result keys: ${Object.keys(emails[0]).join(', ')}`)
-            replyToUuid = emails[0].id || emails[0].uuid || null
-          }
+          replyToUuid = emails[0].id || null
+          console.log(`[Messages/Send] Found reply_to_uuid: ${replyToUuid}, eaccount: ${emails[0].eaccount}, from: ${emails[0].from_address_email}`)
         }
       }
     } catch (e) {

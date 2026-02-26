@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     for (const email of emailsToCheck) {
       try {
         const res = await fetch(
-          `https://api.instantly.ai/api/v2/emails?email_type=all&search=${encodeURIComponent(email!)}&limit=50`,
+          `https://api.instantly.ai/api/v2/emails?lead=${encodeURIComponent(email!)}&limit=50`,
           {
             headers: { 'Authorization': `Bearer ${apiKey}` },
           }
@@ -67,8 +67,8 @@ export async function POST(request: NextRequest) {
 
         if (res.ok) {
           const data = await res.json()
-          const emails = data.items || data || []
-          allEmails.push(...emails)
+          const emails = data.items || []
+          allEmails.push(...(Array.isArray(emails) ? emails : []))
         }
       } catch (e) {
         console.error(`[Sync] Failed to fetch Instantly emails for ${email}:`, e)
