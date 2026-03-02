@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
           }
         })
 
-        // Update artist record
+        // Update artist record — must succeed so found emails are persisted
         const updateData: any = {
           email: result.email_found,
           email_confidence: result.email_confidence,
@@ -78,14 +78,31 @@ export async function POST(request: NextRequest) {
           is_enriched: true,
           is_contactable: result.is_contactable,
           last_enriched_at: new Date().toISOString(),
-          enrichment_attempts: artist.enrichment_attempts + 1,
+          enrichment_attempts: (artist.enrichment_attempts || 0) + 1,
           updated_at: new Date().toISOString(),
         }
 
-        await supabase
+        const { error: updateError } = await supabase
           .from('artists')
           .update(updateData)
           .eq('id', artist.id)
+
+        if (updateError) {
+          console.error(`[Bulk Enrich] Failed to save artist ${artist.id}:`, updateError.message)
+          errors.push({
+            artist_id: artist.id,
+            artist_name: artist.name,
+            error: `Found email but failed to save: ${updateError.message}`,
+          })
+          detailedLogs.push({
+            ...result,
+            _saveError: updateError.message,
+          })
+          if (i < artists.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 1000))
+          }
+          continue
+        }
 
         results.push({
           artist_id: artist.id,

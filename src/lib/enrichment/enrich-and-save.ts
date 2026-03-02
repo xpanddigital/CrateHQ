@@ -85,7 +85,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
     updateData.booking_agency = result.discovered_booking_agent
   }
 
-  // Update artist
+  // Update artist — must succeed so the found email is persisted
   const { error: updateError } = await supabase
     .from('artists')
     .update(updateData)
@@ -93,6 +93,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
 
   if (updateError) {
     console.error(`[Enrich] Failed to update artist ${artist.id}:`, updateError.message)
+    throw new Error(`Enrichment found email but failed to save to artist: ${updateError.message}`)
   }
 
   // Build error details

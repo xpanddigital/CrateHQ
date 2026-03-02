@@ -66,6 +66,7 @@ async function handleInstagramSend(
     )
   }
 
+  // 1) Queue the outbound message for the DM agent to send
   const { data: queued, error: queueError } = await supabase
     .from('pending_outbound_messages')
     .insert({
@@ -84,11 +85,40 @@ async function handleInstagramSend(
     return NextResponse.json({ error: 'Failed to queue Instagram message' }, { status: 500 })
   }
 
+  // 2) Save an outbound Instagram conversation immediately so the UI can render it
+  const { data: conversation, error: convoError } = await supabase
+    .from('conversations')
+    .insert({
+      artist_id: params.artist_id,
+      channel: 'instagram',
+      direction: 'outbound',
+      message_text: params.message_text,
+      ig_account_id: lastInbound.ig_account_id,
+      ig_thread_id: lastInbound.ig_thread_id,
+      scout_id: params.scout_id,
+      metadata: {
+        pending_message_id: queued.id,
+      },
+      read: true,
+    })
+    .select('id')
+    .single()
+
+  if (convoError) {
+    console.error('[Messages/Send] IG conversation insert error:', convoError)
+    return NextResponse.json(
+      { error: 'Message queued but failed to save conversation' },
+      { status: 500 }
+    )
+  }
+
+  // 3) Return success so the UI can show the message immediately
   return NextResponse.json({
     sent: true,
     channel: 'instagram',
     queued: true,
     pending_message_id: queued.id,
+    conversation_id: conversation.id,
   })
 }
 
