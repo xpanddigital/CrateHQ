@@ -152,6 +152,7 @@ export default function InboxPage() {
   const [artistDetail, setArtistDetail] = useState<ArtistDetail | null>(null)
   const [dealDetail, setDealDetail] = useState<any>(null)
   const [threadLoading, setThreadLoading] = useState(false)
+  const [creatingArtist, setCreatingArtist] = useState(false)
   const isThreadOpen = selectedArtistId !== null || selectedThreadKey !== null
 
   // Filters
@@ -270,6 +271,43 @@ export default function InboxPage() {
     }
   }, [syncInstantly])
 
+  const handleCreateArtist = useCallback(async () => {
+    if (!selectedThreadKey || creatingArtist) return
+    setCreatingArtist(true)
+    try {
+      const res = await fetch('/api/artists/from-conversation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ thread_key: selectedThreadKey }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        console.error('Create artist from conversation failed:', data.error || data.warning)
+        return
+      }
+
+      const newArtistId = data.artist?.id
+      if (!newArtistId) return
+
+      // Refetch thread data now that conversations are linked to an artist
+      setSelectedArtistId(newArtistId)
+      setSelectedThreadKey(null)
+
+      const resThread = await fetch(`/api/conversations?artist_id=${newArtistId}`)
+      const threadData = await resThread.json()
+      setMessages(threadData.messages || [])
+      setArtistDetail(threadData.artist || null)
+      setDealDetail(threadData.deal || null)
+
+      // Also refresh thread list so this conversation shows under the new artist
+      fetchThreads()
+    } catch (error) {
+      console.error('Create artist from conversation error:', error)
+    } finally {
+      setCreatingArtist(false)
+    }
+  }, [selectedThreadKey, fetchThreads, creatingArtist])
+
   // Scroll to bottom when messages change
   useEffect(() => {
     threadEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -336,11 +374,12 @@ export default function InboxPage() {
     setReplyText('')
 
     try {
-      if (!selectedArtistId) {
+      // We can send either by artist_id (linked thread) or by thread_key (unmatched IG/email thread).
+      if (!selectedArtistId && !selectedThreadKey) {
         setMessages(prev => prev.map(m =>
           m.id === optimisticMsg.id ? { ...m, _status: 'pending' } : m
         ))
-        console.error('Cannot send: no matched artist')
+        console.error('Cannot send: no matched artist or thread key')
         setSending(false)
         return
       }
@@ -350,6 +389,7 @@ export default function InboxPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           artist_id: selectedArtistId,
+          thread_key: selectedThreadKey,
           channel: replyChannel,
           message_text: textToSend,
         }),
@@ -532,6 +572,17 @@ export default function InboxPage() {
             <ArrowLeft className="h-4 w-4" />
           </Button>
           <h2 className="font-semibold truncate">{artistDetail?.name || selectedSenderName || 'Conversation'}</h2>
+          {!artistDetail && selectedThreadKey && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto"
+              onClick={handleCreateArtist}
+              disabled={creatingArtist}
+            >
+              {creatingArtist ? 'Creating…' : 'Create Artist'}
+            </Button>
+          )}
         </div>
 
         <div className="flex-1 overflow-y-auto p-4 space-y-4">

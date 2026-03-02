@@ -11,11 +11,11 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { artist_id, channel, message_text, scout_id } = body
+    const { artist_id, thread_key, channel, message_text, scout_id } = body
 
-    if (!artist_id || !channel || !message_text) {
+    if ((!artist_id && !thread_key) || !channel || !message_text) {
       return NextResponse.json(
-        { error: 'Missing required fields: artist_id, channel, message_text' },
+        { error: 'Missing required fields: artist_id or thread_key, channel, message_text' },
         { status: 400 }
       )
     }
@@ -30,7 +30,12 @@ export async function POST(request: NextRequest) {
     const supabase = createServiceClient()
 
     if (channel === 'instagram') {
-      return await handleInstagramSend(supabase, { artist_id, message_text, scout_id: scout_id || user.id })
+      return await handleInstagramSend(supabase, {
+        artist_id,
+        thread_key,
+        message_text,
+        scout_id: scout_id || user.id,
+      })
     } else {
       return await handleEmailSend(supabase, { artist_id, message_text, scout_id: scout_id || user.id })
     }
@@ -42,17 +47,37 @@ export async function POST(request: NextRequest) {
 
 async function handleInstagramSend(
   supabase: any,
-  params: { artist_id: string; message_text: string; scout_id: string }
+  params: { artist_id?: string; thread_key?: string; message_text: string; scout_id: string }
 ) {
-  const { data: lastInbound, error: lookupError } = await supabase
-    .from('conversations')
-    .select('ig_account_id, ig_thread_id')
-    .eq('artist_id', params.artist_id)
-    .eq('channel', 'instagram')
-    .eq('direction', 'inbound')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
+  // We can resolve the IG thread either by artist_id (preferred) or by thread_key (ig_thread_id)
+  let lastInbound: { ig_account_id: string | null; ig_thread_id: string | null; artist_id: string | null } | null = null
+  let lookupError: any = null
+
+  if (params.artist_id) {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('ig_account_id, ig_thread_id, artist_id')
+      .eq('artist_id', params.artist_id)
+      .eq('channel', 'instagram')
+      .eq('direction', 'inbound')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    lastInbound = data
+    lookupError = error
+  } else if (params.thread_key) {
+    const { data, error } = await supabase
+      .from('conversations')
+      .select('ig_account_id, ig_thread_id, artist_id')
+      .eq('ig_thread_id', params.thread_key)
+      .eq('channel', 'instagram')
+      .eq('direction', 'inbound')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    lastInbound = data
+    lookupError = error
+  }
 
   if (lookupError) {
     console.error('[Messages/Send] IG lookup error:', lookupError)
@@ -74,7 +99,7 @@ async function handleInstagramSend(
       ig_thread_id: lastInbound.ig_thread_id,
       message_text: params.message_text,
       scout_id: params.scout_id,
-      artist_id: params.artist_id,
+      artist_id: params.artist_id || lastInbound.artist_id || null,
       status: 'pending',
     })
     .select('id')
