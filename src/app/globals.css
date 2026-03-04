@@ -4,25 +4,27 @@
 
 @layer base {
   :root {
-    --background: 240 10% 3.9%;
-    --foreground: 0 0% 95%;
-    --card: 240 6% 8%;
-    --card-foreground: 0 0% 95%;
-    --popover: 240 6% 8%;
-    --popover-foreground: 0 0% 95%;
-    --primary: 40 60% 55%;
-    --primary-foreground: 240 10% 3.9%;
-    --secondary: 257 69% 64%;
-    --secondary-foreground: 0 0% 95%;
-    --muted: 240 4% 16%;
-    --muted-foreground: 240 5% 60%;
-    --accent: 257 69% 64%;
-    --accent-foreground: 0 0% 95%;
+    /* Flank theme tokens */
+    --background: 0 0% 0%;
+    --foreground: 0 0% 100%;
+    --card: 0 0% 4%;
+    --card-foreground: 0 0% 100%;
+    --popover: 0 0% 4%;
+    --popover-foreground: 0 0% 100%;
+    /* Accent / primary: #e8ff47 */
+    --primary: 69 100% 64%;
+    --primary-foreground: 0 0% 0%;
+    --secondary: 0 0% 9%;
+    --secondary-foreground: 0 0% 100%;
+    --muted: 0 0% 9%;
+    --muted-foreground: 0 0% 42%;
+    --accent: 69 100% 64%;
+    --accent-foreground: 0 0% 0%;
     --destructive: 0 84% 60%;
-    --destructive-foreground: 0 0% 95%;
-    --border: 240 4% 16%;
-    --input: 240 4% 16%;
-    --ring: 40 60% 55%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 0 0% 10%;
+    --input: 0 0% 10%;
+    --ring: 69 100% 64%;
     --radius: 0.5rem;
   }
 }
@@ -33,7 +35,8 @@
   }
   body {
     @apply bg-background text-foreground;
-    background-color: hsl(240 10% 3.9%);
-    color: hsl(0 0% 95%);
+    background-color: #000000;
+    color: #ffffff;
+    font-family: var(--font-body), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
 }

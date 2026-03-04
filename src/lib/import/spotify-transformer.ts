@@ -3,9 +3,9 @@
  *
  * Detects whether the uploaded file is:
  *   Format A — Raw Spotify Play Counter (Apify) export
- *   Format B — Existing CrateHQ format
+ *   Format B — Existing Flank format
  *
- * Transforms Format A into the CrateHQ schema, extracts emails from
+ * Transforms Format A into the Flank schema, extracts emails from
  * biographies, and returns a unified array ready for Supabase insert.
  */
 
@@ -29,7 +29,7 @@ export function detectFormat(headers: string[]): ImportFormat {
   const crateHits = CRATEHQ_MARKERS.filter(m => lower.includes(m)).length
   if (crateHits >= 1) return 'cratehq'
 
-  // Fallback: if it has 'name' and 'monthly_listeners' or similar, treat as CrateHQ
+  // Fallback: if it has 'name' and 'monthly_listeners' or similar, treat as Flank
   if (lower.includes('name') || lower.includes('artist_name')) return 'cratehq'
 
   return 'unknown'
@@ -131,7 +131,7 @@ export function extractBioEmails(biography: string | null | undefined): {
   return { emails, managementCompany, bookingAgency }
 }
 
-// ─── Spotify Raw → CrateHQ Transform ────────────────────────────────
+// ─── Spotify Raw → Flank Transform ────────────────────────────────
 
 export interface TransformedArtist {
   name: string
@@ -307,10 +307,10 @@ export function transformSpotifyRaw(row: Record<string, string>): TransformedArt
   }
 }
 
-// ─── CrateHQ / ChatGPT-Formatted CSV → Transform ────────────────────
+// ─── Flank / ChatGPT-Formatted CSV → Transform ────────────────────
 
 /**
- * Transforms a row from a CrateHQ-format or ChatGPT-reformatted CSV.
+ * Transforms a row from a Flank-format or ChatGPT-reformatted CSV.
  * Handles broad column name aliases and runs bio email extraction.
  */
 export function transformCrateHQ(row: Record<string, string>): TransformedArtist {

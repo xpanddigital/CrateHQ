@@ -333,8 +333,19 @@ export default function InboxPage() {
             (selectedThreadKey && (newMsg.sender === selectedThreadKey || (newMsg.metadata as any)?.from_email === selectedThreadKey))
           if (matchesThread) {
             setMessages(prev => {
+              // If we already have this exact message id, do nothing.
               if (prev.some(m => m.id === newMsg.id)) return prev
-              return [...prev, newMsg]
+
+              // If there's an optimistic temp message with the same content and direction/channel,
+              // remove it so we don't show duplicates when the real row arrives.
+              const cleaned = prev.filter(m => !(
+                m.id.startsWith('temp_') &&
+                m.direction === 'outbound' &&
+                m.channel === newMsg.channel &&
+                m.message_text === newMsg.message_text
+              ))
+
+              return [...cleaned, newMsg]
             })
           }
         }
@@ -402,11 +413,9 @@ export default function InboxPage() {
         ))
         console.error('Send failed:', data.error)
       } else {
-        // Message was saved to DB. Update optimistic message with real ID.
+        // Message was saved to DB. Clear optimistic status; realtime insert will replace temp message.
         setMessages(prev => prev.map(m =>
-          m.id === optimisticMsg.id
-            ? { ...m, id: data.conversation_id || m.id, _status: undefined }
-            : m
+          m.id === optimisticMsg.id ? { ...m, _status: undefined } : m
         ))
         if (data.instantly_error) {
           console.warn('Message saved but Instantly delivery failed:', data.instantly_error)

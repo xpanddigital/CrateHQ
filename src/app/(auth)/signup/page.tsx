@@ -6,7 +6,6 @@ import { createClient } from '@/lib/supabase/client'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 
 export default function SignupPage() {
   const [fullName, setFullName] = useState('')
@@ -67,31 +66,37 @@ export default function SignupPage() {
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background p-4">
-      <Card className="w-full max-w-md">
-        <CardHeader className="space-y-1">
-          <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
-          <CardDescription>
-            Get started with CrateHQ
-          </CardDescription>
-        </CardHeader>
-        <form onSubmit={handleSignup}>
-          <CardContent className="space-y-4">
-            {error && (
-              <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md text-sm">
-                <p className="font-semibold">Error:</p>
-                <p>{error}</p>
-                <p className="text-xs mt-2">Try using a different email or check Supabase settings.</p>
-              </div>
-            )}
-            {success && (
-              <div className="bg-green-500/15 text-green-600 px-4 py-3 rounded-md text-sm">
-                <p className="font-semibold">Success!</p>
-                <p>{success}</p>
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="fullName">Full Name</Label>
+    <div className="min-h-screen flex items-center justify-center bg-black px-4">
+      <div className="w-full max-w-md space-y-8">
+        <div className="text-center space-y-2">
+          <div className="text-5xl md:text-6xl text-white font-[var(--font-heading)] italic tracking-tight">
+            flank
+          </div>
+          <p className="text-[14px] text-[rgba(255,255,255,0.42)] font-[var(--font-body)]">
+            Outreach infrastructure for the social era
+          </p>
+        </div>
+
+        <form onSubmit={handleSignup} className="space-y-6">
+          {error && (
+            <div className="bg-destructive/15 text-destructive px-4 py-3 rounded-md text-sm">
+              <p className="font-semibold">Error:</p>
+              <p>{error}</p>
+              <p className="text-xs mt-2">Try using a different email or check Supabase settings.</p>
+            </div>
+          )}
+          {success && (
+            <div className="bg-green-500/15 text-green-500 px-4 py-3 rounded-md text-sm">
+              <p className="font-semibold">Success!</p>
+              <p>{success}</p>
+            </div>
+          )}
+
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="fullName" className="text-xs text-[rgba(255,255,255,0.42)]">
+                Full Name
+              </Label>
               <Input
                 id="fullName"
                 type="text"
@@ -100,10 +105,14 @@ export default function SignupPage() {
                 onChange={(e) => setFullName(e.target.value)}
                 required
                 disabled={loading}
+                className="bg-transparent border border-[rgba(255,255,255,0.10)] text-white font-[var(--font-body)] font-light placeholder:text-[rgba(255,255,255,0.18)] focus-visible:ring-0 focus-visible:border-[#e8ff47]"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="email" className="text-xs text-[rgba(255,255,255,0.42)]">
+                Email
+              </Label>
               <Input
                 id="email"
                 type="email"
@@ -112,10 +121,14 @@ export default function SignupPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 disabled={loading}
+                className="bg-transparent border border-[rgba(255,255,255,0.10)] text-white font-[var(--font-body)] font-light placeholder:text-[rgba(255,255,255,0.18)] focus-visible:ring-0 focus-visible:border-[#e8ff47]"
               />
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="password">Password</Label>
+
+            <div className="space-y-1.5">
+              <Label htmlFor="password" className="text-xs text-[rgba(255,255,255,0.42)]">
+                Password
+              </Label>
               <Input
                 id="password"
                 type="password"
@@ -125,25 +138,30 @@ export default function SignupPage() {
                 required
                 disabled={loading}
                 minLength={6}
+                className="bg-transparent border border-[rgba(255,255,255,0.10)] text-white font-[var(--font-body)] font-light placeholder:text-[rgba(255,255,255,0.18)] focus-visible:ring-0 focus-visible:border-[#e8ff47]"
               />
-              <p className="text-xs text-muted-foreground">
+              <p className="text-xs text-[rgba(255,255,255,0.42)]">
                 At least 6 characters
               </p>
             </div>
-          </CardContent>
-          <CardFooter className="flex flex-col space-y-4">
-            <Button type="submit" className="w-full" disabled={loading}>
-              {loading ? 'Creating account...' : 'Create account'}
-            </Button>
-            <p className="text-sm text-muted-foreground text-center">
-              Already have an account?{' '}
-              <Link href="/login" className="text-primary hover:underline">
-                Sign in
-              </Link>
-            </p>
-          </CardFooter>
+          </div>
+
+          <Button
+            type="submit"
+            className="w-full bg-white text-black hover:bg-[#e8ff47] hover:text-black rounded-md py-2.5 text-[12px] tracking-[0.12em] uppercase font-[var(--font-body)] font-normal"
+            disabled={loading}
+          >
+            {loading ? 'Creating account...' : 'Create account'}
+          </Button>
+
+          <p className="text-sm text-[rgba(255,255,255,0.42)] text-center">
+            Already have an account?{' '}
+            <Link href="/login" className="text-white hover:text-[#e8ff47] underline-offset-4 hover:underline">
+              Sign in
+            </Link>
+          </p>
         </form>
-      </Card>
+      </div>
     </div>
   )
 }

@@ -19,6 +19,11 @@ import {
   FileText,
   ClipboardList,
   Wifi,
+  Calendar,
+  Library,
+  Sparkles,
+  BookOpen,
+  Send as SendIcon,
 } from 'lucide-react'
 import { Profile } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -37,23 +42,30 @@ const navigation = [
   { name: 'Enrichment Logs', href: '/enrichment-logs', icon: ClipboardList, roles: ['admin', 'scout'] },
   { name: 'Scraping', href: '/scraping', icon: Download, roles: ['admin'] },
   { name: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['admin'] },
-  { name: 'DM Agents', href: '/admin/agents', icon: Wifi, roles: ['admin'] },
-  { name: 'Scouts', href: '/scouts', icon: Users, roles: ['admin'] },
   { name: 'Settings', href: '/settings', icon: Settings, roles: ['admin', 'scout'] },
+]
+
+const adminNavigation = [
+  { name: 'Account Identities', href: '/admin/identities', icon: Users },
+  { name: 'Content Studio', href: '/admin/studio', icon: Sparkles },
+  { name: 'Content Calendar', href: '/admin/calendar', icon: Calendar },
+  { name: 'Publish to GHL', href: '/admin/publish', icon: SendIcon },
+  { name: 'Content Library', href: '/admin/library', icon: Library },
+  { name: 'Knowledge Bases', href: '/admin/knowledge', icon: BookOpen },
+  { name: 'DM Agents', href: '/admin/agents', icon: Wifi },
+  { name: 'Scouts', href: '/scouts', icon: Users },
 ]
 
 export function Sidebar({ profile }: SidebarProps) {
   const pathname = usePathname()
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false)
 
-  const filteredNav = navigation.filter((item) =>
-    item.roles.includes(profile.role)
-  )
+  const filteredNav = navigation.filter((item) => item.roles.includes(profile.role))
 
   const SidebarContent = () => (
     <>
       <div className="flex h-16 items-center border-b px-6">
-        <h1 className="text-xl font-bold text-primary">CrateHQ</h1>
+        <h1 className="text-xl font-bold text-primary font-[var(--font-heading)]">Flank</h1>
         <Button
           variant="ghost"
           size="sm"
@@ -83,6 +95,33 @@ export function Sidebar({ profile }: SidebarProps) {
             </Link>
           )
         })}
+
+        {profile.role === 'admin' && (
+          <>
+            <div className="mt-6 mb-2 px-3 text-xs font-semibold text-muted-foreground uppercase tracking-[0.12em]">
+              Admin
+            </div>
+            {adminNavigation.map((item) => {
+              const isActive = pathname === item.href || pathname.startsWith(item.href + '/')
+              return (
+                <Link
+                  key={item.name}
+                  href={item.href}
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={cn(
+                    'flex items-center gap-3 rounded-lg px-3 py-2 text-xs font-medium transition-colors',
+                    isActive
+                      ? 'bg-primary text-primary-foreground'
+                      : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                  )}
+                >
+                  <item.icon className="h-4 w-4" />
+                  {item.name}
+                </Link>
+              )
+            })}
+          </>
+        )}
       </nav>
       <div className="border-t p-4">
         <div className="flex items-center gap-3">
@@ -111,7 +150,7 @@ export function Sidebar({ profile }: SidebarProps) {
         >
           <Menu className="h-6 w-6" />
         </Button>
-        <h1 className="ml-4 text-xl font-bold text-primary">CrateHQ</h1>
+        <h1 className="ml-4 text-xl font-bold text-primary font-[var(--font-heading)]">Flank</h1>
       </div>
 
       {/* Mobile overlay */}

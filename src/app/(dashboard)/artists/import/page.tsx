@@ -71,7 +71,7 @@ export default function ArtistsImportPage() {
       setDetectedFormat(format)
 
       if (format === 'unknown') {
-        setError('Unrecognized CSV format. Expected either raw Spotify scrape or CrateHQ format.')
+        setError('Unrecognized CSV format. Expected either raw Spotify scrape or Flank format.')
         return
       }
 
@@ -180,7 +180,7 @@ export default function ArtistsImportPage() {
             <CardHeader>
               <CardTitle>Upload CSV File</CardTitle>
               <CardDescription>
-                Upload a CSV or TSV file. Auto-detects raw Spotify scrape exports and CrateHQ format.
+                Upload a CSV or TSV file. Auto-detects raw Spotify scrape exports and Flank format.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
