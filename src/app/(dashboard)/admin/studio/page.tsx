@@ -422,7 +422,7 @@ export default function AdminStudioPage() {
                   </div>
                   <Button
                     type="button"
-                    size="xs"
+                    size="sm"
                     onClick={(e) => {
                       e.stopPropagation()
                       handleBuildPost(idea)

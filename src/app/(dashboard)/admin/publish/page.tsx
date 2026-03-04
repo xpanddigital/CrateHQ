@@ -450,7 +450,7 @@ export default function AdminPublishPage() {
                             </span>
                           )}
                           <Button
-                            size="xs"
+                            size="sm"
                             variant={isFailed ? 'outline' : 'default'}
                             disabled={isPublishing || (!isScheduled && !isFailed)}
                             onClick={() => handlePublish(p.id)}

@@ -581,7 +581,7 @@ export default function AdminIdentitiesPage() {
                 </span>
               )}
               <Button
-                size="xs"
+                size="sm"
                 variant="outline"
                 onClick={loadSafety}
                 disabled={safetyLoading}
@@ -975,7 +975,7 @@ export default function AdminIdentitiesPage() {
                       <Button
                         type="button"
                         variant="outline"
-                        size="xs"
+                        size="sm"
                         onClick={handleGenerateVoice}
                         disabled={suggestingVoice}
                       >
@@ -1224,7 +1224,7 @@ export default function AdminIdentitiesPage() {
                     <Button
                       type="button"
                       variant="outline"
-                      size="xs"
+                      size="sm"
                       onClick={handleGenerateHashtags}
                       disabled={generatingHashtags}
                     >
