@@ -227,10 +227,6 @@ export default function AdminIdentitiesPage() {
     }
   }
 
-  const loadData = async () => {
-    // replaced above; function body moved earlier
-  }
-
   useEffect(() => {
     loadData()
   }, [])
