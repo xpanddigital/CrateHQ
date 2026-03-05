@@ -20,6 +20,11 @@ async function requireAdmin() {
   return { supabase, error: null }
 }
 
+function toMinutes(date: string, time: string | null): number {
+  const base = new Date(`${date}T${time || '00:00:00'}Z`)
+  return Math.floor(base.getTime() / 60000)
+}
+
 type SafetySummaryStatus = 'ok' | 'warning' | 'critical'
 
 export async function GET(_request: NextRequest) {
@@ -62,11 +67,6 @@ export async function GET(_request: NextRequest) {
           accountNames[acc.id] = acc.ig_username || acc.id
         }
       }
-    }
-
-    function toMinutes(date: string, time: string | null): number {
-      const base = new Date(`${date}T${time || '00:00:00'}Z`)
-      return Math.floor(base.getTime() / 60000)
     }
 
     const postingTimeCollisions: {
