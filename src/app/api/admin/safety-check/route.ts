@@ -179,7 +179,7 @@ export async function GET(_request: NextRequest) {
               account1: a.name,
               account2: b.name,
               sharedCount: shared.length,
-              sharedTags: shared.slice(0, 20),
+              sharedTags: shared.slice(0, 20) as string[],
             })
           }
         }
