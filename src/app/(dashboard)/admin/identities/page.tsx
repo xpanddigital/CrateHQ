@@ -177,6 +177,9 @@ export default function AdminIdentitiesPage() {
   const [safety, setSafety] = useState<SafetyResult | null>(null)
   const [safetyLoading, setSafetyLoading] = useState(false)
   const [safetyError, setSafetyError] = useState<string | null>(null)
+  const [addAccountUsername, setAddAccountUsername] = useState('')
+  const [addAccountLoading, setAddAccountLoading] = useState(false)
+  const [addAccountError, setAddAccountError] = useState<string | null>(null)
 
   const themeUsage = useMemo(() => {
     const map: Record<string, string> = {}
@@ -266,6 +269,33 @@ export default function AdminIdentitiesPage() {
     }
     return `${safety.summary.totalWarnings} warnings found`
   }, [safety])
+
+  const handleAddInstagramAccount = async () => {
+    const username = addAccountUsername.trim()
+    if (!username) {
+      setAddAccountError('Enter an Instagram username')
+      return
+    }
+    setAddAccountError(null)
+    setAddAccountLoading(true)
+    try {
+      const res = await fetch('/api/admin/ig-accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ig_username: username }),
+      })
+      const data = await res.json()
+      if (!res.ok) {
+        throw new Error(data.error || 'Failed to add account')
+      }
+      setAddAccountUsername('')
+      await loadData()
+    } catch (e: any) {
+      setAddAccountError(e.message || 'Failed to add account')
+    } finally {
+      setAddAccountLoading(false)
+    }
+  }
 
   const startNew = () => {
     setSelectedId('new')
@@ -592,6 +622,41 @@ export default function AdminIdentitiesPage() {
           </CardContent>
         </Card>
 
+        {/* Add Instagram account first when none available for new identities */}
+        {!loading && availableAccounts.length === 0 && (
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-sm font-semibold">Add an Instagram account first</CardTitle>
+              <p className="text-xs text-muted-foreground">
+                Identities are linked to an Instagram account. Add an account below; then you can create a new identity for it. Use the same username as the Instagram handle (e.g. for @mybrand use mybrand).
+              </p>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {addAccountError && (
+                <div className="text-xs text-red-400 bg-red-500/10 border border-red-500/30 rounded px-2 py-1.5">
+                  {addAccountError}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <Input
+                  placeholder="Instagram username (e.g. mybrand)"
+                  value={addAccountUsername}
+                  onChange={(e) => setAddAccountUsername(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddInstagramAccount()}
+                  className="flex-1"
+                />
+                <Button
+                  size="sm"
+                  onClick={handleAddInstagramAccount}
+                  disabled={addAccountLoading || !addAccountUsername.trim()}
+                >
+                  {addAccountLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Add account'}
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
         {error && (
           <div className="text-sm text-red-400 bg-red-500/10 border border-red-500/30 rounded-md px-3 py-2">
             {error}
@@ -606,7 +671,9 @@ export default function AdminIdentitiesPage() {
         ) : identities.length === 0 ? (
           <Card>
             <CardContent className="py-10 text-center text-muted-foreground text-sm">
-              No identities yet. Click &quot;New Identity&quot; to create one.
+              {availableAccounts.length === 0
+                ? 'Add an Instagram account above, then click "New Identity" to create your first identity.'
+                : 'No identities yet. Click "New Identity" to create one.'}
             </CardContent>
           </Card>
         ) : (
