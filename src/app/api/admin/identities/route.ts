@@ -154,29 +154,30 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    // Ensure NOT NULL array/string fields have safe defaults so insert never fails on null/undefined
     const { data, error: insertError } = await supabase
       .from('account_identities')
       .insert({
         ig_account_id,
-        display_name,
+        display_name: display_name || 'Unnamed',
         theme_id,
-        color_primary,
-        color_secondary,
-        color_bg,
-        color_text,
-        color_accent,
-        font_heading,
-        font_body,
-        voice_prompt,
-        caption_style,
-        content_pillars,
-        image_styles,
-        image_subjects,
-        posting_times,
-        posting_days,
-        posts_per_day,
-        carousel_ratio,
-        hashtag_pool,
+        color_primary: color_primary ?? '#000000',
+        color_secondary: color_secondary ?? '#333333',
+        color_bg: color_bg ?? '#000000',
+        color_text: color_text ?? '#ffffff',
+        color_accent: color_accent ?? '#e8ff47',
+        font_heading: font_heading ?? 'DM Sans',
+        font_body: font_body ?? 'DM Sans',
+        voice_prompt: voice_prompt ?? '',
+        caption_style: caption_style ?? 'punchy-short',
+        content_pillars: Array.isArray(content_pillars) ? content_pillars : [],
+        image_styles: Array.isArray(image_styles) ? image_styles : [],
+        image_subjects: Array.isArray(image_subjects) ? image_subjects : [],
+        posting_times: Array.isArray(posting_times) ? posting_times : [],
+        posting_days: Array.isArray(posting_days) ? posting_days : [],
+        posts_per_day: typeof posts_per_day === 'number' ? posts_per_day : 2,
+        carousel_ratio: typeof carousel_ratio === 'number' ? carousel_ratio : 0.6,
+        hashtag_pool: Array.isArray(hashtag_pool) ? hashtag_pool : [],
       })
       .select('id')
       .single()
@@ -195,7 +196,10 @@ export async function POST(request: NextRequest) {
       if (ghl_social_account_id !== undefined) ghlUpdate.ghl_social_account_id = ghl_social_account_id || null
       if (ghl_api_key !== undefined) ghlUpdate.ghl_api_key = ghl_api_key || null
       if (Object.keys(ghlUpdate).length) {
-        await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
+        const { error: _ghlErr } = await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
+        if (_ghlErr) {
+          console.warn('[Admin/Identities] GHL columns update skipped (columns may not exist yet):', _ghlErr.message)
+        }
       }
     }
 
@@ -288,7 +292,10 @@ export async function PATCH(request: NextRequest) {
 
     if (updateError) {
       console.error('[Admin/Identities] Update error:', updateError)
-      return NextResponse.json({ error: 'Failed to update identity' }, { status: 500 })
+      const msg = updateError.code === '42P01' || updateError.message?.includes('does not exist')
+        ? 'Content Engine not set up. Run the Content Engine SQL migration (supabase-content-engine.sql) in your Supabase SQL editor to create the account_identities table.'
+        : updateError.message || 'Failed to update identity'
+      return NextResponse.json({ error: msg }, { status: 500 })
     }
 
     if (ig_account_id && (ghl_location_id !== undefined || ghl_social_account_id !== undefined || ghl_api_key !== undefined)) {
@@ -297,7 +304,10 @@ export async function PATCH(request: NextRequest) {
       if (ghl_social_account_id !== undefined) ghlUpdate.ghl_social_account_id = ghl_social_account_id || null
       if (ghl_api_key !== undefined) ghlUpdate.ghl_api_key = ghl_api_key || null
       if (Object.keys(ghlUpdate).length) {
-        await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
+        const { error: _ghlErr } = await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
+        if (_ghlErr) {
+          console.warn('[Admin/Identities] GHL columns update skipped (columns may not exist yet):', _ghlErr.message)
+        }
       }
     }
 
