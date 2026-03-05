@@ -23,19 +23,36 @@ export async function GET() {
   if (error) return error
 
   try {
-    const { data: identities, error: idError } = await supabase
+    const { data: identitiesRaw, error: idError } = await supabase
       .from('account_identities')
       .select('*')
       .order('created_at', { ascending: true })
 
     if (idError) {
       console.error('[Admin/Identities] Fetch identities error:', idError)
+      // Table may not exist yet (Content Engine migration not run); return empty so page still loads
+      if (idError.code === '42P01' || idError.message?.includes('does not exist')) {
+        const { data: accountsOnly, error: accErr } = await supabase
+          .from('ig_accounts')
+          .select('id, ig_username')
+          .order('created_at', { ascending: true })
+        if (accErr) {
+          return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
+        }
+        return NextResponse.json({
+          identities: [],
+          available_accounts: (accountsOnly || []).map((a: any) => ({ ...a, ghl_location_id: null, ghl_social_account_id: null, ghl_api_key: null })),
+        })
+      }
       return NextResponse.json({ error: 'Failed to fetch identities' }, { status: 500 })
     }
 
+    const identities = identitiesRaw || []
+
+    // Select only columns that exist in base schema; ghl_* may be missing if Content Engine migration not run
     const { data: accounts, error: accError } = await supabase
       .from('ig_accounts')
-      .select('id, ig_username, ghl_location_id, ghl_social_account_id, ghl_api_key')
+      .select('id, ig_username')
       .order('created_at', { ascending: true })
 
     if (accError) {
@@ -43,22 +60,40 @@ export async function GET() {
       return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
     }
 
+    // Optionally fetch GHL columns if they exist (Content Engine migration adds them)
+    let ghlByAccountId: Record<string, { ghl_location_id?: string; ghl_social_account_id?: string; ghl_api_key?: string }> = {}
+    const { data: ghlRows, error: _ghlErr } = await supabase.from('ig_accounts').select('id, ghl_location_id, ghl_social_account_id, ghl_api_key')
+    if (!_ghlErr && ghlRows) {
+      ghlRows.forEach((r: any) => {
+        ghlByAccountId[r.id] = {
+          ghl_location_id: r.ghl_location_id ?? undefined,
+          ghl_social_account_id: r.ghl_social_account_id ?? undefined,
+          ghl_api_key: r.ghl_api_key ?? undefined,
+        }
+      })
+    }
+    // If _ghlErr: ghl_* columns may not exist yet (Content Engine migration not run); continue without them
+
     const identitiesWithUsername =
       (identities || []).map((id: any) => {
         const acc = (accounts || []).find((a: any) => a.id === id.ig_account_id)
+        const ghl = id.ig_account_id ? ghlByAccountId[id.ig_account_id] : null
         return {
           ...id,
           ig_username: acc?.ig_username ?? null,
-          ghl_location_id: acc?.ghl_location_id ?? null,
-          ghl_social_account_id: acc?.ghl_social_account_id ?? null,
-          ghl_api_key: acc?.ghl_api_key ?? null,
+          ghl_location_id: ghl?.ghl_location_id ?? null,
+          ghl_social_account_id: ghl?.ghl_social_account_id ?? null,
+          ghl_api_key: ghl?.ghl_api_key ?? null,
         }
       }) || []
 
     const usedAccountIds = new Set(
       (identities || []).map((id: any) => id.ig_account_id).filter(Boolean)
     )
-    const available_accounts = (accounts || []).filter((a) => !usedAccountIds.has(a.id))
+    const available_accounts = (accounts || []).map((a: any) => ({
+      ...a,
+      ...ghlByAccountId[a.id],
+    })).filter((a) => !usedAccountIds.has(a.id))
 
     return NextResponse.json({ identities: identitiesWithUsername, available_accounts })
   } catch (e) {
