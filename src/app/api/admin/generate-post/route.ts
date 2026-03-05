@@ -3,7 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import crypto from 'crypto'
 
-const MODEL = 'claude-sonnet-4-20250514'
+const MODEL = 'claude-sonnet-4-6'
 
 function sampleHashtags(pool: string[], count: number): string[] {
   const normalized = pool
