@@ -201,7 +201,7 @@ export async function GET(_request: NextRequest) {
             contentPillarOverlap.push({
               account1: a.name,
               account2: b.name,
-              sharedPillars: shared,
+              sharedPillars: shared as string[],
             })
           }
         }
