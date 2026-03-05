@@ -183,7 +183,10 @@ export async function POST(request: NextRequest) {
 
     if (insertError) {
       console.error('[Admin/Identities] Insert error:', insertError)
-      return NextResponse.json({ error: 'Failed to create identity' }, { status: 500 })
+      const msg = insertError.code === '42P01' || insertError.message?.includes('does not exist')
+        ? 'Content Engine not set up. Run the Content Engine SQL migration (supabase-content-engine.sql) in your Supabase SQL editor to create the account_identities table.'
+        : insertError.message || 'Failed to create identity'
+      return NextResponse.json({ error: msg }, { status: 500 })
     }
 
     if (ig_account_id && (ghl_location_id !== undefined || ghl_social_account_id !== undefined || ghl_api_key !== undefined)) {

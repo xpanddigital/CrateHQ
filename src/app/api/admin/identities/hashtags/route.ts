@@ -28,23 +28,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'ANTHROPIC_API_KEY not configured' }, { status: 400 })
     }
 
-    // Collect all hashtags already in use across identities
+    // Collect all hashtags already in use across identities (optional; table may not exist yet)
+    let used = new Set<string>()
     const { data: identities, error: idError } = await supabase
       .from('account_identities')
       .select('hashtag_pool')
 
-    if (idError) {
-      console.error('[Admin/Identities/Hashtags] Fetch identities error:', idError)
-      return NextResponse.json({ error: 'Failed to read existing hashtags' }, { status: 500 })
+    if (!idError && identities) {
+      for (const row of identities) {
+        ;(row.hashtag_pool || []).forEach((h: string) => {
+          const normalized = (h || '').toLowerCase().replace(/^#/, '')
+          if (normalized) used.add(normalized)
+        })
+      }
     }
-
-    const used = new Set<string>()
-    for (const row of identities || []) {
-      ;(row.hashtag_pool || []).forEach((h: string) => {
-        const normalized = (h || '').toLowerCase().replace(/^#/, '')
-        if (normalized) used.add(normalized)
-      })
-    }
+    // If idError (e.g. account_identities table missing), used stays empty — still generate hashtags
 
     const usedList = Array.from(used)
     const pillarsText = Array.isArray(content_pillars) && content_pillars.length
