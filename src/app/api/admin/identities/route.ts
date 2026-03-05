@@ -30,21 +30,20 @@ export async function GET() {
 
     if (idError) {
       console.error('[Admin/Identities] Fetch identities error:', idError)
-      // Table may not exist yet (Content Engine migration not run); return empty so page still loads
-      if (idError.code === '42P01' || idError.message?.includes('does not exist')) {
-        const { data: accountsOnly, error: accErr } = await supabase
-          .from('ig_accounts')
-          .select('id, ig_username')
-          .order('created_at', { ascending: true })
-        if (accErr) {
-          return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
-        }
-        return NextResponse.json({
-          identities: [],
-          available_accounts: (accountsOnly || []).map((a: any) => ({ ...a, ghl_location_id: null, ghl_social_account_id: null, ghl_api_key: null })),
-        })
+      // On any account_identities failure (missing table, schema mismatch, etc.), return empty identities
+      // and still load ig_accounts so the page can load and the user can add an account.
+      const { data: accountsOnly, error: accErr } = await supabase
+        .from('ig_accounts')
+        .select('id, ig_username')
+        .order('created_at', { ascending: true })
+      if (accErr) {
+        console.error('[Admin/Identities] Fallback ig_accounts fetch error:', accErr)
+        return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
       }
-      return NextResponse.json({ error: 'Failed to fetch identities' }, { status: 500 })
+      return NextResponse.json({
+        identities: [],
+        available_accounts: (accountsOnly || []).map((a: any) => ({ ...a, ghl_location_id: null, ghl_social_account_id: null, ghl_api_key: null })),
+      })
     }
 
     const identities = identitiesRaw || []
