@@ -10,16 +10,17 @@ Use the WHATWG URL API instead.
 **Cause:** Next.js (and sometimes other dependencies) still use Node’s legacy `url.parse()` in a few places. Node 22+ emits this deprecation. It does **not** break the app; it’s only a warning.
 
 **What we did:**
-- Upgraded Next.js to the latest 14.2.x.
-- Added `src/instrumentation.ts` so the server suppresses DEP0169 at startup (no more log noise).
+- **suppress-dep0169.cjs** at project root — patches `process.emit` so DEP0169 is not printed.
+- **package.json** `start` script uses `NODE_OPTIONS='--require=./suppress-dep0169.cjs'` so the patch loads before Next.js (when you run `npm start`).
+- **src/instrumentation.ts** — also patches at load time as a fallback.
 
-**If the warning still appears** and you want to hide it in Vercel:
+**Vercel (serverless):** Workers often don’t use the start script. To silence the warning on Vercel:
 
-1. Open your project on [Vercel](https://vercel.com) → **Settings** → **Environment Variables**.
+1. [Vercel](https://vercel.com) → your project → **Settings** → **Environment Variables**.
 2. Add:
    - **Name:** `NODE_OPTIONS`
-   - **Value:** `--disable-warning=DEP0169`
-   - **Environment:** Production (and Preview if you want).
-3. Redeploy.
+   - **Value:** `--require=./suppress-dep0169.cjs`
+   - **Environments:** Production (and Preview if you want).
+3. **Redeploy** so new invocations use the variable.
 
-This only works on **Node 22+**. If your Vercel runtime is Node 18/20, the flag may be ignored; the warning is harmless either way.
+The file `suppress-dep0169.cjs` is in the repo and deployed; the path is correct. On **Node 22+** you can instead use **Value:** `--disable-warning=DEP0169` (no file).
