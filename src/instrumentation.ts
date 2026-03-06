@@ -11,7 +11,7 @@ function suppressDep0169() {
       const w = args[0] as { code?: string; message?: string }
       if (w.code === 'DEP0169' || (w.message && String(w.message).includes('url.parse()'))) return true
     }
-    return origEmit.apply(this, [name, ...args])
+    return (origEmit as (...a: unknown[]) => boolean).apply(this, [name, ...args])
   } as NodeJS.Process['emit']
 }
 suppressDep0169()
