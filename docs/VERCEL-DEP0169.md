@@ -7,20 +7,10 @@ DeprecationWarning: `url.parse()` behavior is not standardized...
 Use the WHATWG URL API instead.
 ```
 
-**Cause:** Next.js (and sometimes other dependencies) still use Node’s legacy `url.parse()` in a few places. Node 22+ emits this deprecation. It does **not** break the app; it’s only a warning.
+**Cause:** Next.js (and sometimes other dependencies) still use Node's legacy `url.parse()` in a few places. Node 22+ emits this deprecation. It does **not** break the app; it's only a warning.
 
 **What we did:**
-- **suppress-dep0169.cjs** at project root — patches `process.emit` so DEP0169 is not printed.
-- **package.json** `start` script uses `NODE_OPTIONS='--require=./suppress-dep0169.cjs'` so the patch loads before Next.js (when you run `npm start`).
-- **src/instrumentation.ts** — also patches at load time as a fallback.
+- **suppress-dep0169.cjs** at project root — available for local/self-hosted use with `NODE_OPTIONS='--require=./suppress-dep0169.cjs'` if you run `npm start` manually.
+- **src/instrumentation.ts** — patches at load time to suppress DEP0169 when the server runs.
 
-**Vercel (serverless):** Workers often don’t use the start script. To silence the warning on Vercel:
-
-1. [Vercel](https://vercel.com) → your project → **Settings** → **Environment Variables**.
-2. Add:
-   - **Name:** `NODE_OPTIONS`
-   - **Value:** `--require=./suppress-dep0169.cjs`
-   - **Environments:** Production (and Preview if you want).
-3. **Redeploy** so new invocations use the variable.
-
-The file `suppress-dep0169.cjs` is in the repo and deployed; the path is correct. On **Node 22+** you can instead use **Value:** `--disable-warning=DEP0169` (no file).
+**Vercel:** Do **not** set `NODE_OPTIONS` in Vercel. It is applied to the build as well as runtime; during build the working directory can differ, so `--require=./suppress-dep0169.cjs` causes "Cannot find module" and the build fails. Remove `NODE_OPTIONS` from your Vercel env vars so the build succeeds. Rely on `instrumentation.ts` only. The DEP0169 message is harmless and does not affect behavior.
