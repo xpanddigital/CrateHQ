@@ -25,9 +25,6 @@ const monoFont = DM_Mono({
 export const metadata: Metadata = {
   title: "Flank - Music Catalog Deal Flow",
   description: "Flank — CRM and outreach automation for music catalog financing",
-  icons: {
-    icon: '/favicon.ico',
-  },
 };
 
 export default function RootLayout({
