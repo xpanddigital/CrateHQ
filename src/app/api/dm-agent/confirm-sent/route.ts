@@ -5,7 +5,7 @@ import { verifyAgentAuth } from '@/lib/dm/auth'
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json()
-    const { pending_message_id, ig_message_id } = body
+    const { pending_message_id, ig_message_id, ig_thread_id } = body
 
     if (!pending_message_id) {
       return NextResponse.json(
@@ -36,9 +36,14 @@ export async function POST(request: NextRequest) {
     }
 
     // Mark as sent
+    const updatePayload: any = { status: 'sent', sent_at: new Date().toISOString() }
+    if (ig_thread_id) {
+      updatePayload.ig_thread_id = ig_thread_id
+    }
+
     const { error: updateError } = await supabase
       .from('pending_outbound_messages')
-      .update({ status: 'sent', sent_at: new Date().toISOString() })
+      .update(updatePayload)
       .eq('id', pending_message_id)
 
     if (updateError) {
@@ -46,32 +51,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to update message status' }, { status: 500 })
     }
 
-    // Insert outbound conversation record
-    const { data: conversation, error: insertError } = await supabase
-      .from('conversations')
-      .insert({
-        artist_id: pendingMsg.artist_id || null,
-        channel: 'instagram',
-        direction: 'outbound',
-        message_text: pendingMsg.message_text,
-        sender: auth.account.ig_username,
-        ig_account_id: pendingMsg.ig_account_id,
-        ig_thread_id: pendingMsg.ig_thread_id,
-        ig_message_id: ig_message_id || null,
-        metadata: { pending_message_id },
-        read: true,
-      })
-      .select('id')
-      .single()
+    // Update outbound conversation record
+    const convoUpdatePayload: any = {
+      ig_message_id: ig_message_id || null,
+    }
+    if (ig_thread_id) {
+      convoUpdatePayload.ig_thread_id = ig_thread_id
+    }
 
-    if (insertError) {
-      console.error('[DM-Agent] Confirm-sent insert error:', insertError)
-      return NextResponse.json({ error: 'Message marked sent but failed to log conversation' }, { status: 500 })
+    const { data: conversationRows, error: convoError } = await supabase
+      .from('conversations')
+      .update(convoUpdatePayload)
+      .eq('metadata->>pending_message_id', pending_message_id)
+      .select('id')
+
+    if (convoError) {
+      console.error('[DM-Agent] Confirm-sent convo update error:', convoError)
+      return NextResponse.json({ error: 'Message marked sent but failed to update conversation' }, { status: 500 })
     }
 
     return NextResponse.json({
       confirmed: true,
-      conversation_id: conversation.id,
+      conversation_id: conversationRows?.[0]?.id,
     })
   } catch (error) {
     console.error('[DM-Agent] Confirm-sent unhandled error:', error)

@@ -18,7 +18,7 @@ export async function GET(request: NextRequest) {
 
     const { data: messages, error } = await supabase
       .from('pending_outbound_messages')
-      .select('id, ig_thread_id, message_text')
+      .select('id, ig_thread_id, message_text, target_username, outreach_type')
       .eq('ig_account_id', igAccountId!)
       .eq('status', 'pending')
       .order('created_at', { ascending: true })
@@ -33,6 +33,8 @@ export async function GET(request: NextRequest) {
         id: m.id,
         thread_id: m.ig_thread_id,
         message_text: m.message_text,
+        target_username: m.target_username,
+        outreach_type: m.outreach_type || 'reply',
       })),
     })
   } catch (error) {
