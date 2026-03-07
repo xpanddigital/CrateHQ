@@ -16,6 +16,44 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
+    // 0. Check Ramp-Up Limits
+    const { data: accountData, error: accountError } = await supabase
+      .from('ig_accounts')
+      .select('daily_cold_dm_limit')
+      .eq('id', ig_account_id)
+      .single()
+
+    if (accountError && accountError.code !== 'PGRST116' && accountError.code !== '42703') {
+      console.error('[Generate Cold DM] Account fetch error:', accountError)
+      return NextResponse.json({ error: 'Failed to fetch account limits' }, { status: 500 })
+    }
+
+    // Default to 3 if column is missing or account not found
+    const dailyLimit = accountData?.daily_cold_dm_limit ?? 3
+
+    // Calculate midnight of current day (UTC)
+    const startOfDay = new Date()
+    startOfDay.setUTCHours(0, 0, 0, 0)
+
+    const { count: todayCount, error: countError } = await supabase
+      .from('pending_outbound_messages')
+      .select('*', { count: 'exact', head: true })
+      .eq('ig_account_id', ig_account_id)
+      .eq('outreach_type', 'cold')
+      .gte('created_at', startOfDay.toISOString())
+
+    if (countError) {
+      console.error('[Generate Cold DM] Count error:', countError)
+      return NextResponse.json({ error: 'Failed to verify daily limit' }, { status: 500 })
+    }
+
+    if ((todayCount ?? 0) >= dailyLimit) {
+      return NextResponse.json(
+        { error: 'Daily cold DM limit reached for this account. Account is currently in the warm-up phase.' },
+        { status: 429 }
+      )
+    }
+
     // 1. Fetch artist data
     const { data: artist, error: artistError } = await supabase
       .from('artists')
