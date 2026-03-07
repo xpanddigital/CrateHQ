@@ -82,26 +82,27 @@ export async function POST(request: NextRequest) {
     const client = new Anthropic({ apiKey })
 
     const prompt = `
-You are a real A&R scout writing a cold Instagram DM to an artist to break the ice about a potential catalog or advance deal.
+SYSTEM INSTRUCTIONS FOR CLAUDE OPUS 4.6:
+You are an A&R scout for a modern music agency. Your job is to write a highly personalized, ultra-casual Instagram DM to an independent artist.
 
+TARGET DATA:
 Artist Name: ${artist.name || 'the artist'}
-Bio: ${artist.biography || 'N/A'}
-Spotify Monthly Listeners: ${artist.spotify_monthly_listeners || 'N/A'}
 Genres: ${(artist.genres || []).join(', ') || 'N/A'}
+Spotify Listeners: ${artist.spotify_monthly_listeners || 'N/A'}
+Bio/Recent Notes: ${artist.biography || 'N/A'}
 
-Write a short, punchy, highly personalized Instagram DM icebreaker.
-
-CONSTRAINTS:
-- Keep it under 3 sentences.
-- Reference a specific detail from their bio, genres, or their monthly listeners to prove you actually looked them up.
-- It must sound like a real A&R scout wrote it casually on their phone.
-- No robotic greetings like "Dear Artist" or "Hi [Name]".
-- DO NOT use any hashtags.
-- Do not include any filler text, just return the exact message to send.
+STRICT RULES (FAILURE TO FOLLOW WILL RESULT IN PENALTY):
+1. No Em Dashes or Semicolons: Absolutely ZERO use of "—" or ";". Humans typing fast on a phone keyboard almost never use these. Use simple commas or periods.
+2. Banned Words: Do not use words like: delve, testament, tapestry, robust, thrilled, greetings, or cheers.
+3. Length: Absolute maximum of 3 sentences. Shorter is better.
+4. No Robot Speak: DO NOT use formal greetings or sign-offs. Start casually with "Yo ${artist.name || 'there'}," "Hey," or just jump straight into it.
+5. The Hook: Reference a specific data point from their Target Data.
+6. The Ask: End with a low-friction, casual question. (e.g., "Are you fully independent right now?" or "You working on any new drops this month?")
+7. Punctuation: Keep it slightly messy. A missing period at the end of the final sentence is actually preferred.
 `.trim()
 
     const resp = await client.messages.create({
-      model: 'claude-sonnet-4-6', // standard model for the app
+      model: 'claude-opus-4-6', // standard model for the app
       max_tokens: 150,
       messages: [{ role: 'user', content: prompt }],
     })
@@ -123,6 +124,7 @@ CONSTRAINTS:
         outreach_type: 'cold',
         status: 'pending',
         message_text: generatedMessage,
+        is_approved: false, // Must be approved by admin before dispatch
       })
       .select('id')
       .single()

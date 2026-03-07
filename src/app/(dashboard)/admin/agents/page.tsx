@@ -4,6 +4,11 @@ import { useState, useEffect, useCallback } from 'react'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { useToast } from '@/components/ui/use-toast'
+import { createClient } from '@/lib/supabase/client'
+import { Switch } from '@/components/ui/switch'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
@@ -22,6 +27,8 @@ interface Agent {
   status: string
   last_heartbeat: string | null
   messages_today: { found: number; sent: number }
+  assigned_scout_id: string | null
+  daily_cold_dm_limit: number
 }
 
 interface HeartbeatLog {
@@ -100,11 +107,20 @@ function formatActiveWindow(start: number, end: number, tz: string): string {
 
 export default function AdminAgentsPage() {
   const [agents, setAgents] = useState<Agent[]>([])
+  const [scouts, setScouts] = useState<{ id: string, full_name: string }[]>([])
   const [loading, setLoading] = useState(true)
   const [logsModal, setLogsModal] = useState<{ accountId: string; username: string } | null>(null)
   const [logs, setLogs] = useState<HeartbeatLog[]>([])
   const [logsLoading, setLogsLoading] = useState(false)
   const [toggling, setToggling] = useState<string | null>(null)
+  const [panicking, setPanicking] = useState(false)
+  const { toast } = useToast()
+
+  const fetchScouts = useCallback(async () => {
+    const supabase = createClient()
+    const { data } = await supabase.from('profiles').select('id, full_name').eq('role', 'scout')
+    if (data) setScouts(data)
+  }, [])
 
   const fetchAgents = useCallback(async () => {
     try {
@@ -119,26 +135,90 @@ export default function AdminAgentsPage() {
   }, [])
 
   useEffect(() => {
+    fetchScouts()
     fetchAgents()
     const interval = setInterval(fetchAgents, 30000)
     return () => clearInterval(interval)
-  }, [fetchAgents])
+  }, [fetchAgents, fetchScouts])
+
+  const handleUpdateAgent = async (accountId: string, updates: any) => {
+    try {
+      const res = await fetch(`/api/admin/agents/${accountId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      if (!res.ok) throw new Error('Failed to update agent configuration')
+      
+      setAgents(prev => prev.map(a => a.id === accountId ? { ...a, ...updates } : a))
+      
+      if ('assigned_scout_id' in updates) {
+        const scout = scouts.find(s => s.id === updates.assigned_scout_id)
+        toast({ title: 'Agent Updated', description: `Assigned to ${scout ? scout.full_name : 'Nobody'}` })
+      }
+      if ('daily_cold_dm_limit' in updates) {
+        toast({ title: 'Agent Updated', description: `Daily limit updated to ${updates.daily_cold_dm_limit}` })
+      }
+    } catch (error: any) {
+      toast({ title: 'Error', description: error.message, variant: 'destructive' })
+    }
+  }
 
   const handleToggle = async (accountId: string, currentActive: boolean) => {
     setToggling(accountId)
     try {
-      await fetch('/api/admin/agents', {
+      const res = await fetch(`/api/admin/agents/${accountId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ account_id: accountId, is_active: !currentActive }),
+        body: JSON.stringify({ is_active: !currentActive }),
       })
+      
+      if (!res.ok) throw new Error('Failed to toggle agent status')
+        
       setAgents(prev => prev.map(a =>
         a.id === accountId ? { ...a, is_active: !currentActive } : a
       ))
-    } catch (error) {
+
+      const agentUsername = agents.find(a => a.id === accountId)?.ig_username
+      if (!currentActive) {
+        toast({ title: 'Account resumed', description: `@${agentUsername} is now active.` })
+      } else {
+        toast({ title: 'Emergency Kill Switch', description: `Account @${agentUsername} paused. The DM agent will no longer receive outbound messages.`, variant: 'destructive' })
+      }
+    } catch (error: any) {
       console.error('Toggle failed:', error)
+      toast({ title: 'Error', description: error.message, variant: 'destructive' })
     } finally {
       setToggling(null)
+    }
+  }
+
+  const handleGlobalPanic = async () => {
+    if (!confirm('🚨 GLOBAL PANIC: Are you sure? This will instantly cut off ALL outbound DMs across the entire fleet. Every account will be paused.')) {
+      return
+    }
+
+    setPanicking(true)
+    try {
+      const res = await fetch('/api/admin/agents/panic', {
+        method: 'POST',
+      })
+      
+      if (!res.ok) throw new Error('Failed to execute global panic')
+      
+      // Update local state so all UI switches flip off instantly
+      setAgents(prev => prev.map(a => ({ ...a, is_active: false })))
+      
+      toast({ 
+        title: '🚨 GLOBAL PANIC ACTIVATED', 
+        description: 'All Instagram accounts have been successfully paused. No new outbound DMs will be sent.',
+        variant: 'destructive',
+      })
+    } catch (error: any) {
+      console.error('Global panic failed:', error)
+      toast({ title: 'Error', description: error.message, variant: 'destructive' })
+    } finally {
+      setPanicking(false)
     }
   }
 
@@ -174,10 +254,21 @@ export default function AdminAgentsPage() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">DM Agents</h1>
-        <Button variant="outline" size="sm" onClick={fetchAgents} disabled={loading}>
-          <Activity className={`h-4 w-4 mr-1 ${loading ? 'animate-pulse' : ''}`} />
-          Refresh
-        </Button>
+        <div className="flex gap-2">
+          <Button 
+            variant="destructive" 
+            size="sm" 
+            onClick={handleGlobalPanic} 
+            disabled={loading || panicking}
+          >
+            <AlertTriangle className={`h-4 w-4 mr-2 ${panicking ? 'animate-pulse' : ''}`} />
+            GLOBAL PANIC: PAUSE ALL ACCOUNTS
+          </Button>
+          <Button variant="outline" size="sm" onClick={fetchAgents} disabled={loading}>
+            <Activity className={`h-4 w-4 mr-1 ${loading ? 'animate-pulse' : ''}`} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Summary Bar */}
@@ -220,6 +311,8 @@ export default function AdminAgentsPage() {
               <TableHead>Status</TableHead>
               <TableHead>Last Heartbeat</TableHead>
               <TableHead>Messages Today</TableHead>
+              <TableHead>Scout Assignment</TableHead>
+              <TableHead>Daily Limit</TableHead>
               <TableHead>Timezone</TableHead>
               <TableHead>Active Window</TableHead>
               <TableHead className="text-right">Actions</TableHead>
@@ -228,13 +321,13 @@ export default function AdminAgentsPage() {
           <TableBody>
             {loading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   Loading agents...
                 </TableCell>
               </TableRow>
             ) : agents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
+                <TableCell colSpan={9} className="text-center py-8 text-muted-foreground">
                   <Wifi className="h-6 w-6 mx-auto mb-2 opacity-50" />
                   No agents configured
                 </TableCell>
@@ -269,6 +362,39 @@ export default function AdminAgentsPage() {
                         <span className="text-muted-foreground"> sent</span>
                       </div>
                     </TableCell>
+                    <TableCell>
+                      <Select 
+                        value={agent.assigned_scout_id || 'unassigned'} 
+                        onValueChange={(val) => handleUpdateAgent(agent.id, { assigned_scout_id: val === 'unassigned' ? null : val })}
+                      >
+                        <SelectTrigger className="w-[140px] h-8 text-xs">
+                          <SelectValue placeholder="Unassigned" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="unassigned">Unassigned</SelectItem>
+                          {scouts.map(s => (
+                            <SelectItem key={s.id} value={s.id}>{s.full_name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </TableCell>
+                    <TableCell>
+                      <Input 
+                        type="number" 
+                        className="w-20 h-8 text-xs" 
+                        min={0} 
+                        max={40} 
+                        value={agent.daily_cold_dm_limit ?? 3}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value)
+                          setAgents(prev => prev.map(a => a.id === agent.id ? { ...a, daily_cold_dm_limit: isNaN(val) ? 0 : val } : a))
+                        }}
+                        onBlur={(e) => {
+                          const val = parseInt(e.target.value)
+                          handleUpdateAgent(agent.id, { daily_cold_dm_limit: isNaN(val) ? 0 : val })
+                        }}
+                      />
+                    </TableCell>
                     <TableCell className="text-sm text-muted-foreground">
                       {agent.timezone.split('/').pop()?.replace(/_/g, ' ')}
                     </TableCell>
@@ -276,20 +402,16 @@ export default function AdminAgentsPage() {
                       {formatActiveWindow(agent.active_start_hour, agent.active_end_hour, agent.timezone)}
                     </TableCell>
                     <TableCell className="text-right">
-                      <div className="flex items-center justify-end gap-1">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => handleToggle(agent.id, agent.is_active)}
-                          disabled={toggling === agent.id}
-                          title={agent.is_active ? 'Pause agent' : 'Resume agent'}
-                        >
-                          {agent.is_active ? (
-                            <Pause className="h-4 w-4" />
-                          ) : (
-                            <Play className="h-4 w-4" />
-                          )}
-                        </Button>
+                      <div className="flex items-center justify-end gap-3">
+                        <div className="flex items-center gap-2 mr-2">
+                          <span className="text-xs text-muted-foreground uppercase font-semibold">Kill Switch</span>
+                          <Switch 
+                            checked={agent.is_active}
+                            onCheckedChange={() => handleToggle(agent.id, agent.is_active)}
+                            disabled={toggling === agent.id}
+                            aria-label="Toggle active status"
+                          />
+                        </div>
                         <Button
                           variant="ghost"
                           size="sm"

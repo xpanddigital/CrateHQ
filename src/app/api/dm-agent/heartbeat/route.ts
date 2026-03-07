@@ -24,17 +24,42 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
+    const CRITICAL_ERRORS = ['error', 'challenge_required', 'session_expired']
+    const isCriticalError = CRITICAL_ERRORS.includes(status)
+
+    const updateData: any = {
+      last_heartbeat: new Date().toISOString(),
+      status,
+    }
+
+    // 1. Auto-Quarantine Circuit Breaker
+    if (isCriticalError) {
+      updateData.is_active = false
+    }
+
     // Update account heartbeat
     const { error: updateError } = await supabase
       .from('ig_accounts')
-      .update({
-        last_heartbeat: new Date().toISOString(),
-        status,
-      })
+      .update(updateData)
       .eq('id', ig_account_id)
 
     if (updateError) {
       console.error('[DM-Agent] Heartbeat update error:', updateError)
+    }
+
+    // 2. Webhook Alert
+    if (isCriticalError && process.env.ALERT_WEBHOOK_URL) {
+      try {
+        await fetch(process.env.ALERT_WEBHOOK_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            text: `🚨 URGENT: IG Account ${ig_account_id} reported a critical error: ${error_detail || status}. The account has been auto-quarantined.`,
+          }),
+        })
+      } catch (err) {
+        console.error('[DM-Agent] Webhook alert failed:', err)
+      }
     }
 
     // Insert heartbeat log

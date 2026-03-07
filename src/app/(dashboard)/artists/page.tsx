@@ -25,6 +25,7 @@ import { formatNumber, formatDate, formatCurrency } from '@/lib/utils'
 import { ArtistAddModal } from '@/components/artists/ArtistAddModal'
 import { BulkTagModal } from '@/components/artists/BulkTagModal'
 import { BulkEnrichModal } from '@/components/artists/BulkEnrichModal'
+import { BulkGenerateModal } from '@/components/outreach/BulkGenerateModal'
 
 export default function ArtistsPage() {
   const [artists, setArtists] = useState<Artist[]>([])
@@ -37,6 +38,7 @@ export default function ArtistsPage() {
   const [showAddModal, setShowAddModal] = useState(false)
   const [showBulkTagModal, setShowBulkTagModal] = useState(false)
   const [showBulkEnrichModal, setShowBulkEnrichModal] = useState(false)
+  const [showBulkGenerateModal, setShowBulkGenerateModal] = useState(false)
   const [showEnrichUnenrichedModal, setShowEnrichUnenrichedModal] = useState(false)
   const [valuating, setValuating] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -485,6 +487,16 @@ export default function ArtistsPage() {
         }}
       />
 
+      <BulkGenerateModal
+        isOpen={showBulkGenerateModal}
+        onClose={() => setShowBulkGenerateModal(false)}
+        selectedArtistIds={Array.from(selectedIds)}
+        onComplete={() => {
+          setSelectedIds(new Set())
+          fetchArtists()
+        }}
+      />
+
       <Card className="p-4">
         <div className="flex items-center gap-4 flex-wrap">
           <div className="relative flex-1 min-w-[200px]">
@@ -543,6 +555,14 @@ export default function ArtistsPage() {
               >
                 <Briefcase className="h-4 w-4 mr-1" />
                 Create Deals ({selectedIds.size})
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={() => setShowBulkGenerateModal(true)}
+              >
+                <Mail className="h-4 w-4 mr-1" />
+                Bulk Draft DMs ({selectedIds.size})
               </Button>
               <Button
                 variant="destructive"

@@ -46,6 +46,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true, duplicate: true })
     }
 
+    // Get assigned scout for this IG account
+    const { data: accountData } = await supabase
+      .from('ig_accounts')
+      .select('assigned_scout_id')
+      .eq('id', ig_account_id)
+      .single()
+
+    const assignedScoutId = accountData?.assigned_scout_id || null
+
     // Match sender to artist (case-insensitive)
     const handleLower = sender_username.toLowerCase()
     const { data: artist } = await supabase
@@ -59,6 +68,7 @@ export async function POST(request: NextRequest) {
       .from('conversations')
       .insert({
         artist_id: artist?.id || null,
+        scout_id: assignedScoutId,
         channel: 'instagram',
         direction: 'inbound',
         message_text,
