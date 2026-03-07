@@ -20,6 +20,8 @@ import { useToast } from '@/components/ui/use-toast'
 import { Artist } from '@/types/database'
 import { formatNumber, formatCurrency, formatDate } from '@/lib/utils'
 import { estimateCatalogValue } from '@/lib/valuation/estimator'
+import { createClient } from '@/lib/supabase/client'
+import { GenerateColdDmButton, IgAccountOption } from '@/components/outreach/GenerateColdDmButton'
 
 // Extended type for edit mode with temporary URL fields
 interface ArtistEditData extends Partial<Artist> {
@@ -42,6 +44,7 @@ export default function ArtistDetailPage() {
   const [qualOverrideStatus, setQualOverrideStatus] = useState('')
   const [qualOverrideReason, setQualOverrideReason] = useState('')
   const [savingQual, setSavingQual] = useState(false)
+  const [availableIgAccounts, setAvailableIgAccounts] = useState<IgAccountOption[]>([])
   const { toast } = useToast()
 
   const handleQualificationOverride = async () => {
@@ -83,6 +86,15 @@ export default function ArtistDetailPage() {
   useEffect(() => {
     fetchArtist()
   }, [fetchArtist])
+
+  useEffect(() => {
+    const fetchAccounts = async () => {
+      const supabase = createClient()
+      const { data } = await supabase.from('ig_accounts').select('id, ig_username')
+      if (data) setAvailableIgAccounts(data)
+    }
+    fetchAccounts()
+  }, [])
 
   const handleEdit = () => {
     setEditMode(true)
@@ -251,6 +263,10 @@ export default function ArtistDetailPage() {
         <div className="flex gap-2">
           {!editMode ? (
             <>
+              <GenerateColdDmButton 
+                artistId={artist.id} 
+                availableIgAccounts={availableIgAccounts} 
+              />
               <Button variant="outline" onClick={handleCalculateValue} disabled={calculatingValue}>
                 {calculatingValue ? (
                   <>
