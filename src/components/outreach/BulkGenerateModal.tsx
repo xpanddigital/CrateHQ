@@ -153,7 +153,7 @@ export function BulkGenerateModal({ isOpen, onClose, selectedArtistIds, onComple
     if (!controller.signal.aborted) {
        toast({
          title: 'Bulk Generation Complete',
-         description: \`Generated \${successes} drafts. (\${failures} failed).\`
+         description: `Generated ${successes} drafts. (${failures} failed).`
        })
        if (onComplete) onComplete()
     }
