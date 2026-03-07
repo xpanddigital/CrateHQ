@@ -232,12 +232,13 @@ def fetch_pending_replies(cfg: dict) -> list:
     return []
 
 
-def confirm_sent(cfg: dict, pending_message_id: str, ig_message_id: str) -> None:
-    """POST confirmation that a reply was sent."""
+def confirm_sent(cfg: dict, pending_message_id: str, ig_message_id: str, ig_thread_id: str = "") -> None:
+    """POST confirmation that a reply or cold DM was sent."""
     url = f"{cfg['cratehq_base_url']}/api/dm-agent/confirm-sent"
     _request_with_retry("POST", url, cfg, json={
         "pending_message_id": pending_message_id,
         "ig_message_id": ig_message_id,
+        "ig_thread_id": ig_thread_id,
     })
 
 
@@ -251,27 +252,6 @@ def send_heartbeat(cfg: dict, status: str, messages_found: int, messages_sent: i
         "messages_sent": messages_sent,
         "error_detail": error_detail,
     })
-
-# ---------------------------------------------------------------------------
-# FlowChat lock-file coordination
-# ---------------------------------------------------------------------------
-
-def _lock_file_path() -> Path:
-    if platform.system() == "Windows":
-        return Path("C:/temp/flowchat_active.lock")
-    return Path("/tmp/flowchat_active.lock")
-
-
-def is_flowchat_active() -> bool:
-    """Return True if FlowChat is currently active (lock file fresh within 5 min)."""
-    lf = _lock_file_path()
-    if not lf.exists():
-        return False
-    try:
-        mtime = datetime.fromtimestamp(lf.stat().st_mtime)
-        return datetime.now() - mtime < timedelta(minutes=5)
-    except OSError:
-        return False
 
 # ---------------------------------------------------------------------------
 # Time / schedule helpers
@@ -362,19 +342,45 @@ def poll_cycle(cl: Client, cfg: dict, last_seen: dict) -> tuple[int, int, dict]:
         # Update last seen to newest message
         last_seen[thread_id] = str(messages[0].id)
 
-    # --- Outbound: send pending replies ---
+    # --- Outbound: send pending replies & cold outreach ---
     pending = fetch_pending_replies(cfg)
-    log.info("Fetched %d pending reply/replies.", len(pending))
+    log.info("Fetched %d pending outbound message(s).", len(pending))
 
     for item in pending:
         try:
-            result = cl.direct_answer(item["thread_id"], item["message_text"])
-            ig_message_id = str(result.id) if result else ""
-            confirm_sent(cfg, item["id"], ig_message_id)
+            ig_message_id = ""
+            new_thread_id = ""
+            outreach_type = item.get("outreach_type", "reply")
+            
+            if outreach_type == "reply" and item.get("thread_id"):
+                # Scenario A: Existing conversation reply
+                result = cl.direct_answer(item["thread_id"], item["message_text"])
+                ig_message_id = str(result.id) if result else ""
+                log.info("Sent reply in thread %s (pending_id=%s).", item["thread_id"], item["id"])
+                
+            elif outreach_type == "cold" and item.get("target_username"):
+                # Scenario B: Cold Initial DM
+                target_pk = cl.user_id_from_username(item["target_username"])
+                result = cl.direct_send(item["message_text"], user_ids=[int(target_pk)])
+                ig_message_id = str(result.id) if result else ""
+                new_thread_id = str(result.thread_id) if hasattr(result, 'thread_id') and result.thread_id else ""
+                log.info("Sent cold DM to @%s (pending_id=%s).", item["target_username"], item["id"])
+                
+            else:
+                log.error("Pending item %s is invalid. Type: %s", item["id"], outreach_type)
+                continue
+
+            # Confirm success back to CrateHQ
+            confirm_sent(cfg, item["id"], ig_message_id, new_thread_id)
             messages_sent += 1
-            log.info("Sent reply in thread %s (pending_id=%s).", item["thread_id"], item["id"])
+            
+            # MANDATORY: Intra-cycle jitter to prevent velocity bans
+            if len(pending) > 1:
+                intra_delay = random.uniform(45.0, 120.0)
+                log.debug("Intra-cycle jitter: sleeping %.1f seconds.", intra_delay)
+                time.sleep(intra_delay)
         except Exception as exc:
-            log.error("Failed to send reply (pending_id=%s): %s", item["id"], exc)
+            log.error("Failed to send outbound message (pending_id=%s): %s", item["id"], exc)
 
     return messages_found, messages_sent, last_seen
 
@@ -427,12 +433,6 @@ def main() -> None:
                          active_start, active_end, sleep_for)
                 send_heartbeat(cfg, "ok", 0, 0)
                 time.sleep(sleep_for)
-                continue
-
-            # --- FlowChat coordination ---
-            if is_flowchat_active():
-                log.info("FlowChat active, skipping cycle.")
-                time.sleep(30)
                 continue
 
             # --- Determine poll interval ---
