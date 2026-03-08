@@ -66,6 +66,7 @@ export default function AdminStudioPage() {
   const [imagePromptIndex, setImagePromptIndex] = useState(0)
   const [generatingImage, setGeneratingImage] = useState(false)
   const [bulkGeneratingImages, setBulkGeneratingImages] = useState(false)
+  const [bulkBuildingPosts, setBulkBuildingPosts] = useState(false)
 
   const selectedIdentity = useMemo(
     () => identities.find((id) => id.id === selectedIdentityId) || null,
@@ -191,6 +192,39 @@ export default function AdminStudioPage() {
       setError(e.message || 'Failed to build post')
     } finally {
       setBuildingPostId(null)
+    }
+  }
+
+  const handleBuildAllPosts = async () => {
+    if (!selectedIdentityId || !ideas.length) return
+    setBulkBuildingPosts(true)
+    setError(null)
+    try {
+      for (const idea of ideas) {
+        setBuildingPostId(idea.id)
+        try {
+          const res = await fetch('/api/admin/generate-post', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ identity_id: selectedIdentityId, mode, idea }),
+          })
+          if (!res.ok) {
+            const data = await res.json()
+            console.error('[Studio] Bulk build post error:', data.error)
+          }
+        } catch (err) {
+          console.error('[Studio] Bulk build exception:', err)
+        }
+        // Small delay to be gentle on the API
+        await new Promise(r => setTimeout(r, 1000))
+      }
+      await loadStats(selectedIdentityId)
+    } catch (e: any) {
+      console.error('[Studio] Bulk build error:', e)
+      setError(e.message || 'Failed to build all posts')
+    } finally {
+      setBuildingPostId(null)
+      setBulkBuildingPosts(false)
     }
   }
 
@@ -346,6 +380,16 @@ export default function AdminStudioPage() {
         <div className="flex items-center gap-2">
           {error && (
             <span className="text-xs text-red-400 max-w-xs truncate">{error}</span>
+          )}
+          {ideas.length > 0 && (
+            <Button
+              size="sm"
+              variant="secondary"
+              onClick={handleBuildAllPosts}
+              disabled={bulkBuildingPosts || !selectedIdentityId}
+            >
+              {bulkBuildingPosts ? 'Building All…' : 'Build All Posts'}
+            </Button>
           )}
           {mode === 'single' && (
             <Button
