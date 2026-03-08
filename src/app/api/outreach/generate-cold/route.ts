@@ -122,7 +122,7 @@ EXAMPLE TONE (do not copy these, just match the energy):
 `.trim()
 
     const resp = await client.messages.create({
-      model: 'claude-opus-4-6', // standard model for the app
+      model: 'claude-3-opus-20240229', // Fallback to actual Claude 3 Opus model. 'claude-opus-4-6' does not exist yet.
       max_tokens: 150,
       messages: [{ role: 'user', content: prompt }],
     })

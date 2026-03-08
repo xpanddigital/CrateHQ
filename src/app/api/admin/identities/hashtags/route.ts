@@ -72,7 +72,9 @@ Do not include any explanation, just the JSON array.
     `.trim()
 
     const resp = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+export const maxDuration = 60
+
+      model: 'claude-3-7-sonnet-20250219',
       max_tokens: 400,
       messages: [{ role: 'user', content: prompt }],
     })

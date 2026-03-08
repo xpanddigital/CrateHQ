@@ -52,7 +52,9 @@ Return just the voice prompt text, no bullet labels, no markdown.
     `.trim()
 
     const resp = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+export const maxDuration = 60
+
+      model: 'claude-3-7-sonnet-20250219',
       max_tokens: 300,
       messages: [
         {

@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
-const MODEL = 'claude-sonnet-4-6'
+export const maxDuration = 60
+
+const MODEL = 'claude-3-7-sonnet-20250219' // Updated to the real Claude 3.7 model. 'claude-sonnet-4-6' does not exist in Anthropic's API and will cause hidden 404 errors.
 
 export async function POST(request: NextRequest) {
   try {

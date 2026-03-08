@@ -3,7 +3,9 @@ import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import crypto from 'crypto'
 
-const MODEL = 'claude-sonnet-4-6'
+export const maxDuration = 60
+
+const MODEL = 'claude-3-7-sonnet-20250219'
 
 function sampleHashtags(pool: string[], count: number): string[] {
   const normalized = pool
