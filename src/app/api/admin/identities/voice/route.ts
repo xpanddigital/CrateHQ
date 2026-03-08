@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 
+export const maxDuration = 60
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
@@ -52,8 +54,6 @@ Return just the voice prompt text, no bullet labels, no markdown.
     `.trim()
 
     const resp = await client.messages.create({
-export const maxDuration = 60
-
       model: 'claude-sonnet-4-6',
       max_tokens: 300,
       messages: [
