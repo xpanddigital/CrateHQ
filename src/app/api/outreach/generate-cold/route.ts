@@ -57,7 +57,7 @@ export async function POST(request: NextRequest) {
     // 1. Fetch artist data
     const { data: artist, error: artistError } = await supabase
       .from('artists')
-      .select('name, instagram_handle, biography, spotify_monthly_listeners, genres')
+      .select('name, instagram_handle, biography, spotify_monthly_listeners, genres, estimated_offer_low, estimated_offer_high')
       .eq('id', artist_id)
       .single()
 
@@ -81,6 +81,10 @@ export async function POST(request: NextRequest) {
 
     const client = new Anthropic({ apiKey })
 
+    const estimateRange = artist.estimated_offer_low && artist.estimated_offer_high
+      ? `$${Math.round(artist.estimated_offer_low / 1000)}K - $${Math.round(artist.estimated_offer_high / 1000)}K`
+      : 'N/A'
+
     const prompt = `
 SYSTEM INSTRUCTIONS FOR CLAUDE OPUS 4.6:
 You are a music industry scout reaching out to independent artists on Instagram about a back catalogue licensing and distribution deal. Your job is to write a highly personalized, casual Instagram DM that feels like a real person typed it on their phone.
@@ -90,9 +94,11 @@ Artist Name: ${artist.name || 'the artist'}
 Genres: ${(artist.genres || []).join(', ') || 'N/A'}
 Spotify Listeners: ${artist.spotify_monthly_listeners || 'N/A'}
 Bio/Recent Notes: ${artist.biography || 'N/A'}
+Estimated Deal Value: ${estimateRange}
 
 YOUR OFFER:
 You want to offer them a short-term digital distribution deal for their existing back catalogue. This does NOT require them to make any new music. You can potentially offer them money upfront for their existing tracks.
+If the Estimated Deal Value is available, you can subtly hint at the size of the opportunity (e.g. "could be a solid 5-figure deal" or "could be worth ${estimateRange}"), but keep it casual.
 
 MESSAGE STRUCTURE (follow this order):
 1. Open with genuine enthusiasm about their music. Reference a specific detail from their bio, a track name, or their streaming numbers. Use exclamation marks naturally like a real fan would.
@@ -108,7 +114,6 @@ STRICT RULES (FAILURE TO FOLLOW WILL RESULT IN PENALTY):
 - Exclamation Marks: Use them freely and naturally, like a real person who is genuinely excited. Multiple exclamation marks are fine (!! or !!!).
 - Punctuation: Keep it slightly messy. Lowercase where a human would be lazy. A missing period at the end is preferred.
 - Contractions: Always use contractions (you're, we'd, don't, can't). Never write out "would love" when "would love" works, but prefer "id love" or "we'd love".
-- DO NOT mention specific dollar amounts.
 - DO NOT sound like a corporate pitch. Sound like a real person who found their music, loves it, and has a genuine opportunity for them.
 - Each message must be completely unique. Never reuse the same sentence structure across different artists.
 
