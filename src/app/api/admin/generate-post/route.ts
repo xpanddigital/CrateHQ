@@ -5,7 +5,7 @@ import crypto from 'crypto'
 
 export const maxDuration = 60
 
-const MODEL = 'claude-3-7-sonnet-20250219'
+const MODEL = 'claude-sonnet-4-6'
 
 function sampleHashtags(pool: string[], count: number): string[] {
   const normalized = pool
