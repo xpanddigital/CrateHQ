@@ -144,7 +144,7 @@ Return STRICT JSON:
 
     const resp = await client.messages.create({
       model: MODEL,
-      max_tokens: 8192, // Increased to maximum allowed by Anthropic models (prev 800)
+      max_tokens: 30000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     } as any)

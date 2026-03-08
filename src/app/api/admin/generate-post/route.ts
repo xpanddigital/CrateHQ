@@ -91,7 +91,7 @@ Return STRICT JSON:
 
       const resp = await client.messages.create({
         model: MODEL,
-        max_tokens: 8192, // Increased to max allowed output tokens
+        max_tokens: 30000,
         system: systemPrompt,
         messages: [{ role: 'user', content: userPrompt }],
       } as any)
@@ -190,13 +190,13 @@ Return only the caption text.
     const [nanoResp, captionResp] = await Promise.all([
       client.messages.create({
         model: MODEL,
-        max_tokens: 8192,
+        max_tokens: 30000,
         system: systemPrompt,
         messages: [{ role: 'user', content: nanoTemplate }],
       } as any),
       client.messages.create({
         model: MODEL,
-        max_tokens: 8192,
+        max_tokens: 30000,
         system: systemPrompt,
         messages: [{ role: 'user', content: captionPrompt }],
       } as any),
