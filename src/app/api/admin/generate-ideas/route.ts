@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json()
     const { identity_id, mode } = body || {}
-    if (!identity_id || !mode || !['carousel', 'single'].includes(mode)) {
+    if (!identity_id || !mode || !['carousel', 'single', 'mixed'].includes(mode)) {
       return NextResponse.json(
         { error: 'Missing or invalid identity_id/mode' },
         { status: 400 }
@@ -86,7 +86,44 @@ ${identity.voice_prompt || ''}
       : 'NONE'
 
     const userPrompt =
-      mode === 'carousel'
+      mode === 'mixed'
+        ? `
+Generate 10 post ideas for Instagram, returned as JSON. EXACTLY 5 MUST BE "carousel" AND EXACTLY 5 MUST BE "single". Alternate them (carousel, single, carousel, single, etc.).
+
+Rules:
+- Use ONLY these content pillars: [${pillarsText}].
+- Avoid overlapping with these existing topics across other accounts: [${excludedText}].
+- For Carousels, vary slideCount between 5 and 9.
+- For Single images, you must specify:
+  - imageSubject: chosen from this account's subjects only: [${(identity.image_subjects || []).join(', ')}]
+  - imageStyle: chosen from this account's image styles only: [${(identity.image_styles || []).join(', ')}]
+
+Return STRICT JSON as an array of exactly 10 objects.
+
+For a carousel:
+{
+  "id": "string unique id",
+  "type": "carousel",
+  "title": "short title",
+  "hook": "scroll-stopping first-slide hook",
+  "category": "pillar or theme",
+  "angle": "one-sentence angle description",
+  "slideCount": 7
+}
+
+For a single image:
+{
+  "id": "string unique id",
+  "type": "single",
+  "title": "short title",
+  "category": "pillar or theme",
+  "imageSubject": "one of the allowed subjects",
+  "imageStyle": "one of the allowed styles",
+  "captionHook": "hook line",
+  "captionAngle": "angle description"
+}
+`.trim()
+        : mode === 'carousel'
         ? `
 Generate 10 high-signal carousel ideas for Instagram, returned as JSON.
 

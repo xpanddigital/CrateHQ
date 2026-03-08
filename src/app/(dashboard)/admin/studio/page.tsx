@@ -14,7 +14,7 @@ type StudioIdentity = {
   ig_username: string | null
 }
 
-type IdeaMode = 'carousel' | 'single'
+type IdeaMode = 'carousel' | 'single' | 'mixed'
 
 type CarouselIdea = {
   id: string
@@ -169,7 +169,7 @@ export default function AdminStudioPage() {
       const res = await fetch('/api/admin/generate-post', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ identity_id: selectedIdentityId, mode, idea }),
+        body: JSON.stringify({ identity_id: selectedIdentityId, mode: idea.type, idea }),
       })
       const data = await res.json()
       if (!res.ok) {
@@ -178,7 +178,7 @@ export default function AdminStudioPage() {
       // Refresh stats after build
       await loadStats(selectedIdentityId)
 
-      if (mode === 'single' && data.post) {
+      if (idea.type === 'single' && data.post) {
         setCurrentPost({
           id: data.post.id,
           nano_prompt: data.post.nano_prompt,
@@ -186,6 +186,27 @@ export default function AdminStudioPage() {
           image_url: data.post.image_url || null,
         })
         setImagePromptIndex(0)
+        
+        // Auto-generate image on single manual build too
+        if (data.post.nano_prompt) {
+          try {
+            const resImg = await fetch('/api/admin/generate-image', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                prompt: data.post.nano_prompt,
+                postId: data.post.id,
+                igAccountId: selectedIdentity?.ig_account_id,
+              }),
+            })
+            const imgData = await resImg.json()
+            if (resImg.ok && imgData.imageUrl) {
+               setCurrentPost(prev => prev ? { ...prev, image_url: imgData.imageUrl } : prev)
+            }
+          } catch (e) {
+            console.error('Auto-generate image failed', e)
+          }
+        }
       }
     } catch (e: any) {
       console.error('[Studio] Generate post error:', e)
@@ -206,11 +227,30 @@ export default function AdminStudioPage() {
           const res = await fetch('/api/admin/generate-post', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ identity_id: selectedIdentityId, mode, idea }),
+            body: JSON.stringify({ identity_id: selectedIdentityId, mode: idea.type, idea }),
           })
+          const data = await res.json()
           if (!res.ok) {
-            const data = await res.json()
             console.error('[Studio] Bulk build post error:', data.error)
+          } else if (idea.type === 'single' && data.post && data.post.nano_prompt) {
+            // Auto-generate the image if it's a single post!
+            try {
+              const resImg = await fetch('/api/admin/generate-image', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                  prompt: data.post.nano_prompt,
+                  postId: data.post.id,
+                  igAccountId: selectedIdentity?.ig_account_id,
+                }),
+              })
+              const imgData = await resImg.json()
+              if (!resImg.ok) {
+                console.error('[Studio] Bulk image error for post:', imgData.error)
+              }
+            } catch (imgErr) {
+              console.error('[Studio] Bulk image exception:', imgErr)
+            }
           }
         } catch (err) {
           console.error('[Studio] Bulk build exception:', err)
@@ -370,6 +410,11 @@ export default function AdminStudioPage() {
               onClick={() => setMode('single')}
             >
               Single Image
+            </span>
+            <span className={cn('px-2 py-1 rounded-full border text-[11px] cursor-pointer', mode === 'mixed' && 'bg-primary text-primary-foreground border-primary')}
+              onClick={() => setMode('mixed')}
+            >
+              Mixed (Auto)
             </span>
             <span className="ml-3 text-[11px]">
               {stats.carousels} carousels · {stats.singles} singles built
