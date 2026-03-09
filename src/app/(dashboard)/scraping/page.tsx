@@ -11,6 +11,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { CheckCircle, Loader2, Search, Database, Tag as TagIcon, FileCheck, ChevronRight, Download } from 'lucide-react'
+import { useToast } from '@/components/ui/use-toast'
 
 interface ArtistData {
   spotify_id: string
@@ -30,6 +31,7 @@ interface ArtistData {
 }
 
 export default function ScrapingPage() {
+  const { toast } = useToast()
   const [currentStep, setCurrentStep] = useState(1)
   const [apifyConfigured, setApifyConfigured] = useState(false)
   const [checkingConfig, setCheckingConfig] = useState(true)
@@ -285,7 +287,7 @@ export default function ScrapingPage() {
       const data = await res.json()
       setRescrapeResult(data)
     } catch (error: any) {
-      alert(error.message || 'Re-scrape failed')
+      toast({ title: error.message || 'Re-scrape failed', variant: 'destructive' })
     } finally {
       setRescrapingAll(false)
     }

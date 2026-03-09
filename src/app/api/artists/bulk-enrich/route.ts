@@ -146,6 +146,34 @@ export async function POST(request: NextRequest) {
           await new Promise(resolve => setTimeout(resolve, 1000))
         }
       } catch (err: any) {
+        // Retry once after a 2s backoff on transient errors
+        const isTransient = err.message?.includes('timeout') || err.message?.includes('ECONNRESET') || err.message?.includes('fetch failed') || err.message?.includes('503')
+        if (isTransient) {
+          console.warn(`[Bulk Enrich] Transient error for ${artist.name}, retrying in 2s...`)
+          await new Promise(resolve => setTimeout(resolve, 2000))
+          try {
+            const retryResult = await enrichArtist(artist, apiKeys)
+            const updateData: any = {
+              email: retryResult.email_found,
+              email_confidence: retryResult.email_confidence,
+              email_source: retryResult.email_source,
+              all_emails_found: retryResult.all_emails,
+              is_enriched: true,
+              is_contactable: retryResult.is_contactable,
+              last_enriched_at: new Date().toISOString(),
+              enrichment_attempts: (artist.enrichment_attempts || 0) + 1,
+              updated_at: new Date().toISOString(),
+            }
+            await supabase.from('artists').update(updateData).eq('id', artist.id)
+            results.push({ artist_id: artist.id, artist_name: artist.name, success: retryResult.is_contactable, email: retryResult.email_found, retried: true })
+            detailedLogs.push(retryResult)
+            if (i < artists.length - 1) await new Promise(resolve => setTimeout(resolve, 1000))
+            continue
+          } catch (retryErr: any) {
+            console.error(`[Bulk Enrich] Retry also failed for ${artist.name}:`, retryErr.message)
+          }
+        }
+
         console.error(`- Error enriching ${artist.name}:`, err.message)
         errors.push({
           artist_id: artist.id,

@@ -15,6 +15,20 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { name, limit, filter = 'qualified' } = body
 
+    // Concurrency guard: reject if there's already an active batch
+    const { data: activeBatches } = await supabase
+      .from('enrichment_batches')
+      .select('id, name, status')
+      .in('status', ['queued', 'processing'])
+      .limit(1)
+
+    if (activeBatches && activeBatches.length > 0) {
+      return NextResponse.json(
+        { error: `A batch is already ${activeBatches[0].status}: "${activeBatches[0].name}". Wait for it to complete or cancel it first.` },
+        { status: 409 }
+      )
+    }
+
     // Query artists that need enrichment (paginate to bypass Supabase 1000-row default)
     const maxToQueue = limit || 50000
     let allArtists: Array<{ id: string; name: string }> = []

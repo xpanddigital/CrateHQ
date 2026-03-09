@@ -24,6 +24,7 @@ import { EmptyState } from '@/components/shared/EmptyState'
 import { TemplateEditorModal } from '@/components/templates/TemplateEditorModal'
 import { Plus, Mail, MoreVertical, Edit, Trash2, Copy, Search, TrendingUp } from 'lucide-react'
 import { EmailTemplate } from '@/types/database'
+import { useToast } from '@/components/ui/use-toast'
 
 const CATEGORY_LABELS: Record<string, string> = {
   initial_outreach: 'Initial Outreach',
@@ -44,6 +45,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 export default function TemplatesPage() {
+  const { toast } = useToast()
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -99,7 +101,7 @@ export default function TemplatesPage() {
       fetchTemplates()
     } catch (error) {
       console.error('Error duplicating template:', error)
-      alert('Failed to duplicate template')
+      toast({ title: 'Failed to duplicate template', variant: 'destructive' })
     }
   }
 
@@ -117,7 +119,7 @@ export default function TemplatesPage() {
       fetchTemplates()
     } catch (error) {
       console.error('Error deleting template:', error)
-      alert('Failed to delete template')
+      toast({ title: 'Failed to delete template', variant: 'destructive' })
     } finally {
       setDeleting(null)
     }
@@ -138,7 +140,7 @@ export default function TemplatesPage() {
       fetchTemplates()
     } catch (error) {
       console.error('Error updating template:', error)
-      alert('Failed to update template')
+      toast({ title: 'Failed to update template', variant: 'destructive' })
     }
   }
 

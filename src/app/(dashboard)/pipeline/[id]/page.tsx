@@ -15,6 +15,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { TagBadge } from '@/components/shared/TagBadge'
 import { ArrowLeft, Mail, Music, DollarSign, Calendar, Send, ArrowUpRight, ArrowDownLeft, Phone, Instagram, StickyNote, Clock, Sparkles, Check, X, Edit } from 'lucide-react'
 import { formatCurrency, formatDate, formatNumber } from '@/lib/utils'
+import { useToast } from '@/components/ui/use-toast'
 
 interface Conversation {
   id: string
@@ -79,6 +80,7 @@ const STAGES = [
 export default function DealDetailPage() {
   const params = useParams()
   const router = useRouter()
+  const { toast } = useToast()
   const [deal, setDeal] = useState<Deal | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -136,7 +138,7 @@ export default function DealDetailPage() {
       fetchDeal()
     } catch (error) {
       console.error('Error updating stage:', error)
-      alert('Failed to update stage')
+      toast({ title: 'Failed to update stage', variant: 'destructive' })
     }
   }
 
@@ -159,11 +161,11 @@ export default function DealDetailPage() {
 
       if (!res.ok) throw new Error('Failed to save')
 
-      alert('Deal updated successfully')
+      toast({ title: 'Deal updated successfully' })
       fetchDeal()
     } catch (error) {
       console.error('Error saving deal:', error)
-      alert('Failed to save deal')
+      toast({ title: 'Failed to save deal', variant: 'destructive' })
     } finally {
       setSaving(false)
     }
@@ -190,7 +192,7 @@ export default function DealDetailPage() {
       fetchDeal()
     } catch (error) {
       console.error('Error sending message:', error)
-      alert('Failed to send message')
+      toast({ title: 'Failed to send message', variant: 'destructive' })
     } finally {
       setSendingMessage(false)
     }
@@ -253,7 +255,7 @@ export default function DealDetailPage() {
       setEditingAiDraft(false)
     } catch (error) {
       console.error('Error generating AI reply:', error)
-      alert('Failed to generate AI reply')
+      toast({ title: 'Failed to generate AI reply', variant: 'destructive' })
     } finally {
       setGeneratingAi(false)
     }
@@ -281,7 +283,7 @@ export default function DealDetailPage() {
       fetchDeal()
     } catch (error) {
       console.error('Error sending message:', error)
-      alert('Failed to send message')
+      toast({ title: 'Failed to send message', variant: 'destructive' })
     } finally {
       setSendingMessage(false)
     }
@@ -305,7 +307,7 @@ export default function DealDetailPage() {
       setShowFollowupDraft(true)
     } catch (error) {
       console.error('Error generating followup:', error)
-      alert('Failed to generate followup')
+      toast({ title: 'Failed to generate followup', variant: 'destructive' })
     } finally {
       setGeneratingAi(false)
     }
@@ -334,7 +336,7 @@ export default function DealDetailPage() {
       fetchDeal()
     } catch (error) {
       console.error('Error sending message:', error)
-      alert('Failed to send message')
+      toast({ title: 'Failed to send message', variant: 'destructive' })
     } finally {
       setSendingMessage(false)
     }

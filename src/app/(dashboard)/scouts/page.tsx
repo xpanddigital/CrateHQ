@@ -26,6 +26,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
 import { EmptyState } from '@/components/shared/EmptyState'
 import { Users, Plus, Mail, Briefcase, CheckCircle, XCircle, Search } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
+import { useToast } from '@/components/ui/use-toast'
 import Link from 'next/link'
 
 interface Scout {
@@ -41,6 +42,7 @@ interface Scout {
 
 export default function ScoutsPage() {
   const router = useRouter()
+  const { toast } = useToast()
   const [scouts, setScouts] = useState<Scout[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -95,7 +97,7 @@ export default function ScoutsPage() {
 
   const handleInvite = async () => {
     if (!inviteForm.email || !inviteForm.full_name) {
-      alert('Please fill in all fields')
+      toast({ title: 'Please fill in all fields', variant: 'destructive' })
       return
     }
 
@@ -113,13 +115,13 @@ export default function ScoutsPage() {
         throw new Error(data.error || 'Failed to invite scout')
       }
 
-      alert(data.message || 'Scout invited successfully!')
+      toast({ title: data.message || 'Scout invited successfully!' })
       setShowInviteModal(false)
       setInviteForm({ email: '', full_name: '', role: 'scout' })
       fetchScouts()
     } catch (error: any) {
       console.error('Error inviting scout:', error)
-      alert(error.message || 'Failed to invite scout')
+      toast({ title: error.message || 'Failed to invite scout', variant: 'destructive' })
     } finally {
       setInviting(false)
     }

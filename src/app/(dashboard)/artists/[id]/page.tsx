@@ -158,7 +158,7 @@ export default function ArtistDetailPage() {
       router.refresh()
     } catch (error: any) {
       console.error('Error updating artist:', error)
-      alert(error.message || 'Failed to update artist')
+      toast({ title: error.message || 'Failed to update artist', variant: 'destructive' })
     } finally {
       setSaving(false)
     }
@@ -180,7 +180,7 @@ export default function ArtistDetailPage() {
 
       if (!res.ok) {
         if (res.status === 409) {
-          alert('An active deal already exists for this artist')
+          toast({ title: 'An active deal already exists for this artist', variant: 'destructive' })
         } else {
           throw new Error(data.error || 'Failed to create deal')
         }
@@ -190,7 +190,7 @@ export default function ArtistDetailPage() {
       router.push(`/pipeline/${data.deal.id}`)
     } catch (error: any) {
       console.error('Error creating deal:', error)
-      alert(error.message || 'Failed to create deal')
+      toast({ title: error.message || 'Failed to create deal', variant: 'destructive' })
     }
   }
 
@@ -203,7 +203,7 @@ export default function ArtistDetailPage() {
       const streams = artist.streams_last_month || artist.spotify_monthly_listeners || 0
 
       if (streams === 0) {
-        alert('Not enough streaming data to estimate catalog value. Add monthly listeners or streams data first.')
+        toast({ title: 'Not enough streaming data to estimate catalog value', description: 'Add monthly listeners or streams data first.', variant: 'destructive' })
         return
       }
 

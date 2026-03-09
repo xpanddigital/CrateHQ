@@ -368,12 +368,12 @@ export default function ArtistsPage() {
       if (!res.ok) throw new Error('Delete failed')
 
       const data = await res.json()
-      alert(`Deleted ${data.deleted} artist(s)`)
+      toast({ title: `Deleted ${data.deleted} artist(s)` })
       setSelectedIds(new Set())
       fetchArtists()
     } catch (error) {
       console.error('Error deleting:', error)
-      alert('Failed to delete artists')
+      toast({ title: 'Failed to delete artists', variant: 'destructive' })
     } finally {
       setDeleting(false)
     }
@@ -395,11 +395,11 @@ export default function ArtistsPage() {
       if (!res.ok) throw new Error('Failed to create deals')
 
       const data = await res.json()
-      alert(`Created ${data.created} deal(s), skipped ${data.skipped} (already have active deals)`)
+      toast({ title: `Created ${data.created} deal(s), skipped ${data.skipped} (already have active deals)` })
       setSelectedIds(new Set())
     } catch (error) {
       console.error('Error creating deals:', error)
-      alert('Failed to create deals')
+      toast({ title: 'Failed to create deals', variant: 'destructive' })
     } finally {
       setCreatingDeals(false)
     }

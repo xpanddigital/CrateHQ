@@ -105,7 +105,7 @@ export default function EnrichmentLogsPage() {
 
   const exportToCSV = () => {
     if (filteredLogs.length === 0) {
-      alert('No logs to export')
+      toast({ title: 'No logs to export', variant: 'destructive' })
       return
     }
 
