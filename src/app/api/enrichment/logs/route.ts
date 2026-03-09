@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function DELETE() {
   try {
@@ -25,7 +26,7 @@ export async function DELETE() {
         .neq('id', '00000000-0000-0000-0000-000000000000')
     
       if (error) {
-        console.error('Error clearing enrichment logs:', error)
+        logger.error('Error clearing enrichment logs:', error)
         return NextResponse.json({ error: 'Failed to clear logs' }, { status: 500 })
       }
     } else {
@@ -35,14 +36,14 @@ export async function DELETE() {
         .eq('run_by', user.id)
 
       if (error) {
-        console.error('Error clearing enrichment logs:', error)
+        logger.error('Error clearing enrichment logs:', error)
         return NextResponse.json({ error: 'Failed to clear logs' }, { status: 500 })
       }
     }
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Error clearing enrichment logs:', error)
+    logger.error('Error clearing enrichment logs:', error)
     return NextResponse.json({ error: error.message || 'Failed to clear logs' }, { status: 500 })
   }
 }
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest) {
     const { data: logs, error } = await query
 
     if (error) {
-      console.error('Error fetching enrichment logs:', error)
+      logger.error('Error fetching enrichment logs:', error)
       return NextResponse.json(
         { error: 'Failed to fetch enrichment logs' },
         { status: 500 }
@@ -100,7 +101,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ logs: logs || [] })
   } catch (error: any) {
-    console.error('Error fetching enrichment logs:', error)
+    logger.error('Error fetching enrichment logs:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch enrichment logs' },
       { status: 500 }

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 // POST /api/deals/[id]/move - Move deal to new stage
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -39,7 +41,7 @@ export async function POST(
         stage_changed_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
@@ -47,7 +49,7 @@ export async function POST(
 
     return NextResponse.json({ deal })
   } catch (error: any) {
-    console.error('Error moving deal:', error)
+    logger.error('Error moving deal:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to move deal' },
       { status: 500 }

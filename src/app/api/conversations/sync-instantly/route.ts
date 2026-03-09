@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { logger } from '@/lib/logger'
 
 /**
  * POST /api/conversations/sync-instantly
@@ -71,7 +72,7 @@ export async function POST(request: NextRequest) {
           allEmails.push(...(Array.isArray(emails) ? emails : []))
         }
       } catch (e) {
-        console.error(`[Sync] Failed to fetch Instantly emails for ${email}:`, e)
+        logger.error(`[Sync] Failed to fetch Instantly emails for ${email}:`, e)
       }
     }
 
@@ -137,7 +138,7 @@ export async function POST(request: NextRequest) {
         synced++
         existingIds.add(dedupKey)
       } else {
-        console.error(`[Sync] Insert error for ${instantlyId}:`, insertError.message)
+        logger.error(`[Sync] Insert error for ${instantlyId}:`, insertError.message)
       }
     }
 
@@ -147,7 +148,7 @@ export async function POST(request: NextRequest) {
       artist_name: artist.name,
     })
   } catch (error) {
-    console.error('[Sync/Instantly] Unhandled error:', error)
+    logger.error('[Sync/Instantly] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

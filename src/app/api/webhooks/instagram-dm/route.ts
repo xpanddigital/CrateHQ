@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { verifyAgentAuth } from '@/lib/dm/auth'
+import { logger } from '@/lib/logger'
 
 const OUTREACH_STAGES = ['outreach_queued', 'contacted']
 
@@ -87,7 +88,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (insertError) {
-      console.error('[Webhook IG-DM] Insert error:', insertError)
+      logger.error('[Webhook IG-DM] Insert error:', insertError)
       return NextResponse.json({ error: 'Failed to store message' }, { status: 500 })
     }
 
@@ -115,7 +116,7 @@ export async function POST(request: NextRequest) {
       artist_name: artist?.name || null,
     })
   } catch (error) {
-    console.error('[Webhook IG-DM] Unhandled error:', error)
+    logger.error('[Webhook IG-DM] Unhandled error:', error)
     return NextResponse.json(
       { error: 'Internal server error' },
       { status: 500 }

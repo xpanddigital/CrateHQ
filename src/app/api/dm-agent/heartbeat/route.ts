@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { verifyAgentAuth } from '@/lib/dm/auth'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       .eq('id', ig_account_id)
 
     if (updateError) {
-      console.error('[DM-Agent] Heartbeat update error:', updateError)
+      logger.error('[DM-Agent] Heartbeat update error:', updateError)
     }
 
     // 2. Webhook Alert
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
           }),
         })
       } catch (err) {
-        console.error('[DM-Agent] Webhook alert failed:', err)
+        logger.error('[DM-Agent] Webhook alert failed:', err)
       }
     }
 
@@ -74,13 +75,13 @@ export async function POST(request: NextRequest) {
       })
 
     if (insertError) {
-      console.error('[DM-Agent] Heartbeat insert error:', insertError)
+      logger.error('[DM-Agent] Heartbeat insert error:', insertError)
       return NextResponse.json({ error: 'Failed to log heartbeat' }, { status: 500 })
     }
 
     return NextResponse.json({ recorded: true })
   } catch (error) {
-    console.error('[DM-Agent] Heartbeat unhandled error:', error)
+    logger.error('[DM-Agent] Heartbeat unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

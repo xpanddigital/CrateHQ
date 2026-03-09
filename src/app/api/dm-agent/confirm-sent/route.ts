@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { verifyAgentAuth } from '@/lib/dm/auth'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       .eq('id', pending_message_id)
 
     if (updateError) {
-      console.error('[DM-Agent] Confirm-sent update error:', updateError)
+      logger.error('[DM-Agent] Confirm-sent update error:', updateError)
       return NextResponse.json({ error: 'Failed to update message status' }, { status: 500 })
     }
 
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
       .select('id')
 
     if (convoError) {
-      console.error('[DM-Agent] Confirm-sent convo update error:', convoError)
+      logger.error('[DM-Agent] Confirm-sent convo update error:', convoError)
       return NextResponse.json({ error: 'Message marked sent but failed to update conversation' }, { status: 500 })
     }
 
@@ -75,7 +76,7 @@ export async function POST(request: NextRequest) {
       conversation_id: conversationRows?.[0]?.id,
     })
   } catch (error) {
-    console.error('[DM-Agent] Confirm-sent unhandled error:', error)
+    logger.error('[DM-Agent] Confirm-sent unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

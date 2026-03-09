@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -28,7 +30,7 @@ export async function GET(
     const { data: scout } = await supabase
       .from('profiles')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (!scout) {
@@ -39,31 +41,31 @@ export async function GET(
     const { count: totalDeals } = await supabase
       .from('deals')
       .select('*', { count: 'exact', head: true })
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
 
     const { count: activeDeals } = await supabase
       .from('deals')
       .select('*', { count: 'exact', head: true })
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
       .not('stage', 'in', '(closed_won,closed_lost)')
 
     const { count: wonDeals } = await supabase
       .from('deals')
       .select('*', { count: 'exact', head: true })
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
       .eq('stage', 'closed_won')
 
     const { count: lostDeals } = await supabase
       .from('deals')
       .select('*', { count: 'exact', head: true })
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
       .eq('stage', 'closed_lost')
 
     // Get pipeline value
     const { data: scoutDeals } = await supabase
       .from('deals')
       .select('estimated_deal_value')
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
       .not('stage', 'in', '(closed_won,closed_lost)')
 
     const pipelineValue = scoutDeals?.reduce(
@@ -75,7 +77,7 @@ export async function GET(
     const { data: dealsByStage } = await supabase
       .from('deals')
       .select('stage')
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
 
     const stageCounts: Record<string, number> = {}
     dealsByStage?.forEach((deal) => {
@@ -91,7 +93,7 @@ export async function GET(
         created_at,
         artist:artists(id, name)
       `)
-      .eq('scout_id', params.id)
+      .eq('scout_id', id)
       .order('created_at', { ascending: false })
       .limit(10)
 
@@ -114,7 +116,7 @@ export async function GET(
       },
     })
   } catch (error: any) {
-    console.error('Error fetching scout details:', error)
+    logger.error('Error fetching scout details:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch scout details' },
       { status: 500 }
@@ -124,8 +126,9 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -157,12 +160,12 @@ export async function PUT(
     const { data: updatedScout, error } = await supabase
       .from('profiles')
       .update(updateData)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
     if (error) {
-      console.error('Error updating scout:', error)
+      logger.error('Error updating scout:', error)
       return NextResponse.json(
         { error: 'Failed to update scout' },
         { status: 500 }
@@ -171,7 +174,7 @@ export async function PUT(
 
     return NextResponse.json({ scout: updatedScout })
   } catch (error: any) {
-    console.error('Error updating scout:', error)
+    logger.error('Error updating scout:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to update scout' },
       { status: 500 }

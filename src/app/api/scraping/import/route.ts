@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest) {
       failed: 0,
     })
   } catch (error: any) {
-    console.error('Import error:', error)
+    logger.error('Import error:', error)
     return NextResponse.json(
       { error: error.message || 'Import failed' },
       { status: 500 }

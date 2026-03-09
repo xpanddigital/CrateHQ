@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 // GET /api/inbox/count - Get unread count
 export async function GET(request: NextRequest) {
@@ -21,7 +22,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ count: count || 0 })
   } catch (error: any) {
-    console.error('Error fetching inbox count:', error)
+    logger.error('Error fetching inbox count:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch count' },
       { status: 500 }

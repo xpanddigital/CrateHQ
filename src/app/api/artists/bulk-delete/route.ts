@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
       .in('artist_id', artistIds)
 
     if (conversationsError) {
-      console.error('Error deleting conversations:', conversationsError)
+      logger.error('Error deleting conversations:', conversationsError)
     }
 
     // 2. Delete deals (has conversations that reference it)
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       .in('artist_id', artistIds)
 
     if (dealsError) {
-      console.error('Error deleting deals:', dealsError)
+      logger.error('Error deleting deals:', dealsError)
     }
 
     // 3. Delete enrichment jobs
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
       .in('artist_id', artistIds)
 
     if (enrichmentError) {
-      console.error('Error deleting enrichment jobs:', enrichmentError)
+      logger.error('Error deleting enrichment jobs:', enrichmentError)
     }
 
     // 4. Delete artist_tags (has ON DELETE CASCADE but delete explicitly)
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
       .in('artist_id', artistIds)
 
     if (tagsError) {
-      console.error('Error deleting artist tags:', tagsError)
+      logger.error('Error deleting artist tags:', tagsError)
     }
 
     // 5. Finally, delete artists
@@ -83,7 +84,7 @@ export async function POST(request: NextRequest) {
       deleted: artistIds.length,
     })
   } catch (error: any) {
-    console.error('Error bulk deleting artists:', error)
+    logger.error('Error bulk deleting artists:', error)
     return NextResponse.json(
       { error: error.message || 'Bulk delete failed' },
       { status: 500 }

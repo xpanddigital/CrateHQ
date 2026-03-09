@@ -10,6 +10,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import { enrichArtist } from './pipeline'
 import { checkEmailQuality } from '@/lib/qualification/email-filter'
+import { logger } from '@/lib/logger'
 
 interface EnrichAndSaveOptions {
   supabase: SupabaseClient
@@ -18,12 +19,12 @@ interface EnrichAndSaveOptions {
 }
 
 export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOptions) {
-  console.log(`[Enrich] Starting for: ${artist.name} (${artist.id})`)
+  logger.info(`[Enrich] Starting for: ${artist.name} (${artist.id})`)
 
   const apiKeys = { anthropic: process.env.ANTHROPIC_API_KEY }
   const result = await enrichArtist(artist, apiKeys)
 
-  console.log(`[Enrich] Complete. Email found:`, result.email_found || 'None')
+  logger.info(`[Enrich] Complete. Email found:`, result.email_found || 'None')
 
   // Email quality check
   let emailRejected = false
@@ -32,7 +33,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
   if (result.email_found) {
     const quality = checkEmailQuality(result.email_found)
     if (!quality.accepted) {
-      console.log(`[Enrich] Email rejected: ${result.email_found} — ${quality.reason}`)
+      logger.info(`[Enrich] Email rejected: ${result.email_found} — ${quality.reason}`)
       emailRejected = true
       emailRejectionReason = quality.reason
       result.is_contactable = false
@@ -92,7 +93,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
     .eq('id', artist.id)
 
   if (updateError) {
-    console.error(`[Enrich] Failed to update artist ${artist.id}:`, updateError.message)
+    logger.error(`[Enrich] Failed to update artist ${artist.id}:`, updateError.message)
     throw new Error(`Enrichment found email but failed to save to artist: ${updateError.message}`)
   }
 
@@ -126,7 +127,7 @@ export async function enrichAndSave({ supabase, artist, runBy }: EnrichAndSaveOp
     })
 
   if (logError) {
-    console.error(`[Enrich] Failed to save log:`, logError.message, logError)
+    logger.error(`[Enrich] Failed to save log:`, logError.message, logError)
   }
 
   return {

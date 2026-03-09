@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { useRouter } from 'next/navigation'
+import { useRouter, useParams } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -36,7 +36,8 @@ interface ScoutDetail {
   }>
 }
 
-export default function ScoutDetailPage({ params }: { params: { id: string } }) {
+export default function ScoutDetailPage() {
+  const { id } = useParams<{ id: string }>()
   const router = useRouter()
   const [scout, setScout] = useState<ScoutDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -65,7 +66,7 @@ export default function ScoutDetailPage({ params }: { params: { id: string } }) 
   const fetchScoutDetail = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await fetch(`/api/scouts/${params.id}`)
+      const res = await fetch(`/api/scouts/${id}`)
       const data = await res.json()
       if (data.scout) {
         setScout(data.scout)
@@ -75,7 +76,7 @@ export default function ScoutDetailPage({ params }: { params: { id: string } }) 
     } finally {
       setLoading(false)
     }
-  }, [params.id])
+  }, [id])
 
   useEffect(() => {
     checkAccess()

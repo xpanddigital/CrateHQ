@@ -8,6 +8,7 @@
  */
 
 import { decrypt, isEncrypted } from '@/lib/crypto'
+import { logger } from '@/lib/logger'
 
 const GHL_VERSION = '2021-07-28'
 const DEFAULT_BASE = 'https://services.leadconnectorhq.com'
@@ -59,7 +60,7 @@ export async function getGHLClient(
     try {
       rawApiKey = decrypt(rawApiKey)
     } catch (e) {
-      console.error('[GHLClient] Failed to decrypt ghl_api_key:', e)
+      logger.error('[GHLClient] Failed to decrypt ghl_api_key:', e)
       return null
     }
   }

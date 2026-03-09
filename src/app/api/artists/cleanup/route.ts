@@ -6,6 +6,7 @@ import {
   isValidEmailFormat,
 } from '@/lib/cleanup/data-cleanup'
 import { extractBioEmails } from '@/lib/import/spotify-transformer'
+import { logger } from '@/lib/logger'
 
 /**
  * GET  — Dry-run: scan all artists and return what WOULD be cleaned.
@@ -81,7 +82,7 @@ export async function GET() {
       bioEmailCandidates: { count: bioEmailCandidates.length, details: bioEmailCandidates },
     })
   } catch (error: any) {
-    console.error('[Cleanup] GET error:', error)
+    logger.error('[Cleanup] GET error:', error)
     return NextResponse.json({ error: error.message || 'Cleanup scan failed' }, { status: 500 })
   }
 }
@@ -122,7 +123,7 @@ export async function POST(request: NextRequest) {
         for (let i = 0; i < ghostIds.length; i += 100) {
           const chunk = ghostIds.slice(i, i + 100)
           const { error } = await supabase.from('artists').delete().in('id', chunk)
-          if (error) console.error('[Cleanup] Ghost delete error:', error.message)
+          if (error) logger.error('[Cleanup] Ghost delete error:', error.message)
           else ghostsDeleted += chunk.length
         }
       }
@@ -224,7 +225,7 @@ export async function POST(request: NextRequest) {
       bioEmailDetails,
     })
   } catch (error: any) {
-    console.error('[Cleanup] POST error:', error)
+    logger.error('[Cleanup] POST error:', error)
     return NextResponse.json({ error: error.message || 'Cleanup failed' }, { status: 500 })
   }
 }

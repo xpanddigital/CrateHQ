@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { logger } from '@/lib/logger'
 
 /**
  * POST /api/artists/from-conversation
@@ -47,7 +48,7 @@ export async function POST(request: NextRequest) {
       .maybeSingle()
 
     if (convoError) {
-      console.error('[Artists/FromConversation] Fetch conversation error:', convoError)
+      logger.error('[Artists/FromConversation] Fetch conversation error:', convoError)
       return NextResponse.json({ error: 'Failed to look up conversation' }, { status: 500 })
     }
 
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (artistError || !artist) {
-      console.error('[Artists/FromConversation] Artist insert error:', artistError)
+      logger.error('[Artists/FromConversation] Artist insert error:', artistError)
       return NextResponse.json({ error: 'Failed to create artist' }, { status: 500 })
     }
 
@@ -101,7 +102,7 @@ export async function POST(request: NextRequest) {
       .eq('ig_thread_id', thread_key)
 
     if (updateError) {
-      console.error('[Artists/FromConversation] Backfill conversations error:', updateError)
+      logger.error('[Artists/FromConversation] Backfill conversations error:', updateError)
       // Non-fatal for the artist creation, but report to caller
       return NextResponse.json({
         artist,
@@ -111,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ artist })
   } catch (error: any) {
-    console.error('[Artists/FromConversation] Unhandled error:', error)
+    logger.error('[Artists/FromConversation] Unhandled error:', error)
     return NextResponse.json(
       { error: error.message || 'Internal server error' },
       { status: 500 }

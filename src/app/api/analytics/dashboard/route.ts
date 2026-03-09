@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -268,7 +269,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (error: any) {
-    console.error('Error fetching dashboard data:', error)
+    logger.error('Error fetching dashboard data:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch dashboard data' },
       { status: 500 }

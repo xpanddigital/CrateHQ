@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,13 +33,13 @@ export async function GET(request: NextRequest) {
       .limit(50)
 
     if (error) {
-      console.error('[Admin/Agents/Logs] Fetch error:', error)
+      logger.error('[Admin/Agents/Logs] Fetch error:', error)
       return NextResponse.json({ error: 'Failed to fetch logs' }, { status: 500 })
     }
 
     return NextResponse.json({ logs })
   } catch (error) {
-    console.error('[Admin/Agents/Logs] Unhandled error:', error)
+    logger.error('[Admin/Agents/Logs] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

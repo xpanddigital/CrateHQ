@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { classifyReply } from '@/lib/ai/sdr'
+import { logger } from '@/lib/logger'
 
 // POST /api/ai/classify - Classify artist reply
 export async function POST(request: NextRequest) {
@@ -22,7 +23,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result)
   } catch (error: any) {
-    console.error('Error classifying reply:', error)
+    logger.error('Error classifying reply:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to classify reply' },
       { status: 500 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 60
 
@@ -71,7 +72,7 @@ Return just the voice prompt text, no bullet labels, no markdown.
 
     return NextResponse.json({ voice_prompt: text.trim() })
   } catch (e: any) {
-    console.error('[Admin/Identities/Voice] Error:', e)
+    logger.error('[Admin/Identities/Voice] Error:', e)
     return NextResponse.json(
       { error: e.message || 'Failed to generate voice prompt' },
       { status: 500 }

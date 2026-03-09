@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -32,13 +33,13 @@ export async function GET(request: NextRequest) {
       .is('image_url', null)
 
     if (error) {
-      console.error('[Admin/StudioSinglePosts] Query error:', error)
+      logger.error('[Admin/StudioSinglePosts] Query error:', error)
       return NextResponse.json({ error: 'Failed to load posts' }, { status: 500 })
     }
 
     return NextResponse.json({ posts: posts || [] })
   } catch (e: any) {
-    console.error('[Admin/StudioSinglePosts] Error:', e)
+    logger.error('[Admin/StudioSinglePosts] Error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }

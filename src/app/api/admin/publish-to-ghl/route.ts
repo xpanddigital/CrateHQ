@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { requireGHLClient, type GHLClient } from '@/lib/ghl/client'
+import { logger } from '@/lib/logger'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -90,7 +91,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (postError || !post) {
-      console.error('[PublishToGHL] Post load error:', postError)
+      logger.error('[PublishToGHL] Post load error:', postError)
       return NextResponse.json({ error: 'Post not found' }, { status: 404 })
     }
 
@@ -173,7 +174,7 @@ export async function POST(request: NextRequest) {
     if (!postRes.ok) {
       const msg =
         (postJson && (postJson.message || postJson.error)) || 'GHL create post failed'
-      console.error('[PublishToGHL] Create post error:', msg, postJson)
+      logger.error('[PublishToGHL] Create post error:', msg, postJson)
       await supabase
         .from('content_posts')
         .update({ status: 'failed' })
@@ -207,7 +208,7 @@ export async function POST(request: NextRequest) {
       raw: postJson,
     })
   } catch (e: any) {
-    console.error('[PublishToGHL] Unhandled error:', e)
+    logger.error('[PublishToGHL] Unhandled error:', e)
     return NextResponse.json(
       { error: e.message || 'Internal server error' },
       { status: 500 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -24,13 +25,13 @@ async function requireAdmin() {
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   const { supabase, error } = await requireAdmin()
   if (error) return error
 
   try {
-    const id = params.id
     const body = await request.json()
     const { assigned_scout_id, daily_cold_dm_limit, is_active } = body
 
@@ -57,13 +58,13 @@ export async function PATCH(
       .single()
 
     if (updateError) {
-      console.error('[Admin Agents PATCH] Update error:', updateError)
+      logger.error('[Admin Agents PATCH] Update error:', updateError)
       return NextResponse.json({ error: updateError.message }, { status: 500 })
     }
 
     return NextResponse.json({ account: data })
   } catch (error: any) {
-    console.error('[Admin Agents PATCH] Unhandled error:', error)
+    logger.error('[Admin Agents PATCH] Unhandled error:', error)
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }
 }

@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -42,13 +43,13 @@ export async function POST() {
       .neq('is_active', false) // Only update ones that are true/null to be safe and satisfy PostgREST requirements
 
     if (finalUpdateError) {
-      console.error('[Global Panic] Update error:', finalUpdateError)
+      logger.error('[Global Panic] Update error:', finalUpdateError)
       return NextResponse.json({ error: finalUpdateError.message }, { status: 500 })
     }
 
     return NextResponse.json({ success: true, message: 'All accounts paused' })
   } catch (error: any) {
-    console.error('[Global Panic] Unhandled error:', error)
+    logger.error('[Global Panic] Unhandled error:', error)
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }
 }

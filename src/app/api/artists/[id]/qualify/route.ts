@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 /**
  * PUT /api/artists/[id]/qualify
@@ -9,8 +10,9 @@ import { createClient } from '@/lib/supabase/server'
  */
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -36,13 +38,13 @@ export async function PUT(
         qualification_date: new Date().toISOString(),
         qualification_manual_override: true,
       })
-      .eq('id', params.id)
+      .eq('id', id)
 
     if (updateError) throw updateError
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Error updating qualification:', error)
+    logger.error('Error updating qualification:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to update qualification' },
       { status: 500 }

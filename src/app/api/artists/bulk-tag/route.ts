@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
       count: artistIds.length,
     })
   } catch (error: any) {
-    console.error('Error bulk tagging artists:', error)
+    logger.error('Error bulk tagging artists:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to apply tags' },
       { status: 500 }

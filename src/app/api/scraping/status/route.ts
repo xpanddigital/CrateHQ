@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getRunStatus } from '@/lib/apify/client'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
       datasetId: status.data.defaultDatasetId,
     })
   } catch (error: any) {
-    console.error('Status check error:', error)
+    logger.error('Status check error:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to check status' },
       { status: 500 }

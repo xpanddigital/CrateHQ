@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { checkRateLimit, rateLimitKeyByIP, RATE_LIMITS } from '@/lib/rate-limit'
+import { logger } from '@/lib/logger'
 
 /**
  * POST /api/webhooks/instantly?secret=<INSTANTLY_WEBHOOK_SECRET>
@@ -28,11 +29,11 @@ export async function POST(request: NextRequest) {
       const providedSecret = request.nextUrl.searchParams.get('secret')
         || request.headers.get('x-webhook-secret')
       if (providedSecret !== webhookSecret) {
-        console.error('[Webhook/Instantly] Invalid or missing webhook secret')
+        logger.error('[Webhook/Instantly] Invalid or missing webhook secret')
         return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
       }
     } else {
-      console.warn('[Webhook/Instantly] INSTANTLY_WEBHOOK_SECRET not set — webhook is unauthenticated')
+      logger.warn('[Webhook/Instantly] INSTANTLY_WEBHOOK_SECRET not set — webhook is unauthenticated')
     }
 
     const body = await request.json()
@@ -40,11 +41,11 @@ export async function POST(request: NextRequest) {
     // Instantly sends event_type at the top level
     const eventType = body.event_type
     if (!eventType) {
-      console.error('[Webhook/Instantly] No event_type in payload:', JSON.stringify(body).slice(0, 500))
+      logger.error('[Webhook/Instantly] No event_type in payload:', JSON.stringify(body).slice(0, 500))
       return NextResponse.json({ error: 'Missing event_type' }, { status: 400 })
     }
 
-    console.log(`[Webhook/Instantly] Received event: ${eventType}, lead: ${body.lead_email || body.email || 'unknown'}`)
+    logger.info(`[Webhook/Instantly] Received event: ${eventType}, lead: ${body.lead_email || body.email || 'unknown'}`)
 
     const supabase = createServiceClient()
 
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
     // Unknown event — accept it but don't process
     return NextResponse.json({ received: true, event_type: eventType, handled: false })
   } catch (error) {
-    console.error('[Webhook/Instantly] Unhandled error:', error)
+    logger.error('[Webhook/Instantly] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -99,7 +100,7 @@ async function handleReply(supabase: any, body: any) {
   const dedupKey = `instantly_${senderEmail}_${timestamp}`
 
   if (!senderEmail) {
-    console.error('[Webhook/Instantly] Reply missing sender email:', JSON.stringify(body).slice(0, 500))
+    logger.error('[Webhook/Instantly] Reply missing sender email:', JSON.stringify(body).slice(0, 500))
     return NextResponse.json({ error: 'Missing sender email' }, { status: 400 })
   }
 
@@ -174,7 +175,7 @@ async function handleReply(supabase: any, body: any) {
     .single()
 
   if (insertError) {
-    console.error('[Webhook/Instantly] Reply insert error:', insertError)
+    logger.error('[Webhook/Instantly] Reply insert error:', insertError)
     return NextResponse.json({ error: 'Failed to store reply' }, { status: 500 })
   }
 
@@ -194,7 +195,7 @@ async function handleReply(supabase: any, body: any) {
     }
   }
 
-  console.log(`[Webhook/Instantly] Reply stored: ${conversation.id}, artist: ${matchedArtist?.name || 'unmatched'}, from: ${senderEmail}`)
+  logger.info(`[Webhook/Instantly] Reply stored: ${conversation.id}, artist: ${matchedArtist?.name || 'unmatched'}, from: ${senderEmail}`)
 
   return NextResponse.json({
     received: true,
@@ -260,7 +261,7 @@ async function handleEmailSent(supabase: any, body: any) {
     .single()
 
   if (insertError) {
-    console.error('[Webhook/Instantly] Sent insert error:', insertError)
+    logger.error('[Webhook/Instantly] Sent insert error:', insertError)
     return NextResponse.json({ error: 'Failed to store sent email' }, { status: 500 })
   }
 

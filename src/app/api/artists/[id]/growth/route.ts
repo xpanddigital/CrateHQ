@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -17,7 +19,7 @@ export async function GET(
     const { data: artist, error: artistError } = await supabase
       .from('artists')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (artistError || !artist) {
@@ -29,13 +31,13 @@ export async function GET(
     const { data: snapshots, error: snapshotsError } = await supabase
       .from('artist_snapshots')
       .select('*')
-      .eq('artist_id', params.id)
+      .eq('artist_id', id)
       .order('snapshot_date', { ascending: false })
       .limit(365)
 
     // If table doesn't exist, return zeroed growth data instead of crashing
     if (snapshotsError) {
-      console.warn('Growth calculation skipped:', snapshotsError.message)
+      logger.warn('Growth calculation skipped:', snapshotsError.message)
       return NextResponse.json({
         growth_mom: artist.growth_mom || 0,
         growth_qoq: artist.growth_qoq || 0,
@@ -104,7 +106,7 @@ export async function GET(
         growth_status: trend_direction,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', params.id)
+      .eq('id', id)
 
     return NextResponse.json({
       growth_mom,
@@ -114,7 +116,7 @@ export async function GET(
       sparkline: sparklineData,
     })
   } catch (error: any) {
-    console.error('Error calculating growth:', error)
+    logger.error('Error calculating growth:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to calculate growth' },
       { status: 500 }

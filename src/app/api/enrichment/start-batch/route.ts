@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 300
 
@@ -102,7 +103,7 @@ export async function POST(request: NextRequest) {
         .insert(rows)
 
       if (insertError) {
-        console.error(`[Start Batch] Failed to insert queue chunk ${i}:`, insertError.message)
+        logger.error(`[Start Batch] Failed to insert queue chunk ${i}:`, insertError.message)
       }
     }
 
@@ -116,7 +117,7 @@ export async function POST(request: NextRequest) {
       estimatedHours: (estimatedMinutes / 60).toFixed(1),
     })
   } catch (error: any) {
-    console.error('[Start Batch] Error:', error)
+    logger.error('[Start Batch] Error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

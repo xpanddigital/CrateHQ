@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import crypto from 'crypto'
+import { logger } from '@/lib/logger'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -58,7 +59,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (insertError) {
-      console.error('[Admin/ig-accounts] Insert error:', insertError)
+      logger.error('[Admin/ig-accounts] Insert error:', insertError)
       return NextResponse.json(
         { error: insertError.message || 'Failed to create account' },
         { status: 500 }
@@ -67,7 +68,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ account: data })
   } catch (e) {
-    console.error('[Admin/ig-accounts] Unhandled error:', e)
+    logger.error('[Admin/ig-accounts] Unhandled error:', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

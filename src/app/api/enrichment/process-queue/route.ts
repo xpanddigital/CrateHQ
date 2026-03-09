@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { enrichAndSave } from '@/lib/enrichment/enrich-and-save'
+import { logger } from '@/lib/logger'
 
 const BATCH_SIZE = 3
 const DELAY_BETWEEN_ARTISTS_MS = 3000
@@ -137,12 +138,12 @@ export async function GET(request: NextRequest) {
           .from('enrichment_queue')
           .update({ status: 'pending', started_at: null })
           .eq('id', job.id)
-        console.log(`[Cron] Timeout approaching after ${elapsed}ms, releasing remaining jobs`)
+        logger.info(`[Cron] Timeout approaching after ${elapsed}ms, releasing remaining jobs`)
         break
       }
 
       try {
-        console.log(`[Cron] Processing ${i + 1}/${jobs.length}: ${artist.name}`)
+        logger.info(`[Cron] Processing ${i + 1}/${jobs.length}: ${artist.name}`)
         const result = await enrichAndSave({ supabase, artist, runBy: 'cron-worker' })
 
         const emailFound = result.email_found ? 1 : 0
@@ -164,7 +165,7 @@ export async function GET(request: NextRequest) {
 
         results.push({ jobId: job.id, artistName: artist.name, status: 'completed', email: result.email_found || undefined })
       } catch (error: any) {
-        console.error(`[Cron] Error enriching ${artist.name}:`, error.message)
+        logger.error(`[Cron] Error enriching ${artist.name}:`, error.message)
 
         const attempts = (job.attempts || 0) + 1
         const newStatus = attempts >= (job.max_attempts || 3) ? 'failed' : 'pending'
@@ -219,7 +220,7 @@ export async function GET(request: NextRequest) {
       remainingInBatch: remaining,
     })
   } catch (error: any) {
-    console.error('[Cron] Fatal error:', error)
+    logger.error('[Cron] Fatal error:', error)
     return NextResponse.json({ error: error.message }, { status: 500 })
   }
 }

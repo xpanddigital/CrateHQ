@@ -1,4 +1,5 @@
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function createSnapshot(artistId: string, data: {
   spotify_monthly_listeners?: number
@@ -24,9 +25,9 @@ export async function createSnapshot(artistId: string, data: {
       })
 
     if (error) {
-      console.error('Error creating snapshot:', error)
+      logger.error('Error creating snapshot:', error)
     }
   } catch (error) {
-    console.error('Error creating snapshot:', error)
+    logger.error('Error creating snapshot:', error)
   }
 }

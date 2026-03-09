@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function PATCH(request: NextRequest) {
   try {
@@ -38,13 +39,13 @@ export async function PATCH(request: NextRequest) {
       .eq('id', postId)
 
     if (error) {
-      console.error('[Admin/CalendarSchedule] Update error:', error)
+      logger.error('[Admin/CalendarSchedule] Update error:', error)
       return NextResponse.json({ error: 'Failed to update schedule' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (e: any) {
-    console.error('[Admin/CalendarSchedule] Error:', e)
+    logger.error('[Admin/CalendarSchedule] Error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }

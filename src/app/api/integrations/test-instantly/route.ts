@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { InstantlyClient } from '@/lib/instantly/client'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -14,7 +15,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(result)
   } catch (error: any) {
-    console.error('Error testing Instantly connection:', error)
+    logger.error('Error testing Instantly connection:', error)
     return NextResponse.json(
       { success: false, error: error.message || 'Connection test failed' },
       { status: 500 }

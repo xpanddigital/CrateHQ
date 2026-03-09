@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -16,7 +18,7 @@ export async function GET(
     const { data: template, error } = await supabase
       .from('email_templates')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error || !template) {
@@ -28,7 +30,7 @@ export async function GET(
 
     return NextResponse.json({ template })
   } catch (error: any) {
-    console.error('Error fetching template:', error)
+    logger.error('Error fetching template:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch template' },
       { status: 500 }
@@ -38,8 +40,9 @@ export async function GET(
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -62,12 +65,12 @@ export async function PUT(
     const { data: template, error } = await supabase
       .from('email_templates')
       .update(updateData)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
     if (error) {
-      console.error('Error updating template:', error)
+      logger.error('Error updating template:', error)
       return NextResponse.json(
         { error: 'Failed to update template' },
         { status: 500 }
@@ -76,7 +79,7 @@ export async function PUT(
 
     return NextResponse.json({ template })
   } catch (error: any) {
-    console.error('Error updating template:', error)
+    logger.error('Error updating template:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to update template' },
       { status: 500 }
@@ -86,8 +89,9 @@ export async function PUT(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -99,10 +103,10 @@ export async function DELETE(
     const { error } = await supabase
       .from('email_templates')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
 
     if (error) {
-      console.error('Error deleting template:', error)
+      logger.error('Error deleting template:', error)
       return NextResponse.json(
         { error: 'Failed to delete template' },
         { status: 500 }
@@ -111,7 +115,7 @@ export async function DELETE(
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Error deleting template:', error)
+    logger.error('Error deleting template:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to delete template' },
       { status: 500 }

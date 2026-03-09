@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 function escapeCsvField(value: any): string {
   if (value === null || value === undefined) return ''
@@ -61,7 +62,7 @@ export async function GET(request: NextRequest) {
     const { data: posts, error: postsError } = await postsQuery
 
     if (postsError) {
-      console.error('[CalendarExport] Posts error:', postsError)
+      logger.error('[CalendarExport] Posts error:', postsError)
       return new NextResponse('Failed to load posts', { status: 500 })
     }
 
@@ -78,7 +79,7 @@ export async function GET(request: NextRequest) {
         .in('id', identityIds)
 
       if (idError) {
-        console.error('[CalendarExport] Identities error:', idError)
+        logger.error('[CalendarExport] Identities error:', idError)
       } else {
         for (const row of identities || []) {
           identitiesMap[row.id] = { display_name: row.display_name }
@@ -139,7 +140,7 @@ export async function GET(request: NextRequest) {
 
     return response
   } catch (e: any) {
-    console.error('[CalendarExport] Error:', e)
+    logger.error('[CalendarExport] Error:', e)
     return new NextResponse('Internal server error', { status: 500 })
   }
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { verifyAgentAuth } from '@/lib/dm/auth'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
       .single()
 
     if (accountError) {
-      console.error('[DM-Agent] Account fetch error:', accountError)
+      logger.error('[DM-Agent] Account fetch error:', accountError)
       return NextResponse.json({ error: 'Failed to verify account status' }, { status: 500 })
     }
 
@@ -44,7 +45,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('[DM-Agent] Pending replies error:', error)
+      logger.error('[DM-Agent] Pending replies error:', error)
       return NextResponse.json({ error: 'Failed to fetch pending messages' }, { status: 500 })
     }
 
@@ -58,7 +59,7 @@ export async function GET(request: NextRequest) {
       })),
     })
   } catch (error) {
-    console.error('[DM-Agent] Pending replies unhandled error:', error)
+    logger.error('[DM-Agent] Pending replies unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

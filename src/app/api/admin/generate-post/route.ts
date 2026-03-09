@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import crypto from 'crypto'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 60
 
@@ -54,7 +55,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (idError || !identity) {
-      console.error('[GeneratePost] Identity error:', idError)
+      logger.error('[GeneratePost] Identity error:', idError)
       return NextResponse.json({ error: 'Identity not found' }, { status: 404 })
     }
 
@@ -114,7 +115,7 @@ Return STRICT JSON:
           parsed = JSON.parse(match[0])
         }
       } catch (e) {
-        console.error('[GeneratePost] Carousel JSON parse error:', e, text)
+        logger.error('[GeneratePost] Carousel JSON parse error:', e, text)
       }
 
       const slides = parsed.slides || []
@@ -137,7 +138,7 @@ Return STRICT JSON:
         .single()
 
       if (insertError) {
-        console.error('[GeneratePost] Carousel insert error:', insertError)
+        logger.error('[GeneratePost] Carousel insert error:', insertError)
         return NextResponse.json({ error: 'Failed to save post' }, { status: 500 })
       }
 
@@ -226,7 +227,7 @@ Return only the caption text.
         nanoParsed = JSON.parse(match[0])
       }
     } catch (e) {
-      console.error('[GeneratePost] Nano JSON parse error:', e, nanoText)
+      logger.error('[GeneratePost] Nano JSON parse error:', e, nanoText)
     }
 
     const nano_prompt = nanoParsed.primary || ''
@@ -250,7 +251,7 @@ Return only the caption text.
       .single()
 
     if (insertError) {
-      console.error('[GeneratePost] Single insert error:', insertError)
+      logger.error('[GeneratePost] Single insert error:', insertError)
       return NextResponse.json({ error: 'Failed to save post' }, { status: 500 })
     }
 
@@ -267,7 +268,7 @@ Return only the caption text.
 
     return NextResponse.json({ post })
   } catch (e: any) {
-    console.error('[GeneratePost] Error:', e)
+    logger.error('[GeneratePost] Error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }

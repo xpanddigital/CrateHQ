@@ -36,6 +36,7 @@ import {
 } from './apify-fetch'
 import { discoverYouTubeChannel, fetchYouTubeDescription } from './youtube-api'
 import { filterEmails } from '@/lib/qualification/email-filter'
+import { logger } from '@/lib/logger'
 
 // ============================================================
 // TYPES
@@ -134,25 +135,25 @@ function validateEmail(email: string, rawContent: string): boolean {
   if (!email || !email.includes('@')) return false
 
   if (!rawContent.toLowerCase().includes(email.toLowerCase())) {
-    console.log(`[Validation Failed] Email "${email}" not found in raw content`)
+    logger.info(`[Validation Failed] Email "${email}" not found in raw content`)
     return false
   }
 
   const lower = email.toLowerCase()
   if (BLOCKED_EMAIL_PATTERNS.some(b => lower.includes(b))) {
-    console.log(`[Validation Failed] Email "${email}" matches blocked pattern`)
+    logger.info(`[Validation Failed] Email "${email}" matches blocked pattern`)
     return false
   }
 
   const domain = lower.split('@')[1]
   if (JUNK_DOMAINS.some(junk => domain === junk || domain.endsWith('.' + junk))) {
-    console.log(`[Validation Failed] Email "${email}" has junk domain`)
+    logger.info(`[Validation Failed] Email "${email}" has junk domain`)
     return false
   }
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
   if (!emailRegex.test(email)) {
-    console.log(`[Validation Failed] Email "${email}" failed format check`)
+    logger.info(`[Validation Failed] Email "${email}" failed format check`)
     return false
   }
 
@@ -199,14 +200,14 @@ async function extractEmailWithAI(
       try {
         return JSON.parse(match[0])
       } catch {
-        console.warn(`[AI Extraction] Failed to parse JSON from AI response: ${match[0].slice(0, 200)}`)
+        logger.warn(`[AI Extraction] Failed to parse JSON from AI response: ${match[0].slice(0, 200)}`)
         return { email: '', source: 'none' }
       }
     }
 
     return { email: '', source: 'none' }
   } catch (error) {
-    console.error('[AI Extraction Error]', error)
+    logger.error('[AI Extraction Error]', error)
     return { email: '', source: 'none' }
   }
 }
@@ -231,7 +232,7 @@ async function step0_YouTubeDiscovery(
 
   const youtubeApiKey = process.env.YOUTUBE_API_KEY
   if (!youtubeApiKey) {
-    console.log('[Step 0] No YOUTUBE_API_KEY configured, skipping discovery')
+    logger.info('[Step 0] No YOUTUBE_API_KEY configured, skipping discovery')
     return { ...empty, errorDetails: 'No YOUTUBE_API_KEY configured' }
   }
 
@@ -239,19 +240,19 @@ async function step0_YouTubeDiscovery(
 
   // CASE A: Artist already has a YouTube URL — fetch the description via Data API
   if (existingUrl) {
-    console.log(`[Step 0] Artist has YouTube URL: ${existingUrl} — fetching description via Data API`)
+    logger.info(`[Step 0] Artist has YouTube URL: ${existingUrl} — fetching description via Data API`)
 
     const descResult = await fetchYouTubeDescription(existingUrl, youtubeApiKey)
 
     if (!descResult.success) {
-      console.log(`[Step 0] Failed to fetch description: ${descResult.error}`)
+      logger.info(`[Step 0] Failed to fetch description: ${descResult.error}`)
       // Still pass the URL through to Step 1 (Apify can try)
       return { ...empty, url: existingUrl, discoveredYouTubeUrl: existingUrl, apifyActor: 'youtube-data-api (description fetch failed)', errorDetails: descResult.error }
     }
 
     // Check for emails in the channel description
     if (descResult.emailsFromDescription.length > 0) {
-      console.log(`[Step 0] Emails found in YouTube description: ${descResult.emailsFromDescription.join(', ')}`)
+      logger.info(`[Step 0] Emails found in YouTube description: ${descResult.emailsFromDescription.join(', ')}`)
       return {
         emails: descResult.emailsFromDescription,
         confidence: 0.9,
@@ -265,7 +266,7 @@ async function step0_YouTubeDiscovery(
     }
 
     // No email in description — pass to Step 1 for deeper Apify extraction
-    console.log(`[Step 0] No email in YouTube description (${descResult.description.length} chars). Passing to Step 1 for Apify extraction.`)
+    logger.info(`[Step 0] No email in YouTube description (${descResult.description.length} chars). Passing to Step 1 for Apify extraction.`)
     return {
       ...empty,
       url: existingUrl,
@@ -276,7 +277,7 @@ async function step0_YouTubeDiscovery(
   }
 
   // CASE B: No YouTube URL — discover the channel via search + Haiku verification
-  console.log(`[Step 0] No YouTube URL in artist data — starting discovery`)
+  logger.info(`[Step 0] No YouTube URL in artist data — starting discovery`)
 
   const result = await discoverYouTubeChannel(artist, {
     youtube: youtubeApiKey,
@@ -284,15 +285,15 @@ async function step0_YouTubeDiscovery(
   })
 
   if (!result.success || !result.channelUrl) {
-    console.log(`[Step 0] YouTube discovery failed: ${result.error || 'No match found'}`)
+    logger.info(`[Step 0] YouTube discovery failed: ${result.error || 'No match found'}`)
     return { ...empty, errorDetails: result.error || 'No YouTube channel found', apifyActor: result.method }
   }
 
-  console.log(`[Step 0] Discovered YouTube channel: ${result.channelUrl} (confidence: ${result.confidence}, method: ${result.method})`)
+  logger.info(`[Step 0] Discovered YouTube channel: ${result.channelUrl} (confidence: ${result.confidence}, method: ${result.method})`)
 
   // If the API already found emails in the channel description, return them
   if (result.emailsFromDescription.length > 0) {
-    console.log(`[Step 0] Emails found in YouTube description: ${result.emailsFromDescription.join(', ')}`)
+    logger.info(`[Step 0] Emails found in YouTube description: ${result.emailsFromDescription.join(', ')}`)
     return {
       emails: result.emailsFromDescription,
       confidence: Math.min(result.confidence, 0.85),
@@ -331,22 +332,22 @@ async function step1_YouTube(
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', apifyUsed: false, apifyActor: '', wasBlocked: false }
 
   if (!youtubeUrl) {
-    console.log('[Step 1] No YouTube URL found (even after discovery), skipping')
+    logger.info('[Step 1] No YouTube URL found (even after discovery), skipping')
     return empty
   }
 
-  console.log(`[Step 1] YouTube URL: ${youtubeUrl}${discoveredYouTubeUrl ? ' (from Step 0 discovery)' : ' (from artist data)'}`)
+  logger.info(`[Step 1] YouTube URL: ${youtubeUrl}${discoveredYouTubeUrl ? ' (from Step 0 discovery)' : ' (from artist data)'}`)
 
   const result = await apifyFetchYouTube(youtubeUrl)
 
   if (!result.success) {
-    console.log(`[Step 1] Apify YouTube scraper failed: ${result.error}`)
+    logger.info(`[Step 1] Apify YouTube scraper failed: ${result.error}`)
     return { ...empty, url: youtubeUrl, apifyUsed: false, apifyActor: result.actorUsed, errorDetails: result.errorDetails }
   }
 
   // Check for direct email from structured fields
   if (result.email && validateEmailFormat(result.email)) {
-    console.log(`[Step 1] Direct email from YouTube scraper: ${result.email}`)
+    logger.info(`[Step 1] Direct email from YouTube scraper: ${result.email}`)
     return {
       emails: [result.email], confidence: 0.9, url: youtubeUrl,
       rawContent: result.allText, apifyUsed: true, apifyActor: result.actorUsed, wasBlocked: false,
@@ -356,7 +357,7 @@ async function step1_YouTube(
   // Regex scan all text for emails
   const regexEmails = extractEmailsFromText(result.allText)
   if (regexEmails.length > 0) {
-    console.log(`[Step 1] Regex found emails in YouTube data: ${regexEmails.join(', ')}`)
+    logger.info(`[Step 1] Regex found emails in YouTube data: ${regexEmails.join(', ')}`)
     return {
       emails: regexEmails, confidence: 0.85, url: youtubeUrl,
       rawContent: result.allText, apifyUsed: true, apifyActor: result.actorUsed, wasBlocked: false,
@@ -385,7 +386,7 @@ If no email found: {"email": "", "source": "none"}`
     }
   }
 
-  console.log('[Step 1] No email found in YouTube data')
+  logger.info('[Step 1] No email found in YouTube data')
   return { ...empty, url: youtubeUrl, rawContent: result.allText, apifyUsed: true, apifyActor: result.actorUsed }
 }
 
@@ -404,23 +405,23 @@ async function step2_Instagram(
   const empty = { emails: [], confidence: 0, url: '', rawContent: '', externalUrl: null, apifyUsed: false, apifyActor: '', wasBlocked: false }
 
   if (!handle) {
-    console.log('[Step 2] No Instagram handle found, skipping')
+    logger.info('[Step 2] No Instagram handle found, skipping')
     return empty
   }
 
   const igUrl = `https://www.instagram.com/${handle}/`
-  console.log(`[Step 2] Instagram handle: @${handle}`)
+  logger.info(`[Step 2] Instagram handle: @${handle}`)
 
   const result = await apifyFetchInstagram(handle)
 
   if (!result.success) {
-    console.log(`[Step 2] Apify Instagram scraper failed: ${result.error}`)
+    logger.info(`[Step 2] Apify Instagram scraper failed: ${result.error}`)
     return { ...empty, url: igUrl, apifyActor: result.actorUsed, errorDetails: result.errorDetails }
   }
 
   // Check businessEmail field first (structured data, highest confidence)
   if (result.businessEmail && validateEmailFormat(result.businessEmail)) {
-    console.log(`[Step 2] Business email from Instagram: ${result.businessEmail}`)
+    logger.info(`[Step 2] Business email from Instagram: ${result.businessEmail}`)
     return {
       emails: [result.businessEmail], confidence: 0.9, url: igUrl,
       rawContent: result.allText, externalUrl: result.externalUrl,
@@ -430,7 +431,7 @@ async function step2_Instagram(
 
   // Check email field (may have been extracted by the actor)
   if (result.email && validateEmailFormat(result.email)) {
-    console.log(`[Step 2] Email from Instagram scraper: ${result.email}`)
+    logger.info(`[Step 2] Email from Instagram scraper: ${result.email}`)
     return {
       emails: [result.email], confidence: 0.85, url: igUrl,
       rawContent: result.allText, externalUrl: result.externalUrl,
@@ -442,7 +443,7 @@ async function step2_Instagram(
   if (result.biography) {
     const bioEmails = extractEmailsFromText(result.biography)
     if (bioEmails.length > 0) {
-      console.log(`[Step 2] Regex found email in bio: ${bioEmails.join(', ')}`)
+      logger.info(`[Step 2] Regex found email in bio: ${bioEmails.join(', ')}`)
       return {
         emails: bioEmails, confidence: 0.8, url: igUrl,
         rawContent: result.allText, externalUrl: result.externalUrl,
@@ -454,7 +455,7 @@ async function step2_Instagram(
   // Regex scan all text
   const allEmails = extractEmailsFromText(result.allText)
   if (allEmails.length > 0) {
-    console.log(`[Step 2] Regex found email in IG data: ${allEmails.join(', ')}`)
+    logger.info(`[Step 2] Regex found email in IG data: ${allEmails.join(', ')}`)
     return {
       emails: allEmails, confidence: 0.75, url: igUrl,
       rawContent: result.allText, externalUrl: result.externalUrl,
@@ -462,7 +463,7 @@ async function step2_Instagram(
     }
   }
 
-  console.log(`[Step 2] No email found. externalUrl=${result.externalUrl || 'none'}`)
+  logger.info(`[Step 2] No email found. externalUrl=${result.externalUrl || 'none'}`)
   return {
     ...empty, url: igUrl, rawContent: result.allText,
     externalUrl: result.externalUrl, apifyUsed: true, apifyActor: result.actorUsed,
@@ -488,11 +489,11 @@ async function step3_LinkInBio(
   const linktreeUrl = externalUrl || (websiteUrl && isLinktreeDomain(websiteUrl) ? websiteUrl : null)
 
   if (!linktreeUrl) {
-    console.log('[Step 3] No link-in-bio URL found, skipping')
+    logger.info('[Step 3] No link-in-bio URL found, skipping')
     return empty
   }
 
-  console.log(`[Step 3] Link-in-bio URL: ${linktreeUrl}`)
+  logger.info(`[Step 3] Link-in-bio URL: ${linktreeUrl}`)
 
   let allContent = ''
   let allEmails: string[] = []
@@ -504,19 +505,19 @@ async function step3_LinkInBio(
     const directResult = await directFetch(linktreeUrl)
 
     if (directResult.success && !isBlockedContent(directResult.html)) {
-      console.log(`[Step 3] Direct fetch success: ${directResult.html.length} chars`)
+      logger.info(`[Step 3] Direct fetch success: ${directResult.html.length} chars`)
       allContent = directResult.html
     } else {
       // Fallback to Apify website-content-crawler
-      console.log('[Step 3] Direct fetch blocked/empty, using Apify website-content-crawler')
+      logger.info('[Step 3] Direct fetch blocked/empty, using Apify website-content-crawler')
       const apifyResult = await apifyFetchWebPage(linktreeUrl, 3)
       if (apifyResult.success) {
         allContent = apifyResult.text || apifyResult.html
         apifyUsed = true
         apifyActor = apifyResult.actorUsed
-        console.log(`[Step 3] Apify success: ${allContent.length} chars`)
+        logger.info(`[Step 3] Apify success: ${allContent.length} chars`)
       } else {
-        console.log(`[Step 3] Apify failed: ${apifyResult.error}`)
+        logger.info(`[Step 3] Apify failed: ${apifyResult.error}`)
         return { ...empty, url: linktreeUrl, apifyActor: apifyResult.actorUsed, errorDetails: apifyResult.errorDetails }
       }
     }
@@ -557,7 +558,7 @@ async function step3_LinkInBio(
     for (const contactUrl of contactLinks.slice(0, 2)) {
       try {
         await delay(500)
-        console.log(`[Step 3] Following contact link: ${contactUrl}`)
+        logger.info(`[Step 3] Following contact link: ${contactUrl}`)
         const contactResult = await directFetch(contactUrl)
         if (contactResult.success) {
           allContent += '\n\n' + contactResult.html
@@ -573,7 +574,7 @@ async function step3_LinkInBio(
     allEmails = Array.from(new Set(allEmails)).filter(e => validateEmailFormat(e))
 
     if (allEmails.length > 0) {
-      console.log(`[Step 3] Found emails: ${allEmails.join(', ')}`)
+      logger.info(`[Step 3] Found emails: ${allEmails.join(', ')}`)
       return {
         emails: allEmails, confidence: 0.75, url: linktreeUrl,
         rawContent: allContent, apifyUsed, apifyActor, wasBlocked: false,
@@ -608,10 +609,10 @@ If no email: {"email": "", "source": "none"}`
       }
     }
 
-    console.log('[Step 3] No email found in link-in-bio')
+    logger.info('[Step 3] No email found in link-in-bio')
     return { ...empty, url: linktreeUrl, rawContent: allContent, apifyUsed, apifyActor }
   } catch (error: any) {
-    console.error('[Step 3 Error]', error.message)
+    logger.error('[Step 3 Error]', error.message)
     return { ...empty, url: linktreeUrl }
   }
 }
@@ -632,23 +633,23 @@ async function step4_Website(
   const websiteUrl = findWebsiteUrl(artist)
 
   if (!websiteUrl) {
-    console.log('[Step 4] No website URL found, skipping')
+    logger.info('[Step 4] No website URL found, skipping')
     return empty
   }
 
   // Skip if it's a link-in-bio domain (already handled in Step 3)
   if (isLinktreeDomain(websiteUrl)) {
-    console.log('[Step 4] Website is a link-in-bio domain, already handled in Step 3')
+    logger.info('[Step 4] Website is a link-in-bio domain, already handled in Step 3')
     return empty
   }
 
   // Skip ticketing platforms
   if (isTicketingPlatform(websiteUrl)) {
-    console.log(`[Step 4] Skipping ticketing platform: ${websiteUrl}`)
+    logger.info(`[Step 4] Skipping ticketing platform: ${websiteUrl}`)
     return empty
   }
 
-  console.log(`[Step 4] Website URL: ${websiteUrl}`)
+  logger.info(`[Step 4] Website URL: ${websiteUrl}`)
 
   let allContent = ''
   let allEmails: string[] = []
@@ -662,18 +663,18 @@ async function step4_Website(
 
     if (directResult.success && !isBlockedContent(directResult.html)) {
       html = directResult.html
-      console.log(`[Step 4] Direct fetch success: ${html.length} chars`)
+      logger.info(`[Step 4] Direct fetch success: ${html.length} chars`)
     } else {
       // Fallback to Apify
-      console.log('[Step 4] Direct fetch blocked/empty, using Apify website-content-crawler')
+      logger.info('[Step 4] Direct fetch blocked/empty, using Apify website-content-crawler')
       const apifyResult = await apifyFetchWebPage(websiteUrl, 5)
       if (apifyResult.success) {
         html = apifyResult.text || apifyResult.html
         apifyUsed = true
         apifyActor = apifyResult.actorUsed
-        console.log(`[Step 4] Apify success: ${html.length} chars`)
+        logger.info(`[Step 4] Apify success: ${html.length} chars`)
       } else {
-        console.log(`[Step 4] Apify failed: ${apifyResult.error}`)
+        logger.info(`[Step 4] Apify failed: ${apifyResult.error}`)
         return { ...empty, url: websiteUrl, apifyActor: apifyResult.actorUsed, errorDetails: apifyResult.errorDetails }
       }
     }
@@ -735,7 +736,7 @@ async function step4_Website(
     for (const subUrl of Array.from(new Set(subpageUrls)).slice(0, 4)) {
       try {
         await delay(500)
-        console.log(`[Step 4] Fetching subpage: ${subUrl}`)
+        logger.info(`[Step 4] Fetching subpage: ${subUrl}`)
         const subResult = await directFetch(subUrl)
         if (subResult.success) {
           allContent += '\n\n' + subResult.html
@@ -763,7 +764,7 @@ async function step4_Website(
     allEmails = Array.from(new Set(allEmails)).filter(e => validateEmailFormat(e))
 
     if (allEmails.length > 0) {
-      console.log(`[Step 4] Found emails: ${allEmails.join(', ')}`)
+      logger.info(`[Step 4] Found emails: ${allEmails.join(', ')}`)
       return {
         emails: allEmails, confidence: 0.8, url: websiteUrl,
         rawContent: allContent, apifyUsed, apifyActor, wasBlocked: false,
@@ -796,10 +797,10 @@ If no email: {"email": "", "source": "none"}`
       }
     }
 
-    console.log('[Step 4] No email found on website')
+    logger.info('[Step 4] No email found on website')
     return { ...empty, url: websiteUrl, rawContent: allContent, apifyUsed, apifyActor }
   } catch (error: any) {
-    console.error('[Step 4 Error]', error.message)
+    logger.error('[Step 4 Error]', error.message)
     return { ...empty, url: websiteUrl }
   }
 }
@@ -814,7 +815,7 @@ async function step5_Facebook(
   emails: string[]; confidence: number; url: string; rawContent: string;
   apifyUsed: boolean; apifyActor: string; wasBlocked: boolean
 }> {
-  console.log('[Step 5] Facebook — skipped (requires login, unreliable)')
+  logger.info('[Step 5] Facebook — skipped (requires login, unreliable)')
   return {
     emails: [], confidence: 0, url: '', rawContent: '',
     apifyUsed: false, apifyActor: 'skipped', wasBlocked: false,
@@ -831,7 +832,7 @@ async function step6_RemainingSocials(
   emails: string[]; confidence: number; url: string; rawContent: string;
   apifyUsed: boolean; apifyActor: string; wasBlocked: boolean
 }> {
-  console.log('[Step 6] Remaining socials — skipped (Twitter/Spotify/TikTok block scraping)')
+  logger.info('[Step 6] Remaining socials — skipped (Twitter/Spotify/TikTok block scraping)')
   return {
     emails: [], confidence: 0, url: '', rawContent: '',
     apifyUsed: false, apifyActor: 'skipped', wasBlocked: false,
@@ -926,17 +927,17 @@ async function step7_PerplexityYouTubeDeepDive(
 
   const perplexityKey = process.env.PERPLEXITY_API_KEY
   if (!perplexityKey) {
-    console.log('[Step 7] No PERPLEXITY_API_KEY configured, skipping YouTube deep dive')
+    logger.info('[Step 7] No PERPLEXITY_API_KEY configured, skipping YouTube deep dive')
     return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
   }
 
   const youtubeUrl = discoveredYouTubeUrl || findYouTubeUrl(artist)
   if (!youtubeUrl) {
-    console.log('[Step 7] No YouTube URL available, skipping deep dive')
+    logger.info('[Step 7] No YouTube URL available, skipping deep dive')
     return { ...empty, errorDetails: 'No YouTube URL available for deep dive' }
   }
 
-  console.log(`[Step 7] Perplexity YouTube Deep Dive — "${artist.name}" → ${youtubeUrl}`)
+  logger.info(`[Step 7] Perplexity YouTube Deep Dive — "${artist.name}" → ${youtubeUrl}`)
 
   const userPrompt = `Find business contact information for the music artist "${artist.name}".
 
@@ -967,7 +968,7 @@ Start by visiting their YouTube channel and extract all available contact inform
     if (!res.ok) {
       const errorText = await res.text()
       const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
-      console.error(`[Step 7] API error: ${errorDetail}`)
+      logger.error(`[Step 7] API error: ${errorDetail}`)
       return { ...empty, url: youtubeUrl, errorDetails: errorDetail }
     }
 
@@ -975,13 +976,13 @@ Start by visiting their YouTube channel and extract all available contact inform
     const content = data.choices?.[0]?.message?.content || ''
     const citations: string[] = data.citations || []
 
-    console.log(`[Step 7] Perplexity deep dive response: "${content.slice(0, 300)}"`)
+    logger.info(`[Step 7] Perplexity deep dive response: "${content.slice(0, 300)}"`)
     if (citations.length > 0) {
-      console.log(`[Step 7] Citations: ${citations.slice(0, 3).join(', ')}`)
+      logger.info(`[Step 7] Citations: ${citations.slice(0, 3).join(', ')}`)
     }
 
     const deepDive = parseDeepDiveResponse(content)
-    console.log(`[Step 7] Parsed: email=${deepDive.email}, source=${deepDive.emailSource}, website=${deepDive.website}, mgmt=${deepDive.management}, agent=${deepDive.bookingAgent}`)
+    logger.info(`[Step 7] Parsed: email=${deepDive.email}, source=${deepDive.emailSource}, website=${deepDive.website}, mgmt=${deepDive.management}, agent=${deepDive.bookingAgent}`)
 
     // Collect all emails from the deep dive
     const allFoundEmails: string[] = []
@@ -996,7 +997,7 @@ Start by visiting their YouTube channel and extract all available contact inform
     }
 
     if (allFoundEmails.length > 0) {
-      console.log(`[Step 7] YouTube deep dive found emails: ${allFoundEmails.join(', ')}`)
+      logger.info(`[Step 7] YouTube deep dive found emails: ${allFoundEmails.join(', ')}`)
       return {
         emails: allFoundEmails,
         confidence: 0.75,
@@ -1009,10 +1010,10 @@ Start by visiting their YouTube channel and extract all available contact inform
       }
     }
 
-    console.log('[Step 7] YouTube deep dive: no valid email found')
+    logger.info('[Step 7] YouTube deep dive: no valid email found')
     return { ...empty, url: youtubeUrl, rawContent: content, deepDiveResult: deepDive }
   } catch (error: any) {
-    console.error(`[Step 7] Perplexity YouTube deep dive error:`, error.message)
+    logger.error(`[Step 7] Perplexity YouTube deep dive error:`, error.message)
     return { ...empty, url: youtubeUrl, errorDetails: error.message }
   }
 }
@@ -1127,17 +1128,17 @@ async function step8_PerplexityInstagramDeepDive(
 
   const perplexityKey = process.env.PERPLEXITY_API_KEY
   if (!perplexityKey) {
-    console.log('[Step 8] No PERPLEXITY_API_KEY configured, skipping Instagram deep dive')
+    logger.info('[Step 8] No PERPLEXITY_API_KEY configured, skipping Instagram deep dive')
     return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
   }
 
   const instagramUrl = findInstagramUrl(artist)
   if (!instagramUrl) {
-    console.log('[Step 8] No Instagram URL available, skipping deep dive')
+    logger.info('[Step 8] No Instagram URL available, skipping deep dive')
     return { ...empty, errorDetails: 'No Instagram URL available for deep dive' }
   }
 
-  console.log(`[Step 8] Perplexity Instagram Deep Dive — "${artist.name}" → ${instagramUrl}`)
+  logger.info(`[Step 8] Perplexity Instagram Deep Dive — "${artist.name}" → ${instagramUrl}`)
 
   let userPrompt = `Find business contact information for the music artist "${artist.name}".
 
@@ -1171,7 +1172,7 @@ Instagram: ${instagramUrl}`
     if (!res.ok) {
       const errorText = await res.text()
       const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
-      console.error(`[Step 8] API error: ${errorDetail}`)
+      logger.error(`[Step 8] API error: ${errorDetail}`)
       return { ...empty, url: instagramUrl, errorDetails: errorDetail }
     }
 
@@ -1179,13 +1180,13 @@ Instagram: ${instagramUrl}`
     const content = data.choices?.[0]?.message?.content || ''
     const citations: string[] = data.citations || []
 
-    console.log(`[Step 8] Perplexity IG deep dive response: "${content.slice(0, 300)}"`)
+    logger.info(`[Step 8] Perplexity IG deep dive response: "${content.slice(0, 300)}"`)
     if (citations.length > 0) {
-      console.log(`[Step 8] Citations: ${citations.slice(0, 3).join(', ')}`)
+      logger.info(`[Step 8] Citations: ${citations.slice(0, 3).join(', ')}`)
     }
 
     const igResult = parseInstagramDeepDiveResponse(content)
-    console.log(`[Step 8] Parsed: email=${igResult.email}, source=${igResult.emailSource}, website=${igResult.website}, linktree=${igResult.linktreeUrl}, mgmt=${igResult.management}, agent=${igResult.bookingAgent}`)
+    logger.info(`[Step 8] Parsed: email=${igResult.email}, source=${igResult.emailSource}, website=${igResult.website}, linktree=${igResult.linktreeUrl}, mgmt=${igResult.management}, agent=${igResult.bookingAgent}`)
 
     const allFoundEmails: string[] = []
     if (igResult.email && validatePerplexityEmail(igResult.email)) {
@@ -1199,7 +1200,7 @@ Instagram: ${instagramUrl}`
     }
 
     if (allFoundEmails.length > 0) {
-      console.log(`[Step 8] Instagram deep dive found emails: ${allFoundEmails.join(', ')}`)
+      logger.info(`[Step 8] Instagram deep dive found emails: ${allFoundEmails.join(', ')}`)
       return {
         emails: allFoundEmails,
         confidence: 0.75,
@@ -1212,10 +1213,10 @@ Instagram: ${instagramUrl}`
       }
     }
 
-    console.log('[Step 8] Instagram deep dive: no valid email found')
+    logger.info('[Step 8] Instagram deep dive: no valid email found')
     return { ...empty, url: instagramUrl, rawContent: content, igDeepDiveResult: igResult }
   } catch (error: any) {
-    console.error(`[Step 8] Perplexity Instagram deep dive error:`, error.message)
+    logger.error(`[Step 8] Perplexity Instagram deep dive error:`, error.message)
     return { ...empty, url: instagramUrl, errorDetails: error.message }
   }
 }
@@ -1289,11 +1290,11 @@ async function step9_PerplexityGeneric(
 
   const perplexityKey = process.env.PERPLEXITY_API_KEY
   if (!perplexityKey) {
-    console.log('[Step 9] No PERPLEXITY_API_KEY configured, skipping')
+    logger.info('[Step 9] No PERPLEXITY_API_KEY configured, skipping')
     return { ...empty, errorDetails: 'No PERPLEXITY_API_KEY configured' }
   }
 
-  console.log(`[Step 9] Perplexity Sonar Pro — generic web search for "${artist.name}" email`)
+  logger.info(`[Step 9] Perplexity Sonar Pro — generic web search for "${artist.name}" email`)
 
   try {
     const res = await fetch('https://api.perplexity.ai/chat/completions', {
@@ -1317,7 +1318,7 @@ async function step9_PerplexityGeneric(
     if (!res.ok) {
       const errorText = await res.text()
       const errorDetail = `Perplexity HTTP ${res.status}: ${errorText.slice(0, 300)}`
-      console.error(`[Step 9] API error: ${errorDetail}`)
+      logger.error(`[Step 9] API error: ${errorDetail}`)
       return { ...empty, errorDetails: errorDetail }
     }
 
@@ -1325,21 +1326,21 @@ async function step9_PerplexityGeneric(
     const content = data.choices?.[0]?.message?.content || ''
     const citations: string[] = data.citations || []
 
-    console.log(`[Step 9] Perplexity response: "${content.slice(0, 200)}"`)
+    logger.info(`[Step 9] Perplexity response: "${content.slice(0, 200)}"`)
     if (citations.length > 0) {
-      console.log(`[Step 9] Citations: ${citations.slice(0, 3).join(', ')}`)
+      logger.info(`[Step 9] Citations: ${citations.slice(0, 3).join(', ')}`)
     }
 
     // Check for NO_EMAIL_FOUND
     if (content.includes('NO_EMAIL_FOUND') || !content.includes('@')) {
-      console.log('[Step 9] Perplexity generic: no email found')
+      logger.info('[Step 9] Perplexity generic: no email found')
       return { ...empty, rawContent: content, citations }
     }
 
     // Extract and validate email
     const email = extractPerplexityEmail(content)
     if (email && validatePerplexityEmail(email)) {
-      console.log(`[Step 9] Perplexity generic found email: ${email}`)
+      logger.info(`[Step 9] Perplexity generic found email: ${email}`)
       return {
         emails: [email],
         confidence: 0.65,
@@ -1352,10 +1353,10 @@ async function step9_PerplexityGeneric(
       }
     }
 
-    console.log(`[Step 9] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
+    logger.info(`[Step 9] Perplexity returned invalid email: ${email || content.slice(0, 50)}`)
     return { ...empty, rawContent: content, errorDetails: `Invalid email extracted: ${email || 'none'}`, citations }
   } catch (error: any) {
-    console.error(`[Step 9] Perplexity error:`, error.message)
+    logger.error(`[Step 9] Perplexity error:`, error.message)
     return { ...empty, errorDetails: error.message }
   }
 }
@@ -1400,11 +1401,11 @@ export async function enrichArtist(
   let discoveredManagement: string | undefined = undefined
   let discoveredBookingAgent: string | undefined = undefined
 
-  console.log(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
-  console.log(`[Enrichment] YOUTUBE_API_KEY present: ${!!process.env.YOUTUBE_API_KEY}`)
-  console.log(`[Enrichment] APIFY_TOKEN present: ${!!process.env.APIFY_TOKEN}`)
-  console.log(`[Enrichment] PERPLEXITY_API_KEY present: ${!!process.env.PERPLEXITY_API_KEY}`)
-  console.log(`[Enrichment] Social links:`, JSON.stringify(artist.social_links || {}))
+  logger.info(`\n[Enrichment Start] Artist: ${artist.name} (${artist.id})`)
+  logger.info(`[Enrichment] YOUTUBE_API_KEY present: ${!!process.env.YOUTUBE_API_KEY}`)
+  logger.info(`[Enrichment] APIFY_TOKEN present: ${!!process.env.APIFY_TOKEN}`)
+  logger.info(`[Enrichment] PERPLEXITY_API_KEY present: ${!!process.env.PERPLEXITY_API_KEY}`)
+  logger.info(`[Enrichment] Social links:`, JSON.stringify(artist.social_links || {}))
 
   for (let i = 0; i < steps.length; i++) {
     const step = steps[i]
@@ -1505,7 +1506,7 @@ export async function enrichArtist(
           step.rejected_emails = rejected
 
           for (const r of rejected) {
-            console.log(`[Step 0] Email REJECTED: ${r.email} — ${r.reason}`)
+            logger.info(`[Step 0] Email REJECTED: ${r.email} — ${r.reason}`)
             allRejectedEmails.push({ email: r.email, source: 'youtube_discovery', reason: r.reason })
           }
 
@@ -1515,7 +1516,7 @@ export async function enrichArtist(
           if (valid.length > 0) {
             step.status = 'success'
             step.best_email = valid[0]
-            console.log(`[Step 0 Success] Found valid email in YouTube description: ${valid.join(', ')}`)
+            logger.info(`[Step 0 Success] Found valid email in YouTube description: ${valid.join(', ')}`)
 
             for (const email of valid) {
               allEmails.push({ email, source: 'youtube_discovery', confidence: result.confidence })
@@ -1529,7 +1530,7 @@ export async function enrichArtist(
             onProgress?.(step, i)
 
             // Early termination — valid email found
-            console.log('[Early Termination] Valid email found in YouTube description, skipping remaining steps')
+            logger.info('[Early Termination] Valid email found in YouTube description, skipping remaining steps')
             for (let j = i + 1; j < steps.length; j++) {
               steps[j].status = 'skipped'
             }
@@ -1538,14 +1539,14 @@ export async function enrichArtist(
             // All emails were rejected — continue to next step
             step.status = 'failed'
             step.error_details = `Found ${rejected.length} email(s) but all rejected by quality filter`
-            console.log(`[Step 0] All ${rejected.length} email(s) rejected — continuing pipeline`)
+            logger.info(`[Step 0] All ${rejected.length} email(s) rejected — continuing pipeline`)
           }
         } else if (discoveredYouTubeUrl) {
           step.status = 'success'
-          console.log(`[Step 0] YouTube channel discovered: ${discoveredYouTubeUrl} — proceeding to Step 1 for deep extraction`)
+          logger.info(`[Step 0] YouTube channel discovered: ${discoveredYouTubeUrl} — proceeding to Step 1 for deep extraction`)
         } else {
           step.status = 'failed'
-          console.log('[Step 0] No YouTube channel discovered')
+          logger.info('[Step 0] No YouTube channel discovered')
         }
         onProgress?.(step, i)
         continue
@@ -1565,7 +1566,7 @@ export async function enrichArtist(
         step.rejected_emails = rejected
 
         for (const r of rejected) {
-          console.log(`[Step ${i}] Email REJECTED: ${r.email} — ${r.reason}`)
+          logger.info(`[Step ${i}] Email REJECTED: ${r.email} — ${r.reason}`)
           allRejectedEmails.push({ email: r.email, source: step.method, reason: r.reason })
         }
 
@@ -1576,7 +1577,7 @@ export async function enrichArtist(
           step.status = 'success'
           step.best_email = valid[0]
 
-          console.log(`[Step ${i} Success] Found valid: ${valid.join(', ')} via ${step.apify_actor || 'direct'}`)
+          logger.info(`[Step ${i} Success] Found valid: ${valid.join(', ')} via ${step.apify_actor || 'direct'}`)
 
           for (const email of valid) {
             allEmails.push({ email, source: step.method, confidence: result.confidence })
@@ -1591,7 +1592,7 @@ export async function enrichArtist(
           onProgress?.(step, i)
 
           // Early termination — valid email found
-          console.log('[Early Termination] Valid email found, skipping remaining steps')
+          logger.info('[Early Termination] Valid email found, skipping remaining steps')
           for (let j = i + 1; j < steps.length; j++) {
             steps[j].status = 'skipped'
           }
@@ -1600,17 +1601,17 @@ export async function enrichArtist(
           // All emails were rejected — continue to next step
           step.status = 'failed'
           step.error_details = `Found ${rejected.length} email(s) but all rejected by quality filter`
-          console.log(`[Step ${i}] All ${rejected.length} email(s) rejected — continuing pipeline`)
+          logger.info(`[Step ${i}] All ${rejected.length} email(s) rejected — continuing pipeline`)
         }
       } else {
         step.status = 'failed'
-        console.log(`[Step ${i} Failed] No email found`)
+        logger.info(`[Step ${i} Failed] No email found`)
       }
     } catch (error: any) {
       step.status = 'failed'
       step.error = error.message
       step.duration_ms = Date.now() - stepStart
-      console.error(`[Step ${i} Error]`, error.message)
+      logger.error(`[Step ${i} Error]`, error.message)
     }
 
     onProgress?.(step, i)
@@ -1646,7 +1647,7 @@ export async function enrichArtist(
     discovered_booking_agent: discoveredBookingAgent,
   }
 
-  console.log(`[Enrichment Complete] ${bestEmail ? `Found: ${bestEmail}` : 'No email found'} (${summary.total_duration_ms}ms)\n`)
+  logger.info(`[Enrichment Complete] ${bestEmail ? `Found: ${bestEmail}` : 'No email found'} (${summary.total_duration_ms}ms)\n`)
 
   return summary
 }
@@ -1669,14 +1670,14 @@ export async function enrichBatch(
   const results: EnrichmentSummary[] = []
 
   for (let i = 0; i < artists.length; i++) {
-    console.log(`\n========== Enriching Artist ${i + 1}/${artists.length} ==========`)
+    logger.info(`\n========== Enriching Artist ${i + 1}/${artists.length} ==========`)
     const summary = await enrichArtist(artists[i], apiKeys)
     results.push(summary)
     onArtistComplete?.(summary, i, artists.length)
 
     // 3s between artists to avoid Apify concurrent run limits
     if (i < artists.length - 1) {
-      console.log(`[Rate Limiting] Waiting ${delayMs}ms before next artist...`)
+      logger.info(`[Rate Limiting] Waiting ${delayMs}ms before next artist...`)
       await delay(delayMs)
     }
   }

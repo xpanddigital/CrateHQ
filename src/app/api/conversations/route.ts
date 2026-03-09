@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 /**
  * Validate that a string looks like a safe thread key (email or UUID-like).
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
 
       const { data: messages, error } = await query
       if (error) {
-        console.error('[Conversations] Thread fetch error:', error)
+        logger.error('[Conversations] Thread fetch error:', error)
         return NextResponse.json({ error: 'Failed to fetch thread' }, { status: 500 })
       }
 
@@ -175,7 +176,7 @@ export async function GET(request: NextRequest) {
 
     const { data: allMessages, error } = await query
     if (error) {
-      console.error('[Conversations] List fetch error:', error)
+      logger.error('[Conversations] List fetch error:', error)
       return NextResponse.json({ error: 'Failed to fetch conversations' }, { status: 500 })
     }
 
@@ -282,7 +283,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ threads })
   } catch (error) {
-    console.error('[Conversations] Unhandled error:', error)
+    logger.error('[Conversations] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -324,7 +325,7 @@ export async function PATCH(request: NextRequest) {
     const { error } = await query.eq('read', false)
 
     if (error) {
-      console.error('[Conversations] Mark read error:', error)
+      logger.error('[Conversations] Mark read error:', error)
       return NextResponse.json({ error: 'Failed to mark as read' }, { status: 500 })
     }
 
@@ -339,7 +340,7 @@ export async function PATCH(request: NextRequest) {
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('[Conversations] PATCH error:', error)
+    logger.error('[Conversations] PATCH error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

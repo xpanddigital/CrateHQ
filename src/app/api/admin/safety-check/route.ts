@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -50,7 +51,7 @@ export async function GET(_request: NextRequest) {
       .lte('scheduled_date', endDate)
 
     if (postsError) {
-      console.error('[SafetyCheck] Posts error:', postsError)
+      logger.error('[SafetyCheck] Posts error:', postsError)
     }
 
     let accountNames: Record<string, string> = {}
@@ -134,7 +135,7 @@ export async function GET(_request: NextRequest) {
       )
 
     if (idError) {
-      console.error('[SafetyCheck] Identities error:', idError)
+      logger.error('[SafetyCheck] Identities error:', idError)
     }
 
     const hashtagOverlap: {
@@ -227,7 +228,7 @@ export async function GET(_request: NextRequest) {
       .select('topic_hash, title, ig_account_id')
 
     if (topicsError) {
-      console.error('[SafetyCheck] Topics error:', topicsError)
+      logger.error('[SafetyCheck] Topics error:', topicsError)
     }
 
     const topicDuplication: {
@@ -288,7 +289,7 @@ export async function GET(_request: NextRequest) {
       themeConflicts,
     })
   } catch (e: any) {
-    console.error('[SafetyCheck] Unhandled error:', e)
+    logger.error('[SafetyCheck] Unhandled error:', e)
     return NextResponse.json(
       { error: e.message || 'Internal server error' },
       { status: 500 }

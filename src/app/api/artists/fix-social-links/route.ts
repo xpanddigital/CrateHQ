@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 /**
  * One-time migration to populate social_links from individual URL columns
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to fetch artists' }, { status: 500 })
     }
 
-    console.log(`[Fix Social Links] Processing ${artists.length} artists...`)
+    logger.info(`[Fix Social Links] Processing ${artists.length} artists...`)
 
     let updated = 0
     let skipped = 0
@@ -64,22 +65,22 @@ export async function POST(request: NextRequest) {
             .eq('id', artist.id)
 
           if (updateError) {
-            console.error(`Error updating ${artist.name}:`, updateError)
+            logger.error(`Error updating ${artist.name}:`, updateError)
             errors.push({ artist_id: artist.id, artist_name: artist.name, error: updateError.message })
           } else {
-            console.log(`✅ Updated ${artist.name}: ${oldLinksCount} → ${newLinksCount} links`)
+            logger.info(`✅ Updated ${artist.name}: ${oldLinksCount} → ${newLinksCount} links`)
             updated++
           }
         } else {
           skipped++
         }
       } catch (err: any) {
-        console.error(`Error processing ${artist.name}:`, err)
+        logger.error(`Error processing ${artist.name}:`, err)
         errors.push({ artist_id: artist.id, artist_name: artist.name, error: err.message })
       }
     }
 
-    console.log(`[Fix Social Links] Complete: ${updated} updated, ${skipped} skipped, ${errors.length} errors`)
+    logger.info(`[Fix Social Links] Complete: ${updated} updated, ${skipped} skipped, ${errors.length} errors`)
 
     return NextResponse.json({
       success: true,
@@ -89,7 +90,7 @@ export async function POST(request: NextRequest) {
       errors,
     })
   } catch (error: any) {
-    console.error('Error fixing social links:', error)
+    logger.error('Error fixing social links:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fix social links' },
       { status: 500 }

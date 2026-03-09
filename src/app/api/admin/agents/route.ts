@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET() {
   try {
@@ -26,7 +27,7 @@ export async function GET() {
       .order('created_at', { ascending: true })
 
     if (accError) {
-      console.error('[Admin/Agents] Accounts fetch error:', accError)
+      logger.error('[Admin/Agents] Accounts fetch error:', accError)
       return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
     }
 
@@ -56,7 +57,7 @@ export async function GET() {
 
     return NextResponse.json({ agents })
   } catch (error) {
-    console.error('[Admin/Agents] Unhandled error:', error)
+    logger.error('[Admin/Agents] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -95,13 +96,13 @@ export async function PATCH(request: NextRequest) {
       .eq('id', account_id)
 
     if (error) {
-      console.error('[Admin/Agents] Toggle error:', error)
+      logger.error('[Admin/Agents] Toggle error:', error)
       return NextResponse.json({ error: 'Failed to update account' }, { status: 500 })
     }
 
     return NextResponse.json({ success: true })
   } catch (error) {
-    console.error('[Admin/Agents] PATCH error:', error)
+    logger.error('[Admin/Agents] PATCH error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }

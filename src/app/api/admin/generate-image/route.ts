@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { logger } from '@/lib/logger'
 
 const IMAGEN_ENDPOINT =
   'https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict'
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     if (!imagenRes.ok) {
       const text = await imagenRes.text()
-      console.error('[GenerateImage] Imagen error:', imagenRes.status, text)
+      logger.error('[GenerateImage] Imagen error:', imagenRes.status, text)
       return NextResponse.json(
         { error: 'Imagen API request failed', status: imagenRes.status },
         { status: 500 }
@@ -57,7 +58,7 @@ export async function POST(request: NextRequest) {
       imagenJson?.predictions?.[0]?.imageBytes
 
     if (!base64) {
-      console.error('[GenerateImage] No base64 image in response:', imagenJson)
+      logger.error('[GenerateImage] No base64 image in response:', imagenJson)
       return NextResponse.json(
         { error: 'Imagen API returned no image data' },
         { status: 500 }
@@ -76,7 +77,7 @@ export async function POST(request: NextRequest) {
       })
 
     if (uploadError) {
-      console.error('[GenerateImage] Supabase upload error:', uploadError)
+      logger.error('[GenerateImage] Supabase upload error:', uploadError)
       return NextResponse.json(
         { error: 'Failed to upload image to storage' },
         { status: 500 }
@@ -96,7 +97,7 @@ export async function POST(request: NextRequest) {
       .eq('id', postId)
 
     if (updateError) {
-      console.error('[GenerateImage] Update post error:', updateError)
+      logger.error('[GenerateImage] Update post error:', updateError)
       return NextResponse.json(
         { error: 'Failed to update post with image URL' },
         { status: 500 }
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, imageUrl: publicUrl })
   } catch (e: any) {
-    console.error('[GenerateImage] Error:', e)
+    logger.error('[GenerateImage] Error:', e)
     return NextResponse.json(
       { error: e.message || 'Internal server error' },
       { status: 500 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { startActorRun, getRunStatus, getDatasetItems } from '@/lib/apify/client'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -119,7 +120,7 @@ export async function POST(request: NextRequest) {
 
     throw new Error('Scraping timed out')
   } catch (error: any) {
-    console.error('Core data error:', error)
+    logger.error('Core data error:', error)
     return NextResponse.json(
       { error: error.message || 'Core data scraping failed' },
       { status: 500 }

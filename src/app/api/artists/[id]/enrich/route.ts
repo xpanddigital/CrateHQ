@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enrichAndSave } from '@/lib/enrichment/enrich-and-save'
+import { logger } from '@/lib/logger'
 
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -17,7 +19,7 @@ export async function POST(
     const { data: artist, error: fetchError } = await supabase
       .from('artists')
       .select('*')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (fetchError || !artist) {
@@ -28,7 +30,7 @@ export async function POST(
 
     return NextResponse.json(result)
   } catch (error: any) {
-    console.error('Error enriching artist:', error)
+    logger.error('Error enriching artist:', error)
     return NextResponse.json(
       { error: error.message || 'Enrichment failed' },
       { status: 500 }

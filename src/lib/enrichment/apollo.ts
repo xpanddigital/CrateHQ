@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger'
 // Apollo.io API client
 // Requires APOLLO_API_KEY environment variable
 
@@ -16,7 +17,7 @@ export async function searchPerson(
 ): Promise<ApolloContact[]> {
   const apiKey = process.env.APOLLO_API_KEY
   if (!apiKey) {
-    console.warn('APOLLO_API_KEY not configured')
+    logger.warn('APOLLO_API_KEY not configured')
     return []
   }
 
@@ -42,7 +43,7 @@ export async function searchPerson(
     const data = await res.json()
     return data.people || []
   } catch (error) {
-    console.error('Apollo.io error:', error)
+    logger.error('Apollo.io error:', error)
     return []
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       return await handleEmailSend(supabase, { artist_id, message_text, scout_id: scout_id || user.id })
     }
   } catch (error) {
-    console.error('[Messages/Send] Unhandled error:', error)
+    logger.error('[Messages/Send] Unhandled error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -84,7 +85,7 @@ async function handleInstagramSend(
   }
 
   if (lookupError) {
-    console.error('[Messages/Send] IG lookup error:', lookupError)
+    logger.error('[Messages/Send] IG lookup error:', lookupError)
     return NextResponse.json({ error: 'Failed to look up conversation thread' }, { status: 500 })
   }
 
@@ -110,7 +111,7 @@ async function handleInstagramSend(
     .single()
 
   if (queueError) {
-    console.error('[Messages/Send] IG queue error:', queueError)
+    logger.error('[Messages/Send] IG queue error:', queueError)
     return NextResponse.json({ error: 'Failed to queue Instagram message' }, { status: 500 })
   }
 
@@ -134,7 +135,7 @@ async function handleInstagramSend(
     .single()
 
   if (convoError) {
-    console.error('[Messages/Send] IG conversation insert error:', convoError)
+    logger.error('[Messages/Send] IG conversation insert error:', convoError)
     return NextResponse.json(
       { error: 'Message queued but failed to save conversation' },
       { status: 500 }
@@ -222,7 +223,7 @@ async function handleEmailSend(
       headers: { 'Authorization': `Bearer ${apiKey}` },
     })
     const accountsRaw = await accountsRes.text()
-    console.log(`[Messages/Send] Instantly accounts API ${accountsRes.status}: ${accountsRaw.slice(0, 500)}`)
+    logger.info(`[Messages/Send] Instantly accounts API ${accountsRes.status}: ${accountsRaw.slice(0, 500)}`)
 
     if (accountsRes.ok) {
       const accountsData = JSON.parse(accountsRaw)
@@ -231,7 +232,7 @@ async function handleEmailSend(
         .map((a: any) => (a.email || a.email_address || '').toLowerCase().trim())
         .filter(Boolean)
 
-      console.log(`[Messages/Send] Instantly accounts: [${allInstantlyAccounts.join(', ')}]`)
+      logger.info(`[Messages/Send] Instantly accounts: [${allInstantlyAccounts.join(', ')}]`)
 
       // Prefer the account that was used in prior conversation
       for (const convo of recentConvos || []) {
@@ -255,7 +256,7 @@ async function handleEmailSend(
       }
     }
   } catch (e) {
-    console.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
+    logger.error('[Messages/Send] Failed to fetch Instantly accounts:', e)
   }
 
   if (!eaccount) {
@@ -265,7 +266,7 @@ async function handleEmailSend(
     )
   }
 
-  console.log(`[Messages/Send] Using eaccount: ${eaccount}`)
+  logger.info(`[Messages/Send] Using eaccount: ${eaccount}`)
 
   // ── Step 5: Find reply_to_uuid from Instantly if we don't have one ──
   if (!replyToUuid) {
@@ -275,22 +276,22 @@ async function handleEmailSend(
         { headers: { 'Authorization': `Bearer ${apiKey}` } }
       )
       const searchRaw = await searchRes.text()
-      console.log(`[Messages/Send] Instantly emails search ${searchRes.status}: ${searchRaw.slice(0, 500)}`)
+      logger.info(`[Messages/Send] Instantly emails search ${searchRes.status}: ${searchRaw.slice(0, 500)}`)
 
       if (searchRes.ok) {
         const searchData = JSON.parse(searchRaw)
         const emails = searchData.items || []
         if (Array.isArray(emails) && emails.length > 0) {
           replyToUuid = emails[0].id || null
-          console.log(`[Messages/Send] Found reply_to_uuid: ${replyToUuid}, eaccount: ${emails[0].eaccount}, from: ${emails[0].from_address_email}`)
+          logger.info(`[Messages/Send] Found reply_to_uuid: ${replyToUuid}, eaccount: ${emails[0].eaccount}, from: ${emails[0].from_address_email}`)
         }
       }
     } catch (e) {
-      console.error('[Messages/Send] Instantly email search failed:', e)
+      logger.error('[Messages/Send] Instantly email search failed:', e)
     }
   }
 
-  console.log(`[Messages/Send] reply_to_uuid: ${replyToUuid || 'none'}`)
+  logger.info(`[Messages/Send] reply_to_uuid: ${replyToUuid || 'none'}`)
 
   // ── Step 6: Send via Instantly ──
   let instantlyResult: any = null
@@ -325,8 +326,8 @@ async function handleEmailSend(
       }
     }
 
-    console.log(`[Messages/Send] ${replyToUuid ? 'Replying' : 'Sending new'}: to=${artist.email}, from=${eaccount}, endpoint=${endpoint}`)
-    console.log(`[Messages/Send] Request body: ${JSON.stringify(requestBody).slice(0, 500)}`)
+    logger.info(`[Messages/Send] ${replyToUuid ? 'Replying' : 'Sending new'}: to=${artist.email}, from=${eaccount}, endpoint=${endpoint}`)
+    logger.info(`[Messages/Send] Request body: ${JSON.stringify(requestBody).slice(0, 500)}`)
 
     const res = await fetch(endpoint, {
       method: 'POST',
@@ -340,12 +341,12 @@ async function handleEmailSend(
     const result = await res.json()
 
     if (!res.ok) {
-      console.error(`[Messages/Send] Instantly ${res.status} error:`, JSON.stringify(result))
+      logger.error(`[Messages/Send] Instantly ${res.status} error:`, JSON.stringify(result))
       instantlyError = result?.message || result?.error || `${res.status} ${res.statusText}`
 
       // If reply fails with 404 (account not found), retry as new send
       if (res.status === 404 && replyToUuid) {
-        console.log('[Messages/Send] Reply failed with 404, retrying as new email send...')
+        logger.info('[Messages/Send] Reply failed with 404, retrying as new email send...')
         const retryBody = {
           eaccount,
           subject,
@@ -365,20 +366,20 @@ async function handleEmailSend(
         })
         const retryResult = await retryRes.json()
         if (retryRes.ok) {
-          console.log('[Messages/Send] Retry as new send succeeded')
+          logger.info('[Messages/Send] Retry as new send succeeded')
           instantlyResult = retryResult
           instantlyError = null
         } else {
-          console.error('[Messages/Send] Retry also failed:', JSON.stringify(retryResult))
+          logger.error('[Messages/Send] Retry also failed:', JSON.stringify(retryResult))
           instantlyError = retryResult?.message || retryResult?.error || `${retryRes.status}`
         }
       }
     } else {
       instantlyResult = result
-      console.log(`[Messages/Send] Instantly success: ${JSON.stringify(result).slice(0, 300)}`)
+      logger.info(`[Messages/Send] Instantly success: ${JSON.stringify(result).slice(0, 300)}`)
     }
   } catch (fetchError) {
-    console.error('[Messages/Send] Instantly fetch error:', fetchError)
+    logger.error('[Messages/Send] Instantly fetch error:', fetchError)
     instantlyError = String(fetchError)
   }
 
@@ -408,7 +409,7 @@ async function handleEmailSend(
     .single()
 
   if (convoError) {
-    console.error('[Messages/Send] CRITICAL: Conversation insert failed:', convoError)
+    logger.error('[Messages/Send] CRITICAL: Conversation insert failed:', convoError)
     return NextResponse.json({
       error: 'Failed to save message to database',
       instantly_error: instantlyError,
@@ -416,7 +417,7 @@ async function handleEmailSend(
     }, { status: 500 })
   }
 
-  console.log(`[Messages/Send] Conversation saved: ${conversation.id}, instantly_sent: ${!instantlyError}`)
+  logger.info(`[Messages/Send] Conversation saved: ${conversation.id}, instantly_sent: ${!instantlyError}`)
 
   // Return 200 with details — frontend should check instantly_error
   return NextResponse.json({

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 // GET /api/inbox - Get inbox items requiring attention
 export async function GET(request: NextRequest) {
@@ -51,7 +52,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ items: items || [] })
   } catch (error: any) {
-    console.error('Error fetching inbox:', error)
+    logger.error('Error fetching inbox:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch inbox' },
       { status: 500 }

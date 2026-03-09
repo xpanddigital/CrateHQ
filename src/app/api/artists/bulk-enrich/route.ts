@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enrichArtist } from '@/lib/enrichment/pipeline'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 300
 
@@ -46,19 +47,19 @@ export async function POST(request: NextRequest) {
     for (let i = 0; i < artists.length; i++) {
       const artist = artists[i]
 
-      console.log(`\n[Enrichment ${i + 1}/${artists.length}] Processing: ${artist.name}`)
-      console.log('- Social links:', JSON.stringify(artist.social_links || {}))
-      console.log('- Instagram:', artist.instagram_handle || 'None')
-      console.log('- Website:', artist.website || 'None')
-      console.log('- Biography:', artist.biography ? 'Yes' : 'No')
-      console.log('- APIFY_TOKEN present:', !!process.env.APIFY_TOKEN)
+      logger.info(`\n[Enrichment ${i + 1}/${artists.length}] Processing: ${artist.name}`)
+      logger.info('- Social links:', JSON.stringify(artist.social_links || {}))
+      logger.info('- Instagram:', artist.instagram_handle || 'None')
+      logger.info('- Website:', artist.website || 'None')
+      logger.info('- Biography:', artist.biography ? 'Yes' : 'No')
+      logger.info('- APIFY_TOKEN present:', !!process.env.APIFY_TOKEN)
 
       try {
-        console.log('[Bulk Enrich] About to call enrichArtist...')
+        logger.info('[Bulk Enrich] About to call enrichArtist...')
         const result = await enrichArtist(artist, apiKeys)
-        console.log('[Bulk Enrich] enrichArtist returned')
+        logger.info('[Bulk Enrich] enrichArtist returned')
 
-        console.log('- Result:', {
+        logger.info('- Result:', {
           email_found: result.email_found || 'None',
           confidence: result.email_confidence,
           source: result.email_source || 'None',
@@ -68,9 +69,9 @@ export async function POST(request: NextRequest) {
         // Log each step's result
         result.steps.forEach((step, idx) => {
           if (step.status !== 'skipped') {
-            console.log(`  Step ${idx + 1} (${step.label}): ${step.status} - ${step.emails_found.length} emails`)
+            logger.info(`  Step ${idx + 1} (${step.label}): ${step.status} - ${step.emails_found.length} emails`)
             if (step.error) {
-              console.log(`    Error: ${step.error}`)
+              logger.info(`    Error: ${step.error}`)
             }
           }
         })
@@ -94,7 +95,7 @@ export async function POST(request: NextRequest) {
           .eq('id', artist.id)
 
         if (updateError) {
-          console.error(`[Bulk Enrich] Failed to save artist ${artist.id}:`, updateError.message)
+          logger.error(`[Bulk Enrich] Failed to save artist ${artist.id}:`, updateError.message)
           errors.push({
             artist_id: artist.id,
             artist_name: artist.name,
@@ -138,7 +139,7 @@ export async function POST(request: NextRequest) {
           })
 
         if (logError) {
-          console.error(`[Bulk Enrich] Failed to save log for ${artist.name}:`, logError.message, logError.details, logError.hint)
+          logger.error(`[Bulk Enrich] Failed to save log for ${artist.name}:`, logError.message, logError.details, logError.hint)
         }
 
         // Delay between requests (1 second)
@@ -149,7 +150,7 @@ export async function POST(request: NextRequest) {
         // Retry once after a 2s backoff on transient errors
         const isTransient = err.message?.includes('timeout') || err.message?.includes('ECONNRESET') || err.message?.includes('fetch failed') || err.message?.includes('503')
         if (isTransient) {
-          console.warn(`[Bulk Enrich] Transient error for ${artist.name}, retrying in 2s...`)
+          logger.warn(`[Bulk Enrich] Transient error for ${artist.name}, retrying in 2s...`)
           await new Promise(resolve => setTimeout(resolve, 2000))
           try {
             const retryResult = await enrichArtist(artist, apiKeys)
@@ -170,11 +171,11 @@ export async function POST(request: NextRequest) {
             if (i < artists.length - 1) await new Promise(resolve => setTimeout(resolve, 1000))
             continue
           } catch (retryErr: any) {
-            console.error(`[Bulk Enrich] Retry also failed for ${artist.name}:`, retryErr.message)
+            logger.error(`[Bulk Enrich] Retry also failed for ${artist.name}:`, retryErr.message)
           }
         }
 
-        console.error(`- Error enriching ${artist.name}:`, err.message)
+        logger.error(`- Error enriching ${artist.name}:`, err.message)
         errors.push({
           artist_id: artist.id,
           artist_name: artist.name,
@@ -196,7 +197,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    console.log(`\n[Enrichment Complete] Total: ${artists.length}, Found emails: ${results.filter(r => r.success).length}`)
+    logger.info(`\n[Enrichment Complete] Total: ${artists.length}, Found emails: ${results.filter(r => r.success).length}`)
 
     return NextResponse.json({
       success: true,
@@ -208,7 +209,7 @@ export async function POST(request: NextRequest) {
       detailed_logs: detailedLogs,
     })
   } catch (error: any) {
-    console.error('Error bulk enriching artists:', error)
+    logger.error('Error bulk enriching artists:', error)
     return NextResponse.json(
       { error: error.message || 'Bulk enrichment failed' },
       { status: 500 }

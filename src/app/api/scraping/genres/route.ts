@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { startActorRun, getRunStatus, getDatasetItems } from '@/lib/apify/client'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
 
     throw new Error('Genre scraping timed out')
   } catch (error: any) {
-    console.error('Genre scraping error:', error)
+    logger.error('Genre scraping error:', error)
     return NextResponse.json(
       { error: error.message || 'Genre scraping failed' },
       { status: 500 }

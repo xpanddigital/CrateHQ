@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import Anthropic from '@anthropic-ai/sdk'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -24,7 +25,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (accountError && accountError.code !== 'PGRST116' && accountError.code !== '42703') {
-      console.error('[Generate Cold DM] Account fetch error:', accountError)
+      logger.error('[Generate Cold DM] Account fetch error:', accountError)
       return NextResponse.json({ error: 'Failed to fetch account limits' }, { status: 500 })
     }
 
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
       .gte('created_at', startOfDay.toISOString())
 
     if (countError) {
-      console.error('[Generate Cold DM] Count error:', countError)
+      logger.error('[Generate Cold DM] Count error:', countError)
       return NextResponse.json({ error: 'Failed to verify daily limit' }, { status: 500 })
     }
 
@@ -62,7 +63,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (artistError || !artist) {
-      console.error('[Generate Cold DM] Artist fetch error:', artistError)
+      logger.error('[Generate Cold DM] Artist fetch error:', artistError)
       return NextResponse.json({ error: 'Artist not found' }, { status: 404 })
     }
 
@@ -150,7 +151,7 @@ EXAMPLE TONE (do not copy these, just match the energy):
       .single()
 
     if (insertError) {
-      console.error('[Generate Cold DM] Insert error:', insertError)
+      logger.error('[Generate Cold DM] Insert error:', insertError)
       return NextResponse.json(
         { error: 'Failed to queue the cold DM' },
         { status: 500 }
@@ -163,7 +164,7 @@ EXAMPLE TONE (do not copy these, just match the energy):
       pending_message_id: pendingMsg.id,
     })
   } catch (error: any) {
-    console.error('[Generate Cold DM] Unhandled error:', error)
+    logger.error('[Generate Cold DM] Unhandled error:', error)
     return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 })
   }
 }

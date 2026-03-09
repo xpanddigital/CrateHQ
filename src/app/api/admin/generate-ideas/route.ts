@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 60
 
@@ -44,7 +45,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (idError || !identity) {
-      console.error('[GenerateIdeas] Identity error:', idError)
+      logger.error('[GenerateIdeas] Identity error:', idError)
       return NextResponse.json({ error: 'Identity not found' }, { status: 404 })
     }
 
@@ -207,7 +208,7 @@ Return STRICT JSON:
         }
       }
     } catch (e) {
-      console.error('[GenerateIdeas] JSON parse error:', e, text)
+      logger.error('[GenerateIdeas] JSON parse error:', e, text)
     }
 
     // Stats for selected account
@@ -228,7 +229,7 @@ Return STRICT JSON:
       stats: { carousels, singles },
     })
   } catch (e: any) {
-    console.error('[GenerateIdeas] Error:', e)
+    logger.error('[GenerateIdeas] Error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }

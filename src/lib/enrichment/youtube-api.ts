@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger'
 /**
  * YouTube Data API v3 — Channel Discovery
  *
@@ -102,14 +103,14 @@ async function searchYouTubeChannels(
   })
 
   const url = `${YT_API_BASE}/search?${params}`
-  console.log(`[YouTube API] Search: "${query}" (max ${maxResults})`)
+  logger.info(`[YouTube API] Search: "${query}" (max ${maxResults})`)
 
   try {
     const res = await fetch(url)
     const bodyText = await res.text()
 
     if (!res.ok) {
-      console.error(`[YouTube API] Search failed: HTTP ${res.status}, Body: ${bodyText.slice(0, 300)}`)
+      logger.error(`[YouTube API] Search failed: HTTP ${res.status}, Body: ${bodyText.slice(0, 300)}`)
       return { results: [], error: `YouTube API HTTP ${res.status}: ${bodyText.slice(0, 200)}` }
     }
 
@@ -121,7 +122,7 @@ async function searchYouTubeChannels(
     }
 
     const items = data.items || []
-    console.log(`[YouTube API] Found ${items.length} channels for "${query}"`)
+    logger.info(`[YouTube API] Found ${items.length} channels for "${query}"`)
 
     return {
       results: items.map((item: any) => ({
@@ -132,7 +133,7 @@ async function searchYouTubeChannels(
       })),
     }
   } catch (error: any) {
-    console.error(`[YouTube API] Search error:`, error.message)
+    logger.error(`[YouTube API] Search error:`, error.message)
     return { results: [], error: error.message }
   }
 }
@@ -152,14 +153,14 @@ async function getChannelDetails(
   })
 
   const url = `${YT_API_BASE}/channels?${params}`
-  console.log(`[YouTube API] Getting channel details for: ${channelId}`)
+  logger.info(`[YouTube API] Getting channel details for: ${channelId}`)
 
   try {
     const res = await fetch(url)
     const bodyText = await res.text()
 
     if (!res.ok) {
-      console.error(`[YouTube API] Channel details failed: HTTP ${res.status}`)
+      logger.error(`[YouTube API] Channel details failed: HTTP ${res.status}`)
       return null
     }
 
@@ -186,7 +187,7 @@ async function getChannelDetails(
       publishedAt: item.snippet?.publishedAt || '',
     }
   } catch (error: any) {
-    console.error(`[YouTube API] Channel details error:`, error.message)
+    logger.error(`[YouTube API] Channel details error:`, error.message)
     return null
   }
 }
@@ -252,17 +253,17 @@ If no good match: {"channelId": "", "confidence": 0, "reasoning": "No matching c
     if (match) {
       try {
         const parsed = JSON.parse(match[0])
-        console.log(`[Haiku Verify] Result: channelId=${parsed.channelId}, confidence=${parsed.confidence}, reason="${parsed.reasoning}"`)
+        logger.info(`[Haiku Verify] Result: channelId=${parsed.channelId}, confidence=${parsed.confidence}, reason="${parsed.reasoning}"`)
         return parsed
       } catch {
-        console.warn(`[Haiku Verify] Failed to parse JSON: ${match[0].slice(0, 200)}`)
+        logger.warn(`[Haiku Verify] Failed to parse JSON: ${match[0].slice(0, 200)}`)
         return null
       }
     }
 
     return null
   } catch (error: any) {
-    console.error(`[Haiku Verify] Error:`, error.message)
+    logger.error(`[Haiku Verify] Error:`, error.message)
     return null
   }
 }
@@ -283,7 +284,7 @@ async function resolveChannelId(
   const handleMatch = youtubeUrl.match(/youtube\.com\/(@[a-zA-Z0-9._-]+|c\/[a-zA-Z0-9._-]+|user\/[a-zA-Z0-9._-]+)/)
   if (handleMatch) {
     const handle = handleMatch[1]
-    console.log(`[YouTube API] Resolving handle "${handle}" to channel ID`)
+    logger.info(`[YouTube API] Resolving handle "${handle}" to channel ID`)
 
     // Use search to resolve handle → channel ID
     const query = handle.startsWith('@') ? handle.slice(1) : handle.replace(/^(c|user)\//, '')
@@ -302,7 +303,7 @@ async function resolveChannelId(
       const data = JSON.parse(await res.text())
       const channelId = data.items?.[0]?.snippet?.channelId || data.items?.[0]?.id?.channelId
       if (channelId) {
-        console.log(`[YouTube API] Resolved "${handle}" → ${channelId}`)
+        logger.info(`[YouTube API] Resolved "${handle}" → ${channelId}`)
         return channelId
       }
     } catch {
@@ -355,12 +356,12 @@ export async function fetchYouTubeDescription(
     return { ...empty, error: 'No YouTube API key configured' }
   }
 
-  console.log(`[YouTube API] Fetching description for existing URL: ${youtubeUrl}`)
+  logger.info(`[YouTube API] Fetching description for existing URL: ${youtubeUrl}`)
 
   const channelId = await resolveChannelId(youtubeUrl, apiKey)
 
   if (!channelId) {
-    console.log(`[YouTube API] Could not resolve channel ID from URL: ${youtubeUrl}`)
+    logger.info(`[YouTube API] Could not resolve channel ID from URL: ${youtubeUrl}`)
     return { ...empty, error: `Could not resolve channel ID from URL: ${youtubeUrl}` }
   }
 
@@ -371,7 +372,7 @@ export async function fetchYouTubeDescription(
   }
 
   const emails = extractEmailsFromText(channel.description)
-  console.log(`[YouTube API] Channel: "${channel.title}", Description: ${channel.description.length} chars, Emails found: ${emails.length}`)
+  logger.info(`[YouTube API] Channel: "${channel.title}", Description: ${channel.description.length} chars, Emails found: ${emails.length}`)
 
   return {
     success: true,
@@ -414,7 +415,7 @@ export async function discoverYouTubeChannel(
 
   // Build search query — artist name is primary, add "music" for disambiguation
   const searchQuery = `${artist.name} music artist`
-  console.log(`\n[YouTube Discovery] Starting for: "${artist.name}"`)
+  logger.info(`\n[YouTube Discovery] Starting for: "${artist.name}"`)
 
   // Pass 1: YouTube Data API search
   const searchResult = await searchYouTubeChannels(searchQuery, apiKeys.youtube, 5)
@@ -424,7 +425,7 @@ export async function discoverYouTubeChannel(
   }
 
   if (searchResult.results.length === 0) {
-    console.log(`[YouTube Discovery] No channels found for "${artist.name}"`)
+    logger.info(`[YouTube Discovery] No channels found for "${artist.name}"`)
     return { ...empty, searchQuery, error: 'No YouTube channels found' }
   }
 
@@ -444,7 +445,7 @@ export async function discoverYouTubeChannel(
     return { ...empty, searchQuery, candidatesFound: searchResult.results.length, error: 'Could not fetch channel details' }
   }
 
-  console.log(`[YouTube Discovery] Got details for ${detailedCandidates.length} candidates`)
+  logger.info(`[YouTube Discovery] Got details for ${detailedCandidates.length} candidates`)
 
   // Quick check: if the #1 result is an exact name match, high confidence without Haiku
   const topChannel = detailedCandidates[0].channel
@@ -463,7 +464,7 @@ export async function discoverYouTubeChannel(
 
     const emails = extractEmailsFromText(topChannel.description)
 
-    console.log(`[YouTube Discovery] Exact name match: "${topChannel.title}" → ${channelUrl}`)
+    logger.info(`[YouTube Discovery] Exact name match: "${topChannel.title}" → ${channelUrl}`)
     return {
       success: true,
       channel: topChannel,
@@ -478,7 +479,7 @@ export async function discoverYouTubeChannel(
   }
 
   // Pass 2: Haiku verification for ambiguous cases
-  console.log(`[YouTube Discovery] Multiple/ambiguous candidates — calling Haiku for verification`)
+  logger.info(`[YouTube Discovery] Multiple/ambiguous candidates — calling Haiku for verification`)
 
   const haikuResult = await verifyWithHaiku(artist, detailedCandidates, apiKeys.anthropic)
 
@@ -493,7 +494,7 @@ export async function discoverYouTubeChannel(
 
       const emails = extractEmailsFromText(ch.description)
 
-      console.log(`[YouTube Discovery] Haiku verified: "${ch.title}" (confidence: ${haikuResult.confidence}) → ${channelUrl}`)
+      logger.info(`[YouTube Discovery] Haiku verified: "${ch.title}" (confidence: ${haikuResult.confidence}) → ${channelUrl}`)
       return {
         success: true,
         channel: ch,
@@ -520,7 +521,7 @@ export async function discoverYouTubeChannel(
 
     const emails = extractEmailsFromText(topChannel.description)
 
-    console.log(`[YouTube Discovery] Fuzzy name match (Haiku uncertain): "${topChannel.title}" → ${channelUrl} (confidence: 0.6)`)
+    logger.info(`[YouTube Discovery] Fuzzy name match (Haiku uncertain): "${topChannel.title}" → ${channelUrl} (confidence: 0.6)`)
     return {
       success: true,
       channel: topChannel,
@@ -534,7 +535,7 @@ export async function discoverYouTubeChannel(
     }
   }
 
-  console.log(`[YouTube Discovery] No confident match found for "${artist.name}"`)
+  logger.info(`[YouTube Discovery] No confident match found for "${artist.name}"`)
   return {
     ...empty,
     searchQuery,

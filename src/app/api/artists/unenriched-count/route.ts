@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 /**
  * Get count of artists without emails (unenriched)
@@ -24,7 +25,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ count: count || 0 })
   } catch (error: any) {
-    console.error('Error fetching unenriched count:', error)
+    logger.error('Error fetching unenriched count:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch count' },
       { status: 500 }

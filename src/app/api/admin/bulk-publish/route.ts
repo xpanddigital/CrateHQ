@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 300
 
@@ -45,7 +46,7 @@ export async function POST(request: NextRequest) {
     const { data: posts, error: postsError } = await query
 
     if (postsError) {
-      console.error('[BulkPublish] Query error:', postsError)
+      logger.error('[BulkPublish] Query error:', postsError)
       return NextResponse.json({ error: 'Failed to load scheduled posts' }, { status: 500 })
     }
 
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ published, failed, errors })
   } catch (e: any) {
-    console.error('[BulkPublish] Unhandled error:', e)
+    logger.error('[BulkPublish] Unhandled error:', e)
     return NextResponse.json(
       { error: e.message || 'Internal server error' },
       { status: 500 }

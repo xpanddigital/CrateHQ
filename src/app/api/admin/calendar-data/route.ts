@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -52,7 +53,7 @@ export async function GET(request: NextRequest) {
     const { data: posts, error: postsError } = await postsQuery
 
     if (postsError) {
-      console.error('[Admin/CalendarData] Posts error:', postsError)
+      logger.error('[Admin/CalendarData] Posts error:', postsError)
       return NextResponse.json({ error: 'Failed to load posts' }, { status: 500 })
     }
 
@@ -72,7 +73,7 @@ export async function GET(request: NextRequest) {
         .in('id', identityIds)
 
       if (idError) {
-        console.error('[Admin/CalendarData] Identities error:', idError)
+        logger.error('[Admin/CalendarData] Identities error:', idError)
       } else {
         for (const row of identities || []) {
           identitiesMap[row.id] = {
@@ -91,7 +92,7 @@ export async function GET(request: NextRequest) {
       end: endIso,
     })
   } catch (e: any) {
-    console.error('[Admin/CalendarData] Error:', e)
+    logger.error('[Admin/CalendarData] Error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }

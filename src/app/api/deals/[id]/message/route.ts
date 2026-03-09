@@ -1,12 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { classifyReply } from '@/lib/ai/sdr'
+import { logger } from '@/lib/logger'
 
 // POST /api/deals/[id]/message - Add message to conversation
 export async function POST(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -28,7 +30,7 @@ export async function POST(
     const { data: deal, error: dealError } = await supabase
       .from('deals')
       .select('artist_id, scout_id')
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (dealError || !deal) {
@@ -45,7 +47,7 @@ export async function POST(
       const { data: history } = await supabase
         .from('conversations')
         .select('direction, body')
-        .eq('deal_id', params.id)
+        .eq('deal_id', id)
         .order('sent_at', { ascending: true })
 
       const conversationHistory = history || []
@@ -64,7 +66,7 @@ export async function POST(
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .insert({
-        deal_id: params.id,
+        deal_id: id,
         artist_id: deal.artist_id,
         scout_id: user.id,
         channel,
@@ -87,7 +89,7 @@ export async function POST(
       const { data: currentDeal } = await supabase
         .from('deals')
         .select('emails_sent')
-        .eq('id', params.id)
+        .eq('id', id)
         .single()
 
       await supabase
@@ -96,12 +98,12 @@ export async function POST(
           last_outreach_at: new Date().toISOString(),
           emails_sent: (currentDeal?.emails_sent || 0) + 1,
         })
-        .eq('id', params.id)
+        .eq('id', id)
     }
 
     return NextResponse.json({ conversation })
   } catch (error: any) {
-    console.error('Error adding message:', error)
+    logger.error('Error adding message:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to add message' },
       { status: 500 }

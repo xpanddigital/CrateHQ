@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 // POST /api/deals - Create new deal
 export async function POST(request: NextRequest) {
@@ -59,7 +60,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ deal })
   } catch (error: any) {
-    console.error('Error creating deal:', error)
+    logger.error('Error creating deal:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to create deal' },
       { status: 500 }
@@ -123,7 +124,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ deals: deals || [] })
   } catch (error: any) {
-    console.error('Error fetching deals:', error)
+    logger.error('Error fetching deals:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch deals' },
       { status: 500 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { estimateCatalogValue } from '@/lib/valuation/estimator'
+import { logger } from '@/lib/logger'
 
 const PAGE_SIZE = 500
 const PARALLEL_CHUNK = 50
@@ -125,7 +126,7 @@ export async function POST(request: NextRequest) {
       nextOffset: hasMore ? offset + limit : null,
     })
   } catch (error: any) {
-    console.error('Error bulk valuating:', error)
+    logger.error('Error bulk valuating:', error)
     return NextResponse.json(
       { error: error.message || 'Bulk valuation failed' },
       { status: 500 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { DEFAULT_TEMPLATES } from '@/lib/templates/defaults'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -19,7 +20,7 @@ export async function GET(request: NextRequest) {
       .order('created_at', { ascending: true })
 
     if (error) {
-      console.error('Error fetching templates:', error)
+      logger.error('Error fetching templates:', error)
       return NextResponse.json(
         { error: 'Failed to fetch templates' },
         { status: 500 }
@@ -40,7 +41,7 @@ export async function GET(request: NextRequest) {
         .select()
 
       if (seedError) {
-        console.error('Error seeding templates:', seedError)
+        logger.error('Error seeding templates:', seedError)
         return NextResponse.json({ templates: [] })
       }
 
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ templates })
   } catch (error: any) {
-    console.error('Error in templates route:', error)
+    logger.error('Error in templates route:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch templates' },
       { status: 500 }
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (error) {
-      console.error('Error creating template:', error)
+      logger.error('Error creating template:', error)
       return NextResponse.json(
         { error: 'Failed to create template' },
         { status: 500 }
@@ -100,7 +101,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ template }, { status: 201 })
   } catch (error: any) {
-    console.error('Error creating template:', error)
+    logger.error('Error creating template:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to create template' },
       { status: 500 }

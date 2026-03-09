@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createSnapshot } from '@/lib/snapshots/create'
+import { logger } from '@/lib/logger'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -20,7 +22,7 @@ export async function GET(
         *,
         tags:artist_tags(tag:tags(*))
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     if (error) throw error
@@ -33,7 +35,7 @@ export async function GET(
 
     return NextResponse.json({ artist: transformedArtist })
   } catch (error: any) {
-    console.error('Error fetching artist:', error)
+    logger.error('Error fetching artist:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch artist' },
       { status: 500 }
@@ -43,8 +45,9 @@ export async function GET(
 
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -77,19 +80,19 @@ export async function PATCH(
     const { data: artist, error } = await supabase
       .from('artists')
       .update(updateData)
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
     if (error) {
-      console.error('Supabase update error:', error)
+      logger.error('Supabase update error:', error)
       throw error
     }
 
     // Create snapshot if streaming data was updated
     if (updateData.spotify_monthly_listeners || updateData.streams_last_month || 
         updateData.track_count || updateData.instagram_followers) {
-      await createSnapshot(params.id, {
+      await createSnapshot(id, {
         spotify_monthly_listeners: artist.spotify_monthly_listeners,
         streams_last_month: artist.streams_last_month,
         track_count: artist.track_count,
@@ -99,7 +102,7 @@ export async function PATCH(
 
     return NextResponse.json({ artist })
   } catch (error: any) {
-    console.error('Error updating artist:', error)
+    logger.error('Error updating artist:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to update artist' },
       { status: 500 }
@@ -109,8 +112,9 @@ export async function PATCH(
 
 export async function DELETE(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -122,13 +126,13 @@ export async function DELETE(
     const { error } = await supabase
       .from('artists')
       .delete()
-      .eq('id', params.id)
+      .eq('id', id)
 
     if (error) throw error
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Error deleting artist:', error)
+    logger.error('Error deleting artist:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to delete artist' },
       { status: 500 }

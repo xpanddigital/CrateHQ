@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 // POST /api/deals/bulk-create - Create deals for multiple artists
 export async function POST(request: NextRequest) {
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
       deals
     })
   } catch (error: any) {
-    console.error('Error bulk creating deals:', error)
+    logger.error('Error bulk creating deals:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to bulk create deals' },
       { status: 500 }

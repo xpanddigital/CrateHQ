@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { getDatasetItems } from '@/lib/apify/client'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -37,7 +38,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ items })
   } catch (error: any) {
-    console.error('Results fetch error:', error)
+    logger.error('Results fetch error:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch results' },
       { status: 500 }

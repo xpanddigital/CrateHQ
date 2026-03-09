@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { valuateAndQualify } from '@/lib/qualification/qualifier'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 300
 
@@ -162,7 +163,7 @@ export async function POST(request: NextRequest) {
           .select()
 
         if (error) {
-          console.error(`[Import] Insert chunk ${i} failed:`, error.message)
+          logger.error(`[Import] Insert chunk ${i} failed:`, error.message)
           throw error
         }
         if (data) insertedData.push(...data)
@@ -202,7 +203,7 @@ export async function POST(request: NextRequest) {
         valuationUpdates.push({ id: artist.id, data: result })
         qualificationSummary[result.qualification_status]++
       } catch (err) {
-        console.error(`[Import] Qualification failed for ${artist.name}:`, err)
+        logger.error(`[Import] Qualification failed for ${artist.name}:`, err)
         qualificationSummary.pending++
       }
     }
@@ -231,7 +232,7 @@ export async function POST(request: NextRequest) {
       qualification: qualificationSummary,
     })
   } catch (error: any) {
-    console.error('Error importing artists:', error)
+    logger.error('Error importing artists:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to import artists' },
       { status: 500 }

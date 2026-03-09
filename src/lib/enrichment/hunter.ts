@@ -1,3 +1,4 @@
+import { logger } from '@/lib/logger'
 // Hunter.io API client
 // Requires HUNTER_API_KEY environment variable
 
@@ -15,7 +16,7 @@ export interface HunterEmail {
 export async function searchDomain(domain: string): Promise<HunterEmail[]> {
   const apiKey = process.env.HUNTER_API_KEY
   if (!apiKey) {
-    console.warn('HUNTER_API_KEY not configured')
+    logger.warn('HUNTER_API_KEY not configured')
     return []
   }
 
@@ -29,7 +30,7 @@ export async function searchDomain(domain: string): Promise<HunterEmail[]> {
     const data = await res.json()
     return data.data?.emails || []
   } catch (error) {
-    console.error('Hunter.io error:', error)
+    logger.error('Hunter.io error:', error)
     return []
   }
 }
@@ -53,7 +54,7 @@ export async function verifyEmail(email: string): Promise<{ result: string; scor
       score: data.data?.score || 0,
     }
   } catch (error) {
-    console.error('Hunter.io error:', error)
+    logger.error('Hunter.io error:', error)
     return { result: 'unknown', score: 0 }
   }
 }

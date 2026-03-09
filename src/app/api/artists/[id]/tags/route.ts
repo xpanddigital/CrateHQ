@@ -1,10 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function PUT(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -19,12 +21,12 @@ export async function PUT(
     await supabase
       .from('artist_tags')
       .delete()
-      .eq('artist_id', params.id)
+      .eq('artist_id', id)
 
     // Insert new tags
     if (tagIds && tagIds.length > 0) {
       const artistTags = tagIds.map((tagId: string) => ({
-        artist_id: params.id,
+        artist_id: id,
         tag_id: tagId,
       }))
 
@@ -37,7 +39,7 @@ export async function PUT(
 
     return NextResponse.json({ success: true })
   } catch (error: any) {
-    console.error('Error updating artist tags:', error)
+    logger.error('Error updating artist tags:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to update tags' },
       { status: 500 }

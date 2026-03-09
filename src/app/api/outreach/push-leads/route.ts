@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { InstantlyClient, artistToInstantlyLead } from '@/lib/instantly/client'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 300
 
@@ -89,7 +90,7 @@ export async function POST(request: NextRequest) {
       .select()
 
     if (dealsError) {
-      console.error('Error creating deals:', dealsError)
+      logger.error('Error creating deals:', dealsError)
       // Don't fail the request, leads were still pushed
     }
 
@@ -109,7 +110,7 @@ export async function POST(request: NextRequest) {
         const campaign = campaigns.find((c: any) => c.id === campaignId)
         if (campaign) campaignName = campaign.name
       } catch (error) {
-        console.error('Error fetching campaign name:', error)
+        logger.error('Error fetching campaign name:', error)
       }
     }
 
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest) {
       })
 
     if (logError) {
-      console.error('Error logging outreach:', logError)
+      logger.error('Error logging outreach:', logError)
       // Don't fail the request, just log the error
     }
 
@@ -139,7 +140,7 @@ export async function POST(request: NextRequest) {
       deals_created: deals?.length || 0,
     })
   } catch (error: any) {
-    console.error('Error pushing leads:', error)
+    logger.error('Error pushing leads:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to push leads' },
       { status: 500 }

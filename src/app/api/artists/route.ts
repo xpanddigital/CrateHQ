@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -66,7 +67,7 @@ export async function GET(request: NextRequest) {
       totalPages: Math.ceil((count || 0) / limit)
     })
   } catch (error: any) {
-    console.error('Error fetching artists:', error)
+    logger.error('Error fetching artists:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch artists' },
       { status: 500 }
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ artist }, { status: 201 })
   } catch (error: any) {
-    console.error('Error creating artist:', error)
+    logger.error('Error creating artist:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to create artist' },
       { status: 500 }

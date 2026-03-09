@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { valuateAndQualify } from '@/lib/qualification/qualifier'
+import { logger } from '@/lib/logger'
 
 const PAGE_SIZE = 500
 const PARALLEL_CHUNK = 50
@@ -98,7 +99,7 @@ export async function POST(request: NextRequest) {
       nextOffset: hasMore ? offset + limit : null,
     })
   } catch (error: any) {
-    console.error('Error running qualification:', error)
+    logger.error('Error running qualification:', error)
     return NextResponse.json(
       { error: error.message || 'Qualification failed' },
       { status: 500 }
@@ -142,7 +143,7 @@ export async function GET() {
       stats: { total, qualified, not_qualified, review, pending },
     })
   } catch (error: any) {
-    console.error('Error fetching qualification stats:', error)
+    logger.error('Error fetching qualification stats:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch stats' },
       { status: 500 }

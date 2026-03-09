@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 type IdentityConfig = {
   id: string
@@ -77,7 +78,7 @@ export async function POST(request: NextRequest) {
     const { data: identitiesRaw, error: idError } = await idQuery
 
     if (idError) {
-      console.error('[AutoSchedule] Identities error:', idError)
+      logger.error('[AutoSchedule] Identities error:', idError)
       return NextResponse.json({ error: 'Failed to load identities' }, { status: 500 })
     }
 
@@ -105,7 +106,7 @@ export async function POST(request: NextRequest) {
       .is('scheduled_date', null)
 
     if (draftsError) {
-      console.error('[AutoSchedule] Drafts error:', draftsError)
+      logger.error('[AutoSchedule] Drafts error:', draftsError)
       return NextResponse.json({ error: 'Failed to load drafts' }, { status: 500 })
     }
 
@@ -218,13 +219,13 @@ export async function POST(request: NextRequest) {
         .eq('id', s.id)
 
       if (error) {
-        console.error('[AutoSchedule] Update error for', s.id, error)
+        logger.error('[AutoSchedule] Update error for', s.id, error)
       }
     }
 
     return NextResponse.json({ scheduled })
   } catch (e: any) {
-    console.error('[AutoSchedule] Error:', e)
+    logger.error('[AutoSchedule] Error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }

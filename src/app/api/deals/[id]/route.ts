@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 // GET /api/deals/[id] - Get deal with artist data and conversations
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -25,7 +27,7 @@ export async function GET(
         scout:profiles(id, full_name, avatar_url, email),
         conversations(*)
       `)
-      .eq('id', params.id)
+      .eq('id', id)
       .single()
 
     // Transform tags structure
@@ -41,7 +43,7 @@ export async function GET(
 
     return NextResponse.json({ deal })
   } catch (error: any) {
-    console.error('Error fetching deal:', error)
+    logger.error('Error fetching deal:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch deal' },
       { status: 500 }
@@ -52,8 +54,9 @@ export async function GET(
 // PATCH /api/deals/[id] - Update deal fields
 export async function PATCH(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -76,7 +79,7 @@ export async function PATCH(
         ...updates,
         updated_at: new Date().toISOString(),
       })
-      .eq('id', params.id)
+      .eq('id', id)
       .select()
       .single()
 
@@ -84,7 +87,7 @@ export async function PATCH(
 
     return NextResponse.json({ deal })
   } catch (error: any) {
-    console.error('Error updating deal:', error)
+    logger.error('Error updating deal:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to update deal' },
       { status: 500 }

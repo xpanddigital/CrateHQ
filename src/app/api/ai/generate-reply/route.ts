@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateReply, ReplyClassification, ScoutPersona } from '@/lib/ai/sdr'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
+import { logger } from '@/lib/logger'
 
 // POST /api/ai/generate-reply - Generate AI reply
 export async function POST(request: NextRequest) {
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ draft })
   } catch (error: any) {
-    console.error('Error generating reply:', error)
+    logger.error('Error generating reply:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to generate reply' },
       { status: 500 }

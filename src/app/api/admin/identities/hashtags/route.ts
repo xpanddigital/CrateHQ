@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { logger } from '@/lib/logger'
 
 export const maxDuration = 60
 
@@ -96,7 +97,7 @@ Do not include any explanation, just the JSON array.
         }
       }
     } catch (e) {
-      console.error('[Admin/Identities/Hashtags] JSON parse error:', e, raw)
+      logger.error('[Admin/Identities/Hashtags] JSON parse error:', e, raw)
     }
 
     // Fallback: split by commas/whitespace if JSON parse failed
@@ -111,7 +112,7 @@ Do not include any explanation, just the JSON array.
 
     return NextResponse.json({ hashtags: unique })
   } catch (e: any) {
-    console.error('[Admin/Identities/Hashtags] Error:', e)
+    logger.error('[Admin/Identities/Hashtags] Error:', e)
     return NextResponse.json(
       { error: e.message || 'Failed to generate hashtags' },
       { status: 500 }

@@ -1,11 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { InstantlyClient } from '@/lib/instantly/client'
+import { logger } from '@/lib/logger'
 
 export async function GET(
   request: NextRequest,
-  { params }: { params: { id: string } }
+  { params }: { params: Promise<{ id: string }> }
 ) {
+  const { id } = await params
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -30,11 +32,11 @@ export async function GET(
     }
 
     const client = new InstantlyClient(integration.api_key)
-    const summary = await client.getCampaignSummary(params.id)
+    const summary = await client.getCampaignSummary(id)
 
     return NextResponse.json({ summary })
   } catch (error: any) {
-    console.error('Error fetching campaign analytics:', error)
+    logger.error('Error fetching campaign analytics:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch analytics' },
       { status: 500 }

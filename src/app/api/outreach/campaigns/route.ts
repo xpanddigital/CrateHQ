@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { InstantlyClient } from '@/lib/instantly/client'
+import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
   try {
@@ -31,7 +32,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({ campaigns })
   } catch (error: any) {
-    console.error('Error fetching campaigns:', error)
+    logger.error('Error fetching campaigns:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch campaigns' },
       { status: 500 }
@@ -74,7 +75,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ campaign }, { status: 201 })
   } catch (error: any) {
-    console.error('Error creating campaign:', error)
+    logger.error('Error creating campaign:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to create campaign' },
       { status: 500 }

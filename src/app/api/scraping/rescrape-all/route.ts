@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { startActorRun, getRunStatus, getDatasetItems } from '@/lib/apify/client'
 import { createSnapshot } from '@/lib/snapshots/create'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -91,7 +92,7 @@ export async function POST(request: NextRequest) {
 
             updated++
           } catch (error) {
-            console.error('Error updating artist:', error)
+            logger.error('Error updating artist:', error)
             failed++
           }
         }
@@ -113,7 +114,7 @@ export async function POST(request: NextRequest) {
 
     throw new Error('Scraping timed out')
   } catch (error: any) {
-    console.error('Re-scrape error:', error)
+    logger.error('Re-scrape error:', error)
     return NextResponse.json(
       { error: error.message || 'Re-scrape failed' },
       { status: 500 }

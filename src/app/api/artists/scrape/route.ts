@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { startActorRun, getRunStatus, getDatasetItems } from '@/lib/apify/client'
+import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
@@ -42,7 +43,7 @@ export async function POST(request: NextRequest) {
       status: run.data.status,
     })
   } catch (error: any) {
-    console.error('Error starting Apify scrape:', error)
+    logger.error('Error starting Apify scrape:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to start scraping' },
       { status: 500 }
@@ -103,7 +104,7 @@ export async function GET(request: NextRequest) {
       results: [],
     })
   } catch (error: any) {
-    console.error('Error fetching Apify results:', error)
+    logger.error('Error fetching Apify results:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch results' },
       { status: 500 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 /**
  * Get all artist IDs without emails that are qualified for enrichment.
@@ -41,7 +42,7 @@ export async function GET(request: NextRequest) {
       pending_count: pendingCount,
     })
   } catch (error: any) {
-    console.error('Error fetching unenriched IDs:', error)
+    logger.error('Error fetching unenriched IDs:', error)
     return NextResponse.json(
       { error: error.message || 'Failed to fetch IDs' },
       { status: 500 }

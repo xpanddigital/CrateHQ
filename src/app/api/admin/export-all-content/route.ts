@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { logger } from '@/lib/logger'
 
 function escapeCsvField(value: any): string {
   if (value === null || value === undefined) return ''
@@ -49,7 +50,7 @@ export async function GET(request: NextRequest) {
     const { data: posts, error: postsError } = await postsQuery
 
     if (postsError) {
-      console.error('[ExportAllContent] Posts error:', postsError)
+      logger.error('[ExportAllContent] Posts error:', postsError)
       return new NextResponse('Failed to load posts', { status: 500 })
     }
 
@@ -130,7 +131,7 @@ export async function GET(request: NextRequest) {
       },
     })
   } catch (e: any) {
-    console.error('[ExportAllContent] Error:', e)
+    logger.error('[ExportAllContent] Error:', e)
     return new NextResponse('Internal server error', { status: 500 })
   }
 }

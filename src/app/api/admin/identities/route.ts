@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { encrypt } from '@/lib/crypto'
+import { logger } from '@/lib/logger'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -30,7 +31,7 @@ export async function GET() {
       .order('created_at', { ascending: true })
 
     if (idError) {
-      console.error('[Admin/Identities] Fetch identities error:', idError)
+      logger.error('[Admin/Identities] Fetch identities error:', idError)
       // On any account_identities failure (missing table, schema mismatch, etc.), return empty identities
       // and still load ig_accounts so the page can load and the user can add an account.
       const { data: accountsOnly, error: accErr } = await supabase
@@ -38,7 +39,7 @@ export async function GET() {
         .select('id, ig_username')
         .order('created_at', { ascending: true })
       if (accErr) {
-        console.error('[Admin/Identities] Fallback ig_accounts fetch error:', accErr)
+        logger.error('[Admin/Identities] Fallback ig_accounts fetch error:', accErr)
         return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
       }
       return NextResponse.json({
@@ -56,7 +57,7 @@ export async function GET() {
       .order('created_at', { ascending: true })
 
     if (accError) {
-      console.error('[Admin/Identities] Fetch accounts error:', accError)
+      logger.error('[Admin/Identities] Fetch accounts error:', accError)
       return NextResponse.json({ error: 'Failed to fetch accounts' }, { status: 500 })
     }
 
@@ -97,7 +98,7 @@ export async function GET() {
 
     return NextResponse.json({ identities: identitiesWithUsername, available_accounts })
   } catch (e) {
-    console.error('[Admin/Identities] GET unhandled error:', e)
+    logger.error('[Admin/Identities] GET unhandled error:', e)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
 }
@@ -184,7 +185,7 @@ export async function POST(request: NextRequest) {
       .single()
 
     if (insertError) {
-      console.error('[Admin/Identities] Insert error:', insertError)
+      logger.error('[Admin/Identities] Insert error:', insertError)
       const msg = insertError.code === '42P01' || insertError.message?.includes('does not exist')
         ? 'Content Engine not set up. Run the Content Engine SQL migration (supabase-content-engine.sql) in your Supabase SQL editor to create the account_identities table.'
         : insertError.message || 'Failed to create identity'
@@ -199,14 +200,14 @@ export async function POST(request: NextRequest) {
       if (Object.keys(ghlUpdate).length) {
         const { error: _ghlErr } = await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
         if (_ghlErr) {
-          console.warn('[Admin/Identities] GHL columns update skipped (columns may not exist yet):', _ghlErr.message)
+          logger.warn('[Admin/Identities] GHL columns update skipped (columns may not exist yet):', _ghlErr.message)
         }
       }
     }
 
     return NextResponse.json({ id: data.id })
   } catch (e: any) {
-    console.error('[Admin/Identities] POST error:', e)
+    logger.error('[Admin/Identities] POST error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }
@@ -292,7 +293,7 @@ export async function PATCH(request: NextRequest) {
       .eq('id', id)
 
     if (updateError) {
-      console.error('[Admin/Identities] Update error:', updateError)
+      logger.error('[Admin/Identities] Update error:', updateError)
       const msg = updateError.code === '42P01' || updateError.message?.includes('does not exist')
         ? 'Content Engine not set up. Run the Content Engine SQL migration (supabase-content-engine.sql) in your Supabase SQL editor to create the account_identities table.'
         : updateError.message || 'Failed to update identity'
@@ -307,14 +308,14 @@ export async function PATCH(request: NextRequest) {
       if (Object.keys(ghlUpdate).length) {
         const { error: _ghlErr } = await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
         if (_ghlErr) {
-          console.warn('[Admin/Identities] GHL columns update skipped (columns may not exist yet):', _ghlErr.message)
+          logger.warn('[Admin/Identities] GHL columns update skipped (columns may not exist yet):', _ghlErr.message)
         }
       }
     }
 
     return NextResponse.json({ success: true })
   } catch (e: any) {
-    console.error('[Admin/Identities] PATCH error:', e)
+    logger.error('[Admin/Identities] PATCH error:', e)
     return NextResponse.json({ error: e.message || 'Internal server error' }, { status: 500 })
   }
 }
