@@ -339,3 +339,118 @@ CREATE POLICY "enrichment_update" ON enrichment_jobs FOR UPDATE TO authenticated
 -- Integrations: strictly per-user
 CREATE POLICY "integrations_all" ON integrations FOR ALL TO authenticated
   USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+
+
+-- ═══════════════════════════════════════════════════════════════════════
+-- Nurture Sequence Engine
+-- ═══════════════════════════════════════════════════════════════════════
+
+-- Sequence templates — reusable multi-step engagement sequences
+CREATE TABLE sequence_templates (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name TEXT NOT NULL,
+  description TEXT,
+  steps JSONB NOT NULL DEFAULT '[]',
+  is_active BOOLEAN DEFAULT true,
+  created_by UUID REFERENCES profiles(id),
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+-- Sequence enrollments — tracks each artist's progress through a sequence
+CREATE TABLE sequence_enrollments (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  artist_id UUID NOT NULL REFERENCES artists(id) ON DELETE CASCADE,
+  template_id UUID NOT NULL REFERENCES sequence_templates(id),
+  ig_account_id TEXT NOT NULL REFERENCES ig_accounts(id),
+  scout_id UUID REFERENCES profiles(id),
+  current_step INTEGER NOT NULL DEFAULT 1,
+  total_steps INTEGER NOT NULL,
+  enrolled_at TIMESTAMPTZ DEFAULT now(),
+  next_step_at TIMESTAMPTZ NOT NULL,
+  last_step_at TIMESTAMPTZ,
+  status TEXT NOT NULL DEFAULT 'active'
+    CHECK (status IN ('active', 'paused', 'completed', 'cancelled', 'failed')),
+  error_message TEXT,
+  dm_message_text TEXT,
+  dm_pending_message_id UUID,
+  created_at TIMESTAMPTZ DEFAULT now(),
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE UNIQUE INDEX idx_enrollments_unique_active
+  ON sequence_enrollments(artist_id, ig_account_id, template_id)
+  WHERE status IN ('active', 'paused');
+CREATE INDEX idx_enrollments_next_step
+  ON sequence_enrollments(next_step_at) WHERE status = 'active';
+CREATE INDEX idx_enrollments_ig_account
+  ON sequence_enrollments(ig_account_id) WHERE status = 'active';
+CREATE INDEX idx_enrollments_status
+  ON sequence_enrollments(status);
+
+-- Sequence step log — audit trail of every executed action
+CREATE TABLE sequence_step_log (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  enrollment_id UUID NOT NULL REFERENCES sequence_enrollments(id) ON DELETE CASCADE,
+  ig_account_id TEXT NOT NULL,
+  artist_id UUID NOT NULL,
+  step_number INTEGER NOT NULL,
+  actions_requested JSONB NOT NULL,
+  actions_completed JSONB NOT NULL,
+  started_at TIMESTAMPTZ NOT NULL,
+  completed_at TIMESTAMPTZ,
+  duration_seconds INTEGER,
+  status TEXT NOT NULL CHECK (status IN ('success', 'partial', 'failed')),
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_step_log_enrollment ON sequence_step_log(enrollment_id);
+CREATE INDEX idx_step_log_ig_account ON sequence_step_log(ig_account_id, created_at DESC);
+
+-- Session schedule — daily task assignments for Playwright executor
+CREATE TABLE session_schedule (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  ig_account_id TEXT NOT NULL REFERENCES ig_accounts(id),
+  scheduled_start TIMESTAMPTZ NOT NULL,
+  session_type TEXT NOT NULL
+    CHECK (session_type IN ('organic_only', 'engagement', 'outreach')),
+  tasks JSONB NOT NULL DEFAULT '[]',
+  status TEXT NOT NULL DEFAULT 'pending'
+    CHECK (status IN ('pending', 'in_progress', 'completed', 'failed', 'skipped')),
+  started_at TIMESTAMPTZ,
+  completed_at TIMESTAMPTZ,
+  result JSONB,
+  error_message TEXT,
+  created_at TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE INDEX idx_schedule_pending
+  ON session_schedule(ig_account_id, scheduled_start) WHERE status = 'pending';
+CREATE INDEX idx_schedule_created ON session_schedule(created_at);
+
+-- RLS for sequence engine tables
+ALTER TABLE sequence_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sequence_enrollments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE sequence_step_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE session_schedule ENABLE ROW LEVEL SECURITY;
+
+CREATE POLICY "sequence_templates_select" ON sequence_templates FOR SELECT TO authenticated
+  USING (public.is_admin());
+CREATE POLICY "sequence_templates_insert" ON sequence_templates FOR INSERT TO authenticated
+  WITH CHECK (public.is_admin());
+CREATE POLICY "sequence_templates_update" ON sequence_templates FOR UPDATE TO authenticated
+  USING (public.is_admin());
+CREATE POLICY "sequence_templates_delete" ON sequence_templates FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+CREATE POLICY "sequence_enrollments_admin_all" ON sequence_enrollments FOR ALL TO authenticated
+  USING (public.is_admin());
+CREATE POLICY "sequence_enrollments_scout_select" ON sequence_enrollments FOR SELECT TO authenticated
+  USING (scout_id = auth.uid());
+
+CREATE POLICY "sequence_step_log_admin_all" ON sequence_step_log FOR ALL TO authenticated
+  USING (public.is_admin());
+
+CREATE POLICY "session_schedule_admin_all" ON session_schedule FOR ALL TO authenticated
+  USING (public.is_admin());

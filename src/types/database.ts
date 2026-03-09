@@ -314,3 +314,124 @@ export interface ContentTopic {
   ig_account_id: string
   created_at: string
 }
+
+// ── Nurture Sequence Engine ──────────────────────────────────────────
+
+export type SequenceActionType =
+  | 'visit_profile'
+  | 'follow'
+  | 'like_posts'
+  | 'watch_stories'
+  | 'like_reel'
+  | 'comment'
+  | 'send_dm'
+
+export interface SequenceAction {
+  type: SequenceActionType
+  count?: number
+  comment_type?: 'ai_generated' | 'static'
+  comment_text?: string
+}
+
+export interface SequenceStep {
+  step_number: number
+  day_offset: number
+  actions: SequenceAction[]
+  label: string
+}
+
+export interface SequenceTemplate {
+  id: string
+  name: string
+  description: string | null
+  steps: SequenceStep[]
+  is_active: boolean
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type SequenceEnrollmentStatus =
+  | 'active'
+  | 'paused'
+  | 'completed'
+  | 'cancelled'
+  | 'failed'
+
+export interface SequenceEnrollment {
+  id: string
+  artist_id: string
+  template_id: string
+  ig_account_id: string
+  scout_id: string | null
+  current_step: number
+  total_steps: number
+  enrolled_at: string
+  next_step_at: string
+  last_step_at: string | null
+  status: SequenceEnrollmentStatus
+  error_message: string | null
+  dm_message_text: string | null
+  dm_pending_message_id: string | null
+  created_at: string
+  updated_at: string
+  // Joined relations
+  artist?: Artist
+  template?: SequenceTemplate
+}
+
+export interface SequenceStepLog {
+  id: string
+  enrollment_id: string
+  ig_account_id: string
+  artist_id: string
+  step_number: number
+  actions_requested: SequenceAction[]
+  actions_completed: SequenceAction[]
+  started_at: string
+  completed_at: string | null
+  duration_seconds: number | null
+  status: 'success' | 'partial' | 'failed'
+  error_message: string | null
+  created_at: string
+}
+
+export type SessionTaskType = 'organic' | 'sequence_step' | 'manual_reply'
+
+export interface SessionTask {
+  task_id: string
+  task_type: SessionTaskType
+  actions: SequenceAction[]
+  // Present for sequence_step tasks
+  enrollment_id?: string
+  artist_id?: string
+  target_username?: string
+  step_number?: number
+  // Present for DM tasks
+  dm_pending_message_id?: string
+  dm_message_text?: string
+  dm_approved?: boolean
+  // Present for comment tasks
+  comment_text?: string
+}
+
+export type SessionScheduleStatus =
+  | 'pending'
+  | 'in_progress'
+  | 'completed'
+  | 'failed'
+  | 'skipped'
+
+export interface SessionSchedule {
+  id: string
+  ig_account_id: string
+  scheduled_start: string
+  session_type: 'organic_only' | 'engagement' | 'outreach'
+  tasks: SessionTask[]
+  status: SessionScheduleStatus
+  started_at: string | null
+  completed_at: string | null
+  result: Record<string, any> | null
+  error_message: string | null
+  created_at: string
+}

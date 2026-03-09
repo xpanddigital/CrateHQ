@@ -3,6 +3,10 @@
     {
       "path": "/api/enrichment/process-queue",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/sequences/generate-schedule",
+      "schedule": "5 0 * * *"
     }
   ]
 }
