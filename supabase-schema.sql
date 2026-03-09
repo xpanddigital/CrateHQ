@@ -20,6 +20,8 @@ CREATE TABLE public.profiles (
     updated_at TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE INDEX idx_profiles_role ON profiles(role);
+
 -- Auto-create profile on user signup
 CREATE OR REPLACE FUNCTION public.handle_new_user()
 RETURNS TRIGGER AS $$
@@ -134,6 +136,7 @@ CREATE TABLE public.deals (
 
 CREATE INDEX idx_deals_scout ON deals(scout_id, stage);
 CREATE INDEX idx_deals_stage ON deals(stage);
+CREATE INDEX idx_deals_artist_id ON deals(artist_id);
 
 -- Deal tags junction table
 CREATE TABLE public.deal_tags (
@@ -162,6 +165,7 @@ CREATE TABLE public.conversations (
 );
 
 CREATE INDEX idx_conversations_deal ON conversations(deal_id, sent_at DESC);
+CREATE INDEX idx_conversations_artist_id ON conversations(artist_id);
 
 -- Email templates table
 CREATE TABLE public.email_templates (

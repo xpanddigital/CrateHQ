@@ -4,7 +4,27 @@ const nextConfig = {
     remotePatterns: [
       {
         protocol: 'https',
-        hostname: '**',
+        hostname: 'i.scdn.co', // Spotify CDN (artist images)
+      },
+      {
+        protocol: 'https',
+        hostname: '*.scdn.co', // Spotify CDN variants
+      },
+      {
+        protocol: 'https',
+        hostname: '*.cdninstagram.com', // Instagram CDN
+      },
+      {
+        protocol: 'https',
+        hostname: '*.fbcdn.net', // Facebook/Instagram CDN
+      },
+      {
+        protocol: 'https',
+        hostname: '*.googleusercontent.com', // YouTube thumbnails
+      },
+      {
+        protocol: 'https',
+        hostname: '*.ggpht.com', // YouTube channel avatars
       },
     ],
   },
