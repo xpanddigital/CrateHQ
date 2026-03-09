@@ -285,17 +285,14 @@ async function handleEmailOpened(supabase: any, body: any) {
   if (artist) {
     const { data: deal } = await supabase
       .from('deals')
-      .select('id, emails_opened')
+      .select('id')
       .eq('artist_id', artist.id)
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
 
     if (deal) {
-      await supabase
-        .from('deals')
-        .update({ emails_opened: (deal.emails_opened || 0) + 1 })
-        .eq('id', deal.id)
+      await supabase.rpc('increment_emails_opened', { deal_id: deal.id })
     }
   }
 

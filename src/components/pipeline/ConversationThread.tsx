@@ -224,7 +224,7 @@ export function ConversationThread({
                     </Badge>
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {formatRelativeTime(conversation.sent_at)}
+                    {formatRelativeTime(conversation.sent_at || conversation.created_at)}
                   </span>
                 </div>
 

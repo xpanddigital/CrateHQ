@@ -111,7 +111,7 @@ export function InboxItem({ conversation, deal, onUpdate }: InboxItemProps) {
               {conversation.body}
             </p>
             <div className="flex items-center gap-2 mt-2 text-xs text-muted-foreground">
-              <span>{formatRelativeTime(conversation.sent_at)}</span>
+              <span>{formatRelativeTime(conversation.sent_at || conversation.created_at)}</span>
               <span>•</span>
               <span className="capitalize">{conversation.channel}</span>
             </div>
@@ -137,10 +137,10 @@ export function InboxItem({ conversation, deal, onUpdate }: InboxItemProps) {
                           {c.direction}
                         </Badge>
                         <span className="text-xs text-muted-foreground">
-                          {formatRelativeTime(c.sent_at)}
+                          {formatRelativeTime(c.sent_at || c.created_at)}
                         </span>
                       </div>
-                      <p className="text-muted-foreground">{c.body.slice(0, 200)}</p>
+                      <p className="text-muted-foreground">{(c.body || c.message_text || '').slice(0, 200)}</p>
                     </div>
                   ))}
               </div>

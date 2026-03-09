@@ -146,26 +146,41 @@ CREATE TABLE public.deal_tags (
 );
 
 -- Conversations table
+-- Note: This table evolved from the original deal-centric design. It retains
+-- deal_id for backwards compatibility but primarily links to artists.
+-- Webhook-inserted messages use message_text/sender/external_id; UI-created
+-- messages use body/subject/sent_at. Both patterns coexist.
 CREATE TABLE public.conversations (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    deal_id UUID NOT NULL REFERENCES deals(id) ON DELETE CASCADE,
-    artist_id UUID NOT NULL REFERENCES artists(id),
+    deal_id UUID REFERENCES deals(id),
+    artist_id UUID REFERENCES artists(id),
     scout_id UUID REFERENCES profiles(id),
     channel TEXT NOT NULL CHECK (channel IN ('email', 'instagram', 'phone', 'note', 'system')),
     direction TEXT NOT NULL CHECK (direction IN ('outbound', 'inbound', 'internal')),
     subject TEXT,
-    body TEXT NOT NULL,
+    body TEXT,
+    message_text TEXT NOT NULL DEFAULT '',
+    sender TEXT,
+    external_id TEXT,
+    ig_thread_id TEXT,
+    ig_account_id UUID,
+    ig_message_id TEXT,
+    metadata JSONB DEFAULT '{}',
+    is_read BOOLEAN DEFAULT false,
+    read BOOLEAN DEFAULT false,
     ai_classification TEXT,
     ai_confidence NUMERIC(3,2),
     ai_suggested_reply TEXT,
-    is_read BOOLEAN DEFAULT false,
     requires_human_review BOOLEAN DEFAULT false,
-    sent_at TIMESTAMPTZ DEFAULT now(),
+    sent_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ DEFAULT now()
 );
 
-CREATE INDEX idx_conversations_deal ON conversations(deal_id, sent_at DESC);
 CREATE INDEX idx_conversations_artist_id ON conversations(artist_id);
+CREATE INDEX idx_conversations_deal_id ON conversations(deal_id) WHERE deal_id IS NOT NULL;
+CREATE INDEX idx_conversations_external_id ON conversations(external_id) WHERE external_id IS NOT NULL;
+CREATE INDEX idx_conversations_ig_thread ON conversations(ig_thread_id) WHERE ig_thread_id IS NOT NULL;
+CREATE INDEX idx_conversations_unread ON conversations(is_read) WHERE is_read = false;
 
 -- Email templates table
 CREATE TABLE public.email_templates (
@@ -218,6 +233,14 @@ ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE enrichment_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integrations ENABLE ROW LEVEL SECURITY;
+
+-- Helper: atomic increment for emails_opened (avoids read-then-write race condition)
+CREATE OR REPLACE FUNCTION public.increment_emails_opened(deal_id UUID)
+RETURNS VOID AS $$
+  UPDATE public.deals
+  SET emails_opened = COALESCE(emails_opened, 0) + 1
+  WHERE id = deal_id;
+$$ LANGUAGE sql SECURITY DEFINER;
 
 -- Helper: check if current user is admin
 CREATE OR REPLACE FUNCTION public.is_admin()

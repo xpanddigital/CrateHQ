@@ -136,19 +136,27 @@ export const DEAL_STAGES: { value: DealStage; label: string; color: string }[] =
 
 export interface Conversation {
   id: string
-  deal_id: string
-  artist_id: string
+  deal_id: string | null
+  artist_id: string | null
   scout_id: string | null
   channel: 'email' | 'instagram' | 'phone' | 'note' | 'system'
   direction: 'outbound' | 'inbound' | 'internal'
   subject: string | null
-  body: string
+  body: string | null
+  message_text: string
+  sender: string | null
+  external_id: string | null
+  ig_thread_id: string | null
+  ig_account_id: string | null
+  ig_message_id: string | null
+  metadata: Record<string, any>
+  is_read: boolean
+  read: boolean
   ai_classification: string | null
   ai_confidence: number | null
   ai_suggested_reply: string | null
-  is_read: boolean
   requires_human_review: boolean
-  sent_at: string
+  sent_at: string | null
   created_at: string
 }
 
@@ -188,4 +196,121 @@ export interface OutreachLog {
   artist_ids: string[]
   created_at: string
   scout?: Profile
+}
+
+export interface EnrichmentLog {
+  id: string
+  artist_id: string
+  artist_name: string
+  email_found: string | null
+  email_confidence: number
+  email_source: string
+  all_emails: Array<{ email: string; source: string; confidence: number }>
+  steps: Array<{
+    method: string
+    label: string
+    status: string
+    emails_found: string[]
+    best_email: string | null
+    confidence: number
+    error: string | null
+    duration_ms: number
+  }>
+  total_duration_ms: number
+  is_contactable: boolean
+  error_details: string | null
+  run_by: string | null
+  created_at: string
+}
+
+export interface EnrichmentBatch {
+  id: string
+  name: string | null
+  total_artists: number
+  completed: number
+  failed: number
+  skipped: number
+  emails_found: number
+  status: 'queued' | 'processing' | 'completed' | 'paused' | 'cancelled'
+  created_by: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+}
+
+export interface EnrichmentQueueItem {
+  id: string
+  artist_id: string
+  batch_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed' | 'skipped'
+  priority: number
+  attempts: number
+  max_attempts: number
+  error_message: string | null
+  email_found: string | null
+  started_at: string | null
+  completed_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ArtistSnapshot {
+  id: string
+  artist_id: string
+  snapshot_date: string
+  spotify_monthly_listeners: number | null
+  streams_last_month: number | null
+  instagram_followers: number | null
+  track_count: number | null
+  estimated_offer: number | null
+  created_at: string
+}
+
+export interface IgAccount {
+  id: string
+  ig_username: string
+  vm_identifier: string | null
+  timezone: string
+  active_start_hour: number
+  active_end_hour: number
+  poll_interval_active_min: number
+  poll_interval_wind_down_min: number
+  is_active: boolean
+  webhook_secret: string
+  last_heartbeat: string | null
+  status: string
+  ghl_location_id: string | null
+  ghl_social_account_id: string | null
+  ghl_api_key: string | null
+  created_at: string
+}
+
+export interface ContentPost {
+  id: string
+  ig_account_id: string | null
+  identity_id: string | null
+  post_type: string
+  status: string
+  title: string
+  category: string
+  caption: string
+  hashtags: string[]
+  slides: Record<string, any> | null
+  slide_image_urls: string[] | null
+  nano_prompt: string | null
+  image_url: string | null
+  alt_prompts: string[] | null
+  scheduled_date: string | null
+  scheduled_time: string | null
+  ghl_post_id: string | null
+  published_at: string | null
+  created_at: string
+}
+
+export interface ContentTopic {
+  id: string
+  topic_hash: string
+  title: string
+  ig_account_id: string
+  created_at: string
 }
