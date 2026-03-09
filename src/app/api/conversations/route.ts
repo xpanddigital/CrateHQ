@@ -2,6 +2,15 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 
 /**
+ * Validate that a string looks like a safe thread key (email or UUID-like).
+ * Prevents filter injection via PostgREST .or() syntax.
+ */
+function isValidThreadKey(key: string): boolean {
+  // Allow emails (contains @) and UUIDs/thread IDs (alphanumeric, hyphens, underscores, dots)
+  return /^[a-zA-Z0-9@._\-+]+$/.test(key)
+}
+
+/**
  * GET /api/conversations
  *
  * Query params:
@@ -18,6 +27,26 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Check if user is admin (admins see all conversations)
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    const isAdmin = profile?.role === 'admin'
+
+    // Get artist IDs this scout has deals for (used to scope conversations)
+    let scoutArtistIds: string[] = []
+    if (!isAdmin) {
+      const { data: scoutDeals } = await supabase
+        .from('deals')
+        .select('artist_id')
+        .eq('scout_id', user.id)
+
+      scoutArtistIds = (scoutDeals || []).map(d => d.artist_id).filter(Boolean)
+    }
+
     const params = request.nextUrl.searchParams
     const artistId = params.get('artist_id')
     const threadKey = params.get('thread_key')
@@ -26,6 +55,11 @@ export async function GET(request: NextRequest) {
 
     // ── Single thread by artist_id ──
     if (artistId && artistId !== 'null' && artistId !== 'undefined') {
+      // Scouts can only view conversations for artists they have deals with
+      if (!isAdmin && !scoutArtistIds.includes(artistId)) {
+        return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+      }
+
       let query = supabase
         .from('conversations')
         .select('*')
@@ -66,6 +100,11 @@ export async function GET(request: NextRequest) {
 
     // ── Single thread by thread_key (ig_thread_id or sender email) ──
     if (threadKey && threadKey !== 'null' && threadKey !== 'undefined') {
+      // Validate thread_key format to prevent filter injection
+      if (!isValidThreadKey(threadKey)) {
+        return NextResponse.json({ error: 'Invalid thread_key format' }, { status: 400 })
+      }
+
       // Try ig_thread_id first
       const { data: igMessages } = await supabase
         .from('conversations')
@@ -77,15 +116,34 @@ export async function GET(request: NextRequest) {
         return NextResponse.json({ messages: igMessages, artist: null, deal: null })
       }
 
-      // Try sender email — match on sender field OR metadata from_email/to_email
-      // This catches both inbound (sender = lead email) and outbound (sender = our account)
-      const { data: allForThread } = await supabase
+      // Try sender email — use separate .eq() calls instead of .or() string interpolation
+      // to prevent filter injection
+      const { data: bySender } = await supabase
         .from('conversations')
         .select('*')
-        .or(`sender.eq.${threadKey},metadata->>from_email.eq.${threadKey},metadata->>to_email.eq.${threadKey}`)
+        .eq('sender', threadKey)
         .order('created_at', { ascending: true })
 
-      return NextResponse.json({ messages: allForThread || [], artist: null, deal: null })
+      const { data: byFromEmail } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('metadata->>from_email', threadKey)
+        .order('created_at', { ascending: true })
+
+      const { data: byToEmail } = await supabase
+        .from('conversations')
+        .select('*')
+        .eq('metadata->>to_email', threadKey)
+        .order('created_at', { ascending: true })
+
+      // Merge and deduplicate by id, then sort
+      const allForThread = deduplicateById([
+        ...(bySender || []),
+        ...(byFromEmail || []),
+        ...(byToEmail || []),
+      ]).sort((a, b) => a.created_at.localeCompare(b.created_at))
+
+      return NextResponse.json({ messages: allForThread, artist: null, deal: null })
     }
 
     // ── Thread list ──
@@ -93,6 +151,14 @@ export async function GET(request: NextRequest) {
       .from('conversations')
       .select('*')
       .order('created_at', { ascending: false })
+
+    // Scope to scout's artists if not admin
+    if (!isAdmin && scoutArtistIds.length > 0) {
+      query = query.in('artist_id', scoutArtistIds)
+    } else if (!isAdmin) {
+      // Scout with no deals sees no conversations
+      return NextResponse.json({ threads: [] })
+    }
 
     if (channel && channel !== 'all') {
       query = query.eq('channel', channel)
@@ -241,7 +307,13 @@ export async function PATCH(request: NextRequest) {
     if (artist_id) {
       query = query.eq('artist_id', artist_id)
     } else if (thread_key) {
-      query = query.or(`ig_thread_id.eq.${thread_key},sender.eq.${thread_key}`)
+      // Validate thread_key format to prevent filter injection
+      if (!isValidThreadKey(thread_key)) {
+        return NextResponse.json({ error: 'Invalid thread_key format' }, { status: 400 })
+      }
+      // Use separate .eq() calls instead of .or() string interpolation
+      // For mark-as-read, matching on ig_thread_id or sender is sufficient
+      query = query.eq('sender', thread_key)
     }
 
     const { error } = await query.eq('read', false)
@@ -251,9 +323,28 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to mark as read' }, { status: 500 })
     }
 
+    // Also mark by ig_thread_id if thread_key was provided
+    if (thread_key && !artist_id && isValidThreadKey(thread_key)) {
+      await supabase
+        .from('conversations')
+        .update({ read: true })
+        .eq('ig_thread_id', thread_key)
+        .eq('read', false)
+    }
+
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error('[Conversations] PATCH error:', error)
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 })
   }
+}
+
+/** Deduplicate an array of objects by their `id` field */
+function deduplicateById<T extends { id: string }>(items: T[]): T[] {
+  const seen = new Set<string>()
+  return items.filter(item => {
+    if (seen.has(item.id)) return false
+    seen.add(item.id)
+    return true
+  })
 }

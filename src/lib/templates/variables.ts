@@ -98,7 +98,7 @@ export function replaceVariables(
  * Get all variables used in a template
  */
 export function extractVariables(text: string): string[] {
-  const regex = /{{\\s*([a-z_]+)\\s*}}/g
+  const regex = /{{\s*([a-z_]+)\s*}}/g
   const matches = text.matchAll(regex)
   return Array.from(matches, (m) => m[1])
 }

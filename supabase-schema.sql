@@ -29,7 +29,7 @@ BEGIN
         NEW.id,
         NEW.email,
         COALESCE(NEW.raw_user_meta_data->>'full_name', NEW.email),
-        COALESCE(NEW.raw_user_meta_data->>'role', 'scout')
+        'scout'  -- Always default to scout; admin role must be granted by an existing admin
     );
     RETURN NEW;
 END;
@@ -215,14 +215,100 @@ ALTER TABLE email_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE enrichment_jobs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE integrations ENABLE ROW LEVEL SECURITY;
 
--- Permissive policies for authenticated users
-CREATE POLICY "auth_all" ON profiles FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON artists FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON artist_tags FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON tags FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON deals FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON deal_tags FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON conversations FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON email_templates FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON enrichment_jobs FOR ALL TO authenticated USING (true) WITH CHECK (true);
-CREATE POLICY "auth_all" ON integrations FOR ALL TO authenticated USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
+-- Helper: check if current user is admin
+CREATE OR REPLACE FUNCTION public.is_admin()
+RETURNS BOOLEAN AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM public.profiles WHERE id = auth.uid() AND role = 'admin'
+  );
+$$ LANGUAGE sql SECURITY DEFINER STABLE;
+
+-- Profiles: users can read all profiles, but only update their own (admins can update any)
+CREATE POLICY "profiles_select" ON profiles FOR SELECT TO authenticated USING (true);
+CREATE POLICY "profiles_update" ON profiles FOR UPDATE TO authenticated
+  USING (id = auth.uid() OR public.is_admin());
+CREATE POLICY "profiles_insert" ON profiles FOR INSERT TO authenticated
+  WITH CHECK (id = auth.uid());
+
+-- Artists: shared resource, all authenticated users can read; only admins can delete
+CREATE POLICY "artists_select" ON artists FOR SELECT TO authenticated USING (true);
+CREATE POLICY "artists_insert" ON artists FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "artists_update" ON artists FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "artists_delete" ON artists FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- Artist tags: shared (follows artists access pattern)
+CREATE POLICY "artist_tags_select" ON artist_tags FOR SELECT TO authenticated USING (true);
+CREATE POLICY "artist_tags_insert" ON artist_tags FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "artist_tags_delete" ON artist_tags FOR DELETE TO authenticated USING (true);
+
+-- Tags: shared resource, all can read/create; only admins can delete
+CREATE POLICY "tags_select" ON tags FOR SELECT TO authenticated USING (true);
+CREATE POLICY "tags_insert" ON tags FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "tags_update" ON tags FOR UPDATE TO authenticated USING (true);
+CREATE POLICY "tags_delete" ON tags FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- Deals: scouts see only their own deals; admins see all
+CREATE POLICY "deals_select" ON deals FOR SELECT TO authenticated
+  USING (scout_id = auth.uid() OR public.is_admin());
+CREATE POLICY "deals_insert" ON deals FOR INSERT TO authenticated
+  WITH CHECK (scout_id = auth.uid());
+CREATE POLICY "deals_update" ON deals FOR UPDATE TO authenticated
+  USING (scout_id = auth.uid() OR public.is_admin());
+CREATE POLICY "deals_delete" ON deals FOR DELETE TO authenticated
+  USING (public.is_admin());
+
+-- Deal tags: follows deals access pattern
+CREATE POLICY "deal_tags_select" ON deal_tags FOR SELECT TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM deals WHERE deals.id = deal_tags.deal_id
+      AND (deals.scout_id = auth.uid() OR public.is_admin())
+  ));
+CREATE POLICY "deal_tags_insert" ON deal_tags FOR INSERT TO authenticated
+  WITH CHECK (EXISTS (
+    SELECT 1 FROM deals WHERE deals.id = deal_tags.deal_id
+      AND (deals.scout_id = auth.uid() OR public.is_admin())
+  ));
+CREATE POLICY "deal_tags_delete" ON deal_tags FOR DELETE TO authenticated
+  USING (EXISTS (
+    SELECT 1 FROM deals WHERE deals.id = deal_tags.deal_id
+      AND (deals.scout_id = auth.uid() OR public.is_admin())
+  ));
+
+-- Conversations: scouts see conversations for their deals; admins see all
+CREATE POLICY "conversations_select" ON conversations FOR SELECT TO authenticated
+  USING (
+    public.is_admin()
+    OR EXISTS (
+      SELECT 1 FROM deals WHERE deals.artist_id = conversations.artist_id
+        AND deals.scout_id = auth.uid()
+    )
+  );
+CREATE POLICY "conversations_insert" ON conversations FOR INSERT TO authenticated
+  WITH CHECK (true);  -- Webhooks insert via service role; scouts insert via their deals
+CREATE POLICY "conversations_update" ON conversations FOR UPDATE TO authenticated
+  USING (
+    public.is_admin()
+    OR EXISTS (
+      SELECT 1 FROM deals WHERE deals.artist_id = conversations.artist_id
+        AND deals.scout_id = auth.uid()
+    )
+  );
+
+-- Email templates: shared resource, all can read/create; only creator or admin can modify
+CREATE POLICY "templates_select" ON email_templates FOR SELECT TO authenticated USING (true);
+CREATE POLICY "templates_insert" ON email_templates FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "templates_update" ON email_templates FOR UPDATE TO authenticated
+  USING (created_by = auth.uid() OR public.is_admin());
+CREATE POLICY "templates_delete" ON email_templates FOR DELETE TO authenticated
+  USING (created_by = auth.uid() OR public.is_admin());
+
+-- Enrichment jobs: shared (part of global enrichment pipeline)
+CREATE POLICY "enrichment_select" ON enrichment_jobs FOR SELECT TO authenticated USING (true);
+CREATE POLICY "enrichment_insert" ON enrichment_jobs FOR INSERT TO authenticated WITH CHECK (true);
+CREATE POLICY "enrichment_update" ON enrichment_jobs FOR UPDATE TO authenticated USING (true);
+
+-- Integrations: strictly per-user
+CREATE POLICY "integrations_all" ON integrations FOR ALL TO authenticated
+  USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
 
 /**
- * POST /api/webhooks/instantly
+ * POST /api/webhooks/instantly?secret=<INSTANTLY_WEBHOOK_SECRET>
  *
  * Instantly sends a flat JSON payload (no nested "data" object).
  * Key fields: event_type, lead_email, email, reply_text, campaign_id, etc.
@@ -11,9 +11,25 @@ import { createServiceClient } from '@/lib/supabase/service'
  * Sent events: event_type = "email_sent"
  * Open events: event_type = "email_opened"
  * Bounce events: event_type = "email_bounced"
+ *
+ * Authentication: Set INSTANTLY_WEBHOOK_SECRET env var and append ?secret=<value>
+ * to the webhook URL configured in Instantly.
  */
 export async function POST(request: NextRequest) {
   try {
+    // Verify webhook secret
+    const webhookSecret = process.env.INSTANTLY_WEBHOOK_SECRET
+    if (webhookSecret) {
+      const providedSecret = request.nextUrl.searchParams.get('secret')
+        || request.headers.get('x-webhook-secret')
+      if (providedSecret !== webhookSecret) {
+        console.error('[Webhook/Instantly] Invalid or missing webhook secret')
+        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+      }
+    } else {
+      console.warn('[Webhook/Instantly] INSTANTLY_WEBHOOK_SECRET not set — webhook is unauthenticated')
+    }
+
     const body = await request.json()
 
     // Instantly sends event_type at the top level

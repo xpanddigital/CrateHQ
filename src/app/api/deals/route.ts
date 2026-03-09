@@ -77,6 +77,15 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Check if user is admin
+    const { data: profile } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+
+    const isAdmin = profile?.role === 'admin'
+
     const searchParams = request.nextUrl.searchParams
     const stage = searchParams.get('stage')
     const scout_id = searchParams.get('scout_id')
@@ -95,7 +104,10 @@ export async function GET(request: NextRequest) {
       query = query.eq('stage', stage)
     }
 
-    if (scout_id) {
+    // Scouts can only see their own deals; admins can see all (or filter by scout_id)
+    if (!isAdmin) {
+      query = query.eq('scout_id', user.id)
+    } else if (scout_id) {
       query = query.eq('scout_id', scout_id)
     }
 

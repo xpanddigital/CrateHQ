@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { valuateAndQualify } from '@/lib/qualification/qualifier'
 
+export const maxDuration = 300
+
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
