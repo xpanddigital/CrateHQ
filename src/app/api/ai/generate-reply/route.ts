@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { generateReply, ReplyClassification, ScoutPersona } from '@/lib/ai/sdr'
+import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 
 // POST /api/ai/generate-reply - Generate AI reply
 export async function POST(request: NextRequest) {
@@ -11,6 +12,9 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const rl = checkRateLimit(rateLimitKey(user.id, 'ai/generate-reply'), RATE_LIMITS.ai)
+    if (!rl.allowed) return rl.response
 
     const { replyText, artistId, dealId, classification } = await request.json()
 

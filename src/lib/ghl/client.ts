@@ -7,6 +7,8 @@
  * sub-accounts).
  */
 
+import { decrypt, isEncrypted } from '@/lib/crypto'
+
 const GHL_VERSION = '2021-07-28'
 const DEFAULT_BASE = 'https://services.leadconnectorhq.com'
 
@@ -51,7 +53,18 @@ export async function getGHLClient(
     return null
   }
 
-  const apiKey = account.ghl_api_key?.trim()
+  // Decrypt API key if it was stored encrypted
+  let rawApiKey = account.ghl_api_key?.trim() || ''
+  if (rawApiKey && isEncrypted(rawApiKey)) {
+    try {
+      rawApiKey = decrypt(rawApiKey)
+    } catch (e) {
+      console.error('[GHLClient] Failed to decrypt ghl_api_key:', e)
+      return null
+    }
+  }
+
+  const apiKey = rawApiKey
   const locationId = account.ghl_location_id?.trim()
   const socialAccountId = account.ghl_social_account_id?.trim()
 

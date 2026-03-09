@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { enrichArtist } from '@/lib/enrichment/pipeline'
+import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const maxDuration = 300
 
@@ -12,6 +13,9 @@ export async function POST(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const rl = checkRateLimit(rateLimitKey(user.id, 'artists/bulk-enrich'), RATE_LIMITS.bulk)
+    if (!rl.allowed) return rl.response
 
     const { artistIds } = await request.json()
 

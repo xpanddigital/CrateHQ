@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { checkRateLimit, rateLimitKeyByIP, RATE_LIMITS } from '@/lib/rate-limit'
 
 /**
  * POST /api/webhooks/instantly?secret=<INSTANTLY_WEBHOOK_SECRET>
@@ -17,6 +18,10 @@ import { createServiceClient } from '@/lib/supabase/service'
  */
 export async function POST(request: NextRequest) {
   try {
+    // Rate limit by IP to prevent webhook flooding
+    const rl = checkRateLimit(rateLimitKeyByIP(request, 'webhooks/instantly'), RATE_LIMITS.webhook)
+    if (!rl.allowed) return rl.response
+
     // Verify webhook secret
     const webhookSecret = process.env.INSTANTLY_WEBHOOK_SECRET
     if (webhookSecret) {

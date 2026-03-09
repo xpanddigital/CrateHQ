@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { encrypt } from '@/lib/crypto'
 
 async function requireAdmin() {
   const supabase = await createClient()
@@ -194,7 +195,7 @@ export async function POST(request: NextRequest) {
       const ghlUpdate: Record<string, string | null> = {}
       if (ghl_location_id !== undefined) ghlUpdate.ghl_location_id = ghl_location_id || null
       if (ghl_social_account_id !== undefined) ghlUpdate.ghl_social_account_id = ghl_social_account_id || null
-      if (ghl_api_key !== undefined) ghlUpdate.ghl_api_key = ghl_api_key || null
+      if (ghl_api_key !== undefined) ghlUpdate.ghl_api_key = ghl_api_key ? encrypt(ghl_api_key) : null
       if (Object.keys(ghlUpdate).length) {
         const { error: _ghlErr } = await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
         if (_ghlErr) {
@@ -302,7 +303,7 @@ export async function PATCH(request: NextRequest) {
       const ghlUpdate: Record<string, string | null> = {}
       if (ghl_location_id !== undefined) ghlUpdate.ghl_location_id = ghl_location_id || null
       if (ghl_social_account_id !== undefined) ghlUpdate.ghl_social_account_id = ghl_social_account_id || null
-      if (ghl_api_key !== undefined) ghlUpdate.ghl_api_key = ghl_api_key || null
+      if (ghl_api_key !== undefined) ghlUpdate.ghl_api_key = ghl_api_key ? encrypt(ghl_api_key) : null
       if (Object.keys(ghlUpdate).length) {
         const { error: _ghlErr } = await supabase.from('ig_accounts').update(ghlUpdate).eq('id', ig_account_id)
         if (_ghlErr) {

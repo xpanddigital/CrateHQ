@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import crypto from 'crypto'
+import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 
 export const maxDuration = 60
 
@@ -36,6 +37,9 @@ export async function POST(request: NextRequest) {
     if (!profile || profile.role !== 'admin') {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
+
+    const rl = checkRateLimit(rateLimitKey(user.id, 'admin/generate-post'), RATE_LIMITS.ai)
+    if (!rl.allowed) return rl.response
 
     const body = await request.json()
     const { identity_id, mode, idea } = body || {}

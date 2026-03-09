@@ -91,13 +91,14 @@ export async function GET(request: NextRequest) {
     const scout_id = searchParams.get('scout_id')
     const search = searchParams.get('search')
 
+    // Use !inner join when searching so PostgREST filters on the joined table
+    const selectClause = search
+      ? `*, artist:artists!inner(id, name, image_url, spotify_monthly_listeners, estimated_offer_low, estimated_offer_high), scout:profiles(id, full_name, avatar_url)`
+      : `*, artist:artists(id, name, image_url, spotify_monthly_listeners, estimated_offer_low, estimated_offer_high), scout:profiles(id, full_name, avatar_url)`
+
     let query = supabase
       .from('deals')
-      .select(`
-        *,
-        artist:artists(id, name, image_url, spotify_monthly_listeners, estimated_offer_low, estimated_offer_high),
-        scout:profiles(id, full_name, avatar_url)
-      `)
+      .select(selectClause)
       .order('created_at', { ascending: false })
 
     if (stage) {
@@ -111,20 +112,16 @@ export async function GET(request: NextRequest) {
       query = query.eq('scout_id', scout_id)
     }
 
+    // Server-side search by artist name via PostgREST join filter
+    if (search) {
+      query = query.ilike('artist.name', `%${search}%`)
+    }
+
     const { data: deals, error } = await query
 
     if (error) throw error
 
-    // Filter by artist name if search provided
-    let filteredDeals = deals || []
-    if (search) {
-      const searchLower = search.toLowerCase()
-      filteredDeals = filteredDeals.filter((deal: any) =>
-        deal.artist?.name?.toLowerCase().includes(searchLower)
-      )
-    }
-
-    return NextResponse.json({ deals: filteredDeals })
+    return NextResponse.json({ deals: deals || [] })
   } catch (error: any) {
     console.error('Error fetching deals:', error)
     return NextResponse.json(

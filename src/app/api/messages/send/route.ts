@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 
 export async function POST(request: NextRequest) {
   try {
@@ -9,6 +10,9 @@ export async function POST(request: NextRequest) {
     if (authError || !user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
+
+    const rl = checkRateLimit(rateLimitKey(user.id, 'messages/send'), RATE_LIMITS.standard)
+    if (!rl.allowed) return rl.response
 
     const body = await request.json()
     const { artist_id, thread_key, channel, message_text, scout_id } = body

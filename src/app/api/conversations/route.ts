@@ -147,10 +147,15 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Thread list ──
+    // Pagination: cap fetch to prevent loading entire table
+    const pageSize = Math.min(Number(params.get('limit')) || 500, 1000)
+    const offset = Math.max(Number(params.get('offset')) || 0, 0)
+
     let query = supabase
       .from('conversations')
       .select('*')
       .order('created_at', { ascending: false })
+      .range(offset, offset + pageSize - 1)
 
     // Scope to scout's artists if not admin
     if (!isAdmin && scoutArtistIds.length > 0) {
