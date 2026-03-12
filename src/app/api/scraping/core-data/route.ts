@@ -1,134 +1,51 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { startActorRun, getRunStatus, getDatasetItems } from '@/lib/apify/client'
+import { startActorRun } from '@/lib/apify/client'
 import { logger } from '@/lib/logger'
 
+const DEFAULT_ACTOR_ID = 'YZhD6hYc8daYSWXKs' // beatanalytics/spotify-play-count-scraper
+
+/**
+ * POST /api/scraping/core-data
+ * Triggers an Apify run for core artist data. Returns immediately with { runId, datasetId }.
+ * Client polls /api/scraping/status?runId=xxx, then fetches /api/scraping/results?datasetId=xxx.
+ */
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    if (!user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
     const { data: profile } = await supabase
-      .from('profiles')
-      .select('role')
-      .eq('id', user.id)
-      .single()
-
+      .from('profiles').select('role').eq('id', user.id).single()
     if (profile?.role !== 'admin') {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
 
-    const { urls } = await request.json()
+    const { urls, actorId } = await request.json()
+    if (!urls || !Array.isArray(urls) || urls.length === 0) {
+      return NextResponse.json({ error: 'urls array is required' }, { status: 400 })
+    }
 
     const apifyToken = process.env.APIFY_TOKEN
-    if (!apifyToken) {
-      return NextResponse.json({ error: 'Apify not configured' }, { status: 500 })
-    }
+    if (!apifyToken) return NextResponse.json({ error: 'Apify not configured' }, { status: 500 })
 
-    const actorId = 'YZhD6hYc8daYSWXKs'
+    // beatanalytics scraper expects { urls: [{url: "..."}], followAlbums, ... }
     const input = {
-      urls: urls,
+      urls: urls.map((url: string) => ({ url })),
+      followAlbums: true,
+      followPopularReleases: true,
+      followSingles: true,
     }
 
-    const run = await startActorRun(apifyToken, actorId, input)
-    const runId = run.data.id
+    const run = await startActorRun(apifyToken, actorId || DEFAULT_ACTOR_ID, input)
 
-    // Poll for completion
-    let attempts = 0
-    const maxAttempts = 120 // 10 minutes
-
-    while (attempts < maxAttempts) {
-      await new Promise(r => setTimeout(r, 5000))
-      
-      const status = await getRunStatus(apifyToken, runId)
-      
-      if (status.data.status === 'SUCCEEDED') {
-        const datasetId = status.data.defaultDatasetId
-        const items = await getDatasetItems(apifyToken, datasetId)
-        
-        // Transform and key by Spotify ID
-        const results: Record<string, any> = {}
-        
-        for (const item of items) {
-          const spotifyId = extractSpotifyId(item._url || item.url)
-          if (!spotifyId) continue
-          
-          // Build social_links
-          const socialLinks: Record<string, string> = {}
-          for (let i = 0; i < 20; i++) {
-            const label = item[`externalLinks/${i}/label`]
-            const url = item[`externalLinks/${i}/url`]
-            if (label && url) {
-              const key = label.toLowerCase().replace(/\s+/g, '_')
-              socialLinks[key] = url
-            }
-          }
-          
-          // Extract Instagram handle
-          let instagramHandle = ''
-          if (socialLinks.instagram) {
-            instagramHandle = socialLinks.instagram
-              .replace(/https?:\/\/(www\.)?instagram\.com\//gi, '')
-              .replace(/\/$/, '')
-              .split('/')[0]
-          }
-          
-          // Count tracks
-          let trackCount = 0
-          for (let i = 0; i < 100; i++) {
-            if (item[`albums/${i}/id`]) trackCount++
-            if (item[`singles/${i}/id`]) trackCount++
-          }
-          
-          // Sum top track streams
-          let topTrackStreams = 0
-          for (let i = 0; i < 10; i++) {
-            const streams = item[`topTracks/${i}/streamCount`]
-            if (streams) topTrackStreams += parseInt(streams) || 0
-          }
-          
-          results[spotifyId] = {
-            name: item.name,
-            _url: item._url || item.url,
-            monthlyListeners: item.monthlyListeners || 0,
-            followers: item.followers || 0,
-            biography: item.biography || null,
-            social_links: socialLinks,
-            instagram_handle: instagramHandle || null,
-            trackCount,
-            topTrackStreams,
-            image_url: item['coverArt/0/url'] || null,
-            country: item['topCities/0/country'] || null,
-            verified: item.verified || false,
-            worldRank: item.worldRank || null,
-          }
-        }
-        
-        return NextResponse.json({ results })
-      }
-      
-      if (status.data.status === 'FAILED' || status.data.status === 'ABORTED') {
-        throw new Error('Scraping failed')
-      }
-      
-      attempts++
-    }
-
-    throw new Error('Scraping timed out')
+    return NextResponse.json({
+      runId: run.data.id,
+      datasetId: run.data.defaultDatasetId,
+    })
   } catch (error: any) {
-    logger.error('Core data error:', error)
-    return NextResponse.json(
-      { error: error.message || 'Core data scraping failed' },
-      { status: 500 }
-    )
+    logger.error('[Scraping/CoreData] Error:', error)
+    return NextResponse.json({ error: error.message || 'Failed to start run' }, { status: 500 })
   }
-}
-
-function extractSpotifyId(url: string): string | null {
-  const match = url?.match(/artist\/([a-zA-Z0-9]+)/)
-  return match ? match[1] : null
 }

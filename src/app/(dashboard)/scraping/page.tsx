@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -10,219 +10,195 @@ import { Badge } from '@/components/ui/badge'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { CheckCircle, Loader2, Search, Database, Tag as TagIcon, FileCheck, ChevronRight, Download } from 'lucide-react'
+import {
+  CheckCircle,
+  Loader2,
+  Upload,
+  Database,
+  Tag as TagIcon,
+  FileCheck,
+  ChevronRight,
+  AlertTriangle,
+  RefreshCw,
+  Link as LinkIcon,
+} from 'lucide-react'
 import { useToast } from '@/components/ui/use-toast'
 
-interface ArtistData {
-  spotify_id: string
-  name: string
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ScrapedArtist {
   spotify_url: string
-  monthlyListeners: number
-  topTrackStreams: number
-  trackCount: number
+  name: string
+  monthly_listeners: number
+  spotify_followers: number
+  spotify_verified: boolean
+  biography: string | null
+  image_url: string | null
+  country: string | null
+  world_rank: number
+  top_track_streams: number
+  track_count: number
+  instagram_handle: string | null
+  social_links: Record<string, string>
   genres: string[]
-  hasInstagram: boolean
-  hasYouTube: boolean
-  hasWebsite: boolean
-  hasBio: boolean
+  popularity: number | null
+  // Preview flags
+  has_instagram: boolean
+  has_youtube: boolean
+  has_website: boolean
+  has_bio: boolean
+  // UI state
+  spotify_id: string
   selected: boolean
-  // Full data for import
-  rawData: any
 }
+
+type RunStatus = 'idle' | 'running' | 'succeeded' | 'failed'
+
+// ─── Transform Apify output to ScrapedArtist ──────────────────────────────────
+
+function transformItem(item: any, genreItem?: any): ScrapedArtist {
+  const socialLinks: Record<string, string> = {}
+  let instagramHandle: string | null = null
+
+  for (const link of item.externalLinks || []) {
+    const label = (link.label || '').toLowerCase().trim()
+    const url = link.url || ''
+    if (label === 'instagram') {
+      socialLinks.instagram = url
+      instagramHandle = url
+        .replace(/https?:\/\/(www\.)?instagram\.com\//i, '')
+        .replace(/\/$/, '')
+        .split('?')[0]
+        .split('/')[0]
+    } else if (label === 'youtube') {
+      socialLinks.youtube = url
+    } else if (label === 'facebook') {
+      socialLinks.facebook = url
+    } else if (label === 'twitter' || label === 'x') {
+      socialLinks.twitter = url
+    } else if (label === 'wikipedia') {
+      socialLinks.wikipedia = url
+    } else if (label === 'website' || label === 'homepage') {
+      socialLinks.website = url
+    }
+  }
+
+  const topTrackStreams = (item.topTracks || [])
+    .reduce((sum: number, t: any) => sum + (t.streamCount || 0), 0)
+
+  const trackCount = (item.albums?.length || 0) + (item.singles?.length || 0)
+
+  const spotifyUrl = item._url || item.url || ''
+  const spotifyIdMatch = spotifyUrl.match(/artist\/([a-zA-Z0-9]+)/)
+  const spotifyId = spotifyIdMatch ? spotifyIdMatch[1] : spotifyUrl
+
+  return {
+    spotify_url: spotifyUrl,
+    spotify_id: spotifyId,
+    name: item.name || '',
+    monthly_listeners: item.monthlyListeners || 0,
+    spotify_followers: item.followers || 0,
+    spotify_verified: item.verified || false,
+    biography: item.biography || null,
+    image_url: item.coverArt?.[0]?.url || null,
+    country: item.topCities?.[0]?.country || null,
+    world_rank: item.worldRank || 0,
+    top_track_streams: topTrackStreams,
+    track_count: trackCount,
+    instagram_handle: instagramHandle,
+    social_links: socialLinks,
+    genres: genreItem?.genres || [],
+    popularity: genreItem?.popularity || null,
+    has_instagram: !!instagramHandle,
+    has_youtube: !!socialLinks.youtube,
+    has_website: !!(socialLinks.website || socialLinks.homepage),
+    has_bio: !!item.biography,
+    selected: true,
+  }
+}
+
+function extractSpotifyUrl(text: string): string | null {
+  const match = text.match(/https?:\/\/open\.spotify\.com\/artist\/[a-zA-Z0-9]+/)
+  return match ? match[0] : null
+}
+
+function deduplicateUrls(urls: string[]): string[] {
+  return [...new Set(urls.map(u => u.trim()).filter(Boolean))]
+}
+
+// ─── Component ────────────────────────────────────────────────────────────────
 
 export default function ScrapingPage() {
   const { toast } = useToast()
   const [currentStep, setCurrentStep] = useState(1)
-  const [apifyConfigured, setApifyConfigured] = useState(false)
-  const [checkingConfig, setCheckingConfig] = useState(true)
   const [isAdmin, setIsAdmin] = useState(false)
-  
-  // Step 1: Discovery
-  const [keywords, setKeywords] = useState('')
-  const [maxResults, setMaxResults] = useState('50')
+  const [checkingConfig, setCheckingConfig] = useState(true)
+  const [apifyConfigured, setApifyConfigured] = useState(false)
+
+  // Step 1 — URL Collection
   const [pastedUrls, setPastedUrls] = useState('')
-  const [discoveredUrls, setDiscoveredUrls] = useState<string[]>([])
-  const [discovering, setDiscovering] = useState(false)
-  const [discoveryError, setDiscoveryError] = useState('')
-  
-  // Step 2: Core Data
-  const [coreData, setCoreData] = useState<Record<string, any>>({})
-  const [scrapingCore, setScrapingCore] = useState(false)
-  
-  // Step 3: Genres
-  const [genreData, setGenreData] = useState<Record<string, any>>({})
-  const [scrapingGenres, setScrapingGenres] = useState(false)
-  
-  // Step 4: Review & Import
-  const [artists, setArtists] = useState<ArtistData[]>([])
+  const [collectedUrls, setCollectedUrls] = useState<string[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Step 2 — Core Data
+  const [coreRunId, setCoreRunId] = useState('')
+  const [coreDatasetId, setCoreDatasetId] = useState('')
+  const [coreStatus, setCoreStatus] = useState<RunStatus>('idle')
+  const [coreProgress, setCoreProgress] = useState('')
+  const [coreItems, setCoreItems] = useState<any[]>([])
+
+  // Step 3 — Genre Enrichment
+  const [genreRunId, setGenreRunId] = useState('')
+  const [genreDatasetId, setGenreDatasetId] = useState('')
+  const [genreStatus, setGenreStatus] = useState<RunStatus>('idle')
+  const [genreProgress, setGenreProgress] = useState('')
+
+  // Step 4 — Review & Import
+  const [artists, setArtists] = useState<ScrapedArtist[]>([])
+  const [minListeners, setMinListeners] = useState('')
+  const [maxListeners, setMaxListeners] = useState('')
   const [selectedTags, setSelectedTags] = useState<string[]>([])
   const [availableTags, setAvailableTags] = useState<any[]>([])
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<any>(null)
-  const [rescrapingAll, setRescrapingAll] = useState(false)
+
+  // Rescrape All
+  const [rescrapeRunId, setRescrapeRunId] = useState('')
+  const [rescrapeStatus, setRescrapeStatus] = useState<RunStatus>('idle')
   const [rescrapeResult, setRescrapeResult] = useState<any>(null)
 
+  // Actor IDs (from localStorage settings)
+  const [coreActorId, setCoreActorIdState] = useState('YZhD6hYc8daYSWXKs')
+  const [genreActorId, setGenreActorIdState] = useState('vJZ1EOCOEVCsENnWh')
+
   useEffect(() => {
-    checkApifyConfig()
-    checkAdminRole()
+    checkSetup()
+    fetchTags()
+    // Load actor ID overrides from localStorage
+    const savedCore = localStorage.getItem('apify_core_actor_id')
+    const savedGenre = localStorage.getItem('apify_genre_actor_id')
+    if (savedCore) setCoreActorIdState(savedCore)
+    if (savedGenre) setGenreActorIdState(savedGenre)
   }, [])
 
-  const checkAdminRole = async () => {
+  const checkSetup = async () => {
     try {
       const supabase = (await import('@/lib/supabase/client')).createClient()
       const { data: { user } } = await supabase.auth.getUser()
-      
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('role')
-          .eq('id', user.id)
-          .single()
-        
-        setIsAdmin(profile?.role === 'admin')
-      }
-    } catch (error) {
-      setIsAdmin(false)
-    }
-  }
+      if (!user) return
 
-  const checkApifyConfig = async () => {
-    try {
+      const { data: profile } = await supabase
+        .from('profiles').select('role').eq('id', user.id).single()
+      setIsAdmin(profile?.role === 'admin')
+
       const res = await fetch('/api/integrations/check-apify')
       const data = await res.json()
       setApifyConfigured(data.configured || false)
-    } catch (error) {
-      setApifyConfigured(false)
+    } catch {
+      setIsAdmin(false)
     } finally {
       setCheckingConfig(false)
     }
-  }
-
-  const steps = [
-    { number: 1, title: 'Discover Artists', icon: Search },
-    { number: 2, title: 'Core Data Scrape', icon: Database },
-    { number: 3, title: 'Genre Enrichment', icon: TagIcon },
-    { number: 4, title: 'Review & Import', icon: FileCheck },
-  ]
-
-  const handleDiscover = async () => {
-    setDiscovering(true)
-    setDiscoveryError('')
-    try {
-      // Parse keywords or use pasted URLs
-      let urls: string[] = []
-      
-      if (pastedUrls.trim()) {
-        urls = pastedUrls.split('\n').map(u => u.trim()).filter(Boolean)
-        setDiscoveredUrls(urls)
-        setCurrentStep(2)
-      } else if (keywords.trim()) {
-        const keywordList = keywords.split(',').map(k => k.trim()).filter(Boolean)
-        
-        const res = await fetch('/api/scraping/discover', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            keywords: keywordList,
-            maxResults: parseInt(maxResults) || 50,
-          }),
-        })
-
-        if (!res.ok) {
-          const data = await res.json()
-          throw new Error(data.error || 'Discovery failed')
-        }
-        
-        const data = await res.json()
-        urls = data.urls || []
-        
-        setDiscoveredUrls(urls)
-        if (urls.length > 0) {
-          setCurrentStep(2)
-        }
-      }
-    } catch (error: any) {
-      console.error('Discovery error:', error)
-      setDiscoveryError(error.message || 'Discovery failed')
-    } finally {
-      setDiscovering(false)
-    }
-  }
-
-  const handleScrapeCore = async () => {
-    setScrapingCore(true)
-    try {
-      const res = await fetch('/api/scraping/core-data', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: discoveredUrls }),
-      })
-
-      if (!res.ok) throw new Error('Core data scraping failed')
-      
-      const data = await res.json()
-      setCoreData(data.results || {})
-      setCurrentStep(3)
-    } catch (error) {
-      console.error('Core scraping error:', error)
-    } finally {
-      setScrapingCore(false)
-    }
-  }
-
-  const handleScrapeGenres = async () => {
-    setScrapingGenres(true)
-    try {
-      const res = await fetch('/api/scraping/genres', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ urls: discoveredUrls }),
-      })
-
-      if (!res.ok) throw new Error('Genre scraping failed')
-      
-      const data = await res.json()
-      setGenreData(data.results || {})
-      
-      // Merge and prepare for review
-      prepareReviewData()
-    } catch (error) {
-      console.error('Genre scraping error:', error)
-    } finally {
-      setScrapingGenres(false)
-    }
-  }
-
-  const handleSkipGenres = () => {
-    prepareReviewData()
-  }
-
-  const prepareReviewData = () => {
-    const merged: ArtistData[] = []
-    
-    for (const [spotifyId, core] of Object.entries(coreData)) {
-      const genre = genreData[spotifyId] || {}
-      
-      merged.push({
-        spotify_id: spotifyId,
-        name: core.name || '',
-        spotify_url: core._url || '',
-        monthlyListeners: core.monthlyListeners || 0,
-        topTrackStreams: core.topTrackStreams || 0,
-        trackCount: core.trackCount || 0,
-        genres: genre.genres || [],
-        hasInstagram: !!core.instagram_handle,
-        hasYouTube: !!core.social_links?.youtube,
-        hasWebsite: !!core.social_links?.website,
-        hasBio: !!core.biography,
-        selected: true,
-        rawData: { ...core, ...genre },
-      })
-    }
-    
-    setArtists(merged)
-    setCurrentStep(4)
-    fetchTags()
   }
 
   const fetchTags = async () => {
@@ -230,73 +206,262 @@ export default function ScrapingPage() {
       const res = await fetch('/api/tags')
       const data = await res.json()
       if (data.tags) setAvailableTags(data.tags)
-    } catch (error) {
-      console.error('Error fetching tags:', error)
+    } catch {}
+  }
+
+  // ─── Polling ──────────────────────────────────────────────────────────────
+
+  const pollStatus = useCallback(async (
+    runId: string,
+    onRunning: (msg: string) => void,
+    onSucceeded: (datasetId: string) => void,
+    onFailed: (msg: string) => void,
+  ) => {
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/scraping/status?runId=${runId}`)
+        const data = await res.json()
+        const status = data.status
+
+        if (status === 'RUNNING' || status === 'READY') {
+          onRunning(`Running... (${status})`)
+        } else if (status === 'SUCCEEDED') {
+          clearInterval(interval)
+          onSucceeded(data.datasetId)
+        } else if (status === 'FAILED' || status === 'ABORTED' || status === 'TIMED-OUT') {
+          clearInterval(interval)
+          onFailed(`Run ${status.toLowerCase()}`)
+        }
+      } catch (err) {
+        clearInterval(interval)
+        onFailed('Status check failed')
+      }
+    }, 5000)
+  }, [])
+
+  const fetchResults = useCallback(async (datasetId: string): Promise<any[]> => {
+    const res = await fetch(`/api/scraping/results?datasetId=${datasetId}`)
+    if (!res.ok) throw new Error('Failed to fetch results')
+    const data = await res.json()
+    return data.items || []
+  }, [])
+
+  // ─── Step 1: Collect URLs ─────────────────────────────────────────────────
+
+  const handleCsvUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      const lines = text.split('\n')
+      const found: string[] = []
+      for (const line of lines) {
+        const cells = line.split(',')
+        for (const cell of cells) {
+          const url = extractSpotifyUrl(cell.trim().replace(/"/g, ''))
+          if (url) found.push(url)
+        }
+      }
+      setPastedUrls(prev => [prev, ...found].filter(Boolean).join('\n'))
+      toast({ title: `Extracted ${found.length} Spotify URLs from CSV` })
+    }
+    reader.readAsText(file)
+    e.target.value = ''
+  }
+
+  const handleCollectUrls = () => {
+    const lines = pastedUrls.split('\n')
+    const urls: string[] = []
+    for (const line of lines) {
+      const url = extractSpotifyUrl(line.trim())
+      if (url) urls.push(url)
+    }
+    const deduped = deduplicateUrls(urls)
+    if (deduped.length === 0) {
+      toast({ title: 'No valid Spotify artist URLs found', variant: 'destructive' })
+      return
+    }
+    setCollectedUrls(deduped)
+    setCurrentStep(2)
+  }
+
+  // ─── Step 2: Core Data ────────────────────────────────────────────────────
+
+  const handleStartCoreData = async () => {
+    setCoreStatus('running')
+    setCoreProgress('Starting run...')
+    try {
+      const res = await fetch('/api/scraping/core-data', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: collectedUrls, actorId: coreActorId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
+      const { runId, datasetId } = await res.json()
+      setCoreRunId(runId)
+      setCoreDatasetId(datasetId)
+
+      pollStatus(
+        runId,
+        (msg) => setCoreProgress(msg),
+        async (dsId) => {
+          setCoreProgress('Fetching results...')
+          const items = await fetchResults(dsId)
+          setCoreItems(items)
+          setCoreStatus('succeeded')
+          setCoreProgress(`Scraped ${items.length} artists`)
+          setCurrentStep(3)
+        },
+        (msg) => {
+          setCoreStatus('failed')
+          setCoreProgress(msg)
+          toast({ title: `Core data scrape failed: ${msg}`, variant: 'destructive' })
+        },
+      )
+    } catch (err: any) {
+      setCoreStatus('failed')
+      setCoreProgress(err.message)
+      toast({ title: err.message, variant: 'destructive' })
     }
   }
 
-  const handleImport = async () => {
-    setImporting(true)
+  // ─── Step 3: Genre Enrichment ─────────────────────────────────────────────
+
+  const handleStartGenres = async () => {
+    setGenreStatus('running')
+    setGenreProgress('Starting run...')
     try {
-      const selectedArtists = artists.filter(a => a.selected)
-      
+      const res = await fetch('/api/scraping/genres', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ urls: collectedUrls, actorId: genreActorId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
+      const { runId, datasetId } = await res.json()
+      setGenreRunId(runId)
+      setGenreDatasetId(datasetId)
+
+      pollStatus(
+        runId,
+        (msg) => setGenreProgress(msg),
+        async (dsId) => {
+          setGenreProgress('Fetching results...')
+          const genreItems = await fetchResults(dsId)
+          setGenreStatus('succeeded')
+          setGenreProgress(`Enriched ${genreItems.length} artists`)
+          buildReviewTable(coreItems, genreItems)
+        },
+        (msg) => {
+          setGenreStatus('failed')
+          setGenreProgress(msg)
+          toast({ title: `Genre enrichment failed: ${msg}. Proceeding without genres.`, variant: 'default' })
+          buildReviewTable(coreItems, [])
+        },
+      )
+    } catch (err: any) {
+      setGenreStatus('failed')
+      setGenreProgress(err.message)
+      buildReviewTable(coreItems, [])
+    }
+  }
+
+  const handleSkipGenres = () => {
+    buildReviewTable(coreItems, [])
+  }
+
+  const buildReviewTable = (core: any[], genreItems: any[]) => {
+    // Build genre lookup by Spotify ID
+    const genreMap = new Map<string, any>()
+    for (const g of genreItems) {
+      const url = g._url || g.url || ''
+      const match = url.match(/artist\/([a-zA-Z0-9]+)/)
+      if (match) genreMap.set(match[1], g)
+    }
+
+    const merged = core.map(item => {
+      const spotifyUrl = item._url || item.url || ''
+      const match = spotifyUrl.match(/artist\/([a-zA-Z0-9]+)/)
+      const spotifyId = match ? match[1] : ''
+      return transformItem(item, genreMap.get(spotifyId))
+    })
+
+    setArtists(merged)
+    setCurrentStep(4)
+  }
+
+  // ─── Step 4: Import ───────────────────────────────────────────────────────
+
+  const filteredArtists = artists.filter(a => {
+    const min = parseInt(minListeners) || 0
+    const max = parseInt(maxListeners) || Infinity
+    return a.monthly_listeners >= min && a.monthly_listeners <= max
+  })
+
+  const selectedArtists = filteredArtists.filter(a => a.selected)
+
+  const handleImport = async () => {
+    if (selectedArtists.length === 0) return
+    setImporting(true)
+    setImportResult(null)
+    try {
       const res = await fetch('/api/scraping/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          artists: selectedArtists.map(a => a.rawData),
-          tagIds: selectedTags,
-        }),
+        body: JSON.stringify({ artists: selectedArtists, tagIds: selectedTags }),
       })
-
-      if (!res.ok) throw new Error('Import failed')
-      
+      if (!res.ok) throw new Error((await res.json()).error || 'Import failed')
       const data = await res.json()
       setImportResult(data)
-    } catch (error) {
-      console.error('Import error:', error)
+      toast({ title: `Imported ${data.imported} artists` })
+    } catch (err: any) {
+      toast({ title: err.message, variant: 'destructive' })
     } finally {
       setImporting(false)
     }
   }
 
-  const toggleArtist = (spotifyId: string) => {
-    setArtists(prev => prev.map(a => 
-      a.spotify_id === spotifyId ? { ...a, selected: !a.selected } : a
-    ))
-  }
+  // ─── Rescrape All ─────────────────────────────────────────────────────────
 
   const handleRescrapeAll = async () => {
-    if (!confirm('Re-scrape all existing artists? This will update their data and create growth snapshots. May take 10-15 minutes.')) {
-      return
-    }
-
-    setRescrapingAll(true)
+    if (!confirm('Re-scrape all existing artists? This updates stream counts and listeners. May take 10-15+ minutes.')) return
+    setRescrapeStatus('running')
     setRescrapeResult(null)
-
     try {
-      const res = await fetch('/api/scraping/rescrape-all', {
-        method: 'POST',
-      })
+      const res = await fetch('/api/scraping/rescrape-all', { method: 'POST' })
+      if (!res.ok) throw new Error((await res.json()).error || 'Failed')
+      const { runId, datasetId, total } = await res.json()
+      setRescrapeRunId(runId)
+      toast({ title: `Re-scrape started for ${total} artists. Polling for completion...` })
 
-      if (!res.ok) {
-        const data = await res.json()
-        throw new Error(data.error || 'Re-scrape failed')
-      }
-
-      const data = await res.json()
-      setRescrapeResult(data)
-    } catch (error: any) {
-      toast({ title: error.message || 'Re-scrape failed', variant: 'destructive' })
-    } finally {
-      setRescrapingAll(false)
+      pollStatus(
+        runId,
+        () => {},
+        async (dsId) => {
+          const items = await fetchResults(dsId)
+          const applyRes = await fetch('/api/scraping/rescrape-all', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ items }),
+          })
+          const result = await applyRes.json()
+          setRescrapeStatus('succeeded')
+          setRescrapeResult(result)
+          toast({ title: `Re-scrape complete: ${result.updated} updated` })
+        },
+        (msg) => {
+          setRescrapeStatus('failed')
+          toast({ title: `Re-scrape failed: ${msg}`, variant: 'destructive' })
+        },
+      )
+    } catch (err: any) {
+      setRescrapeStatus('failed')
+      toast({ title: err.message, variant: 'destructive' })
     }
   }
 
-  const selectedCount = artists.filter(a => a.selected).length
-  const withInstagram = artists.filter(a => a.hasInstagram).length
-  const withYouTube = artists.filter(a => a.hasYouTube).length
-  const withEmailFindable = artists.filter(a => a.hasWebsite || a.hasBio).length
+  // ─── Render ───────────────────────────────────────────────────────────────
 
   if (checkingConfig) {
     return (
@@ -309,14 +474,10 @@ export default function ScrapingPage() {
   if (!isAdmin) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
-        </div>
+        <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
         <Card>
-          <CardContent className="p-12 text-center">
-            <p className="text-sm text-muted-foreground">
-              This page is only accessible to administrators.
-            </p>
+          <CardContent className="p-12 text-center text-sm text-muted-foreground">
+            This page is only accessible to administrators.
           </CardContent>
         </Card>
       </div>
@@ -326,81 +487,60 @@ export default function ScrapingPage() {
   if (!apifyConfigured) {
     return (
       <div className="space-y-6">
-        <div>
-          <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
-          <p className="text-muted-foreground">
-            Multi-stage artist discovery and data enrichment pipeline
-          </p>
-        </div>
-
+        <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
         <Card>
-          <CardContent className="p-12 text-center">
-            <Download className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-            <h3 className="text-lg font-semibold mb-2">Apify Not Configured</h3>
-            <p className="text-sm text-muted-foreground mb-4">
-              Add APIFY_TOKEN to your .env.local file to enable scraping features
+          <CardContent className="p-12 text-center space-y-3">
+            <p className="font-semibold">Apify Not Configured</p>
+            <p className="text-sm text-muted-foreground">
+              Add <code className="bg-muted px-1 rounded">APIFY_TOKEN</code> to your environment variables.
             </p>
-            <div className="bg-muted/50 rounded-lg p-4 text-left max-w-md mx-auto">
-              <p className="text-xs font-mono mb-2">
-                APIFY_TOKEN=your_apify_token_here
-              </p>
-              <p className="text-xs text-muted-foreground">
-                Get your token from: https://console.apify.com/account/integrations
-              </p>
-            </div>
           </CardContent>
         </Card>
       </div>
     )
   }
 
+  const steps = [
+    { number: 1, title: 'Collect URLs', icon: LinkIcon },
+    { number: 2, title: 'Core Data', icon: Database },
+    { number: 3, title: 'Genre Enrichment', icon: TagIcon },
+    { number: 4, title: 'Review & Import', icon: FileCheck },
+  ]
+
+  const withInstagram = filteredArtists.filter(a => a.has_instagram).length
+  const withYouTube = filteredArtists.filter(a => a.has_youtube).length
+  const withSocial = filteredArtists.filter(a => a.has_instagram || a.has_youtube || a.has_website).length
+
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold">Scraping Dashboard</h1>
-          <p className="text-muted-foreground">
-            Multi-stage artist discovery and data enrichment pipeline
-          </p>
+          <p className="text-muted-foreground">Artist discovery and enrichment pipeline</p>
         </div>
         <Button
           variant="outline"
           onClick={handleRescrapeAll}
-          disabled={rescrapingAll}
+          disabled={rescrapeStatus === 'running'}
         >
-          {rescrapingAll ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Re-scraping...
-            </>
+          {rescrapeStatus === 'running' ? (
+            <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Re-scraping...</>
           ) : (
-            'Re-scrape All Artists'
+            <><RefreshCw className="h-4 w-4 mr-2" />Re-scrape All Artists</>
           )}
         </Button>
       </div>
 
+      {/* Rescrape result */}
       {rescrapeResult && (
         <Card>
-          <CardContent className="pt-6">
-            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-              <div className="flex items-center gap-2 mb-2">
-                <CheckCircle className="h-5 w-5 text-green-500" />
-                <p className="font-semibold text-green-500">Re-scrape Complete!</p>
-              </div>
-              <div className="grid grid-cols-3 gap-4 text-sm">
-                <div>
-                  <p className="text-muted-foreground">Total</p>
-                  <p className="font-bold">{rescrapeResult.total}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Updated</p>
-                  <p className="font-bold text-green-500">{rescrapeResult.updated}</p>
-                </div>
-                <div>
-                  <p className="text-muted-foreground">Failed</p>
-                  <p className="font-bold">{rescrapeResult.failed}</p>
-                </div>
-              </div>
+          <CardContent className="pt-4">
+            <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4 flex items-center gap-3">
+              <CheckCircle className="h-5 w-5 text-green-500 flex-shrink-0" />
+              <p className="text-sm text-green-600">
+                Re-scrape complete — {rescrapeResult.updated} updated, {rescrapeResult.failed} failed
+              </p>
             </div>
           </CardContent>
         </Card>
@@ -413,25 +553,21 @@ export default function ScrapingPage() {
             {steps.map((step, index) => (
               <div key={step.number} className="flex items-center">
                 <div className="flex flex-col items-center">
-                  <div
-                    className={`flex items-center justify-center h-12 w-12 rounded-full border-2 ${
-                      currentStep >= step.number
+                  <div className={`flex items-center justify-center h-12 w-12 rounded-full border-2 ${
+                    currentStep > step.number
+                      ? 'bg-green-500 border-green-500 text-white'
+                      : currentStep === step.number
                         ? 'bg-primary border-primary text-primary-foreground'
                         : 'border-muted text-muted-foreground'
-                    }`}
-                  >
-                    {currentStep > step.number ? (
-                      <CheckCircle className="h-6 w-6" />
-                    ) : (
-                      <step.icon className="h-6 w-6" />
-                    )}
+                  }`}>
+                    {currentStep > step.number
+                      ? <CheckCircle className="h-6 w-6" />
+                      : <step.icon className="h-6 w-6" />}
                   </div>
-                  <p className="text-xs font-medium mt-2 text-center">
-                    {step.title}
-                  </p>
+                  <p className="text-xs font-medium mt-2 text-center w-20">{step.title}</p>
                 </div>
                 {index < steps.length - 1 && (
-                  <ChevronRight className="h-6 w-6 mx-4 text-muted-foreground" />
+                  <ChevronRight className="h-6 w-6 mx-2 text-muted-foreground flex-shrink-0" />
                 )}
               </div>
             ))}
@@ -439,322 +575,299 @@ export default function ScrapingPage() {
         </CardContent>
       </Card>
 
-      {/* Step 1: Discover */}
+      {/* ── Step 1: Collect URLs ── */}
       {currentStep === 1 && (
         <Card>
           <CardHeader>
-            <CardTitle>Step 1: Discover Artists</CardTitle>
+            <CardTitle>Step 1: Collect Spotify Artist URLs</CardTitle>
             <CardDescription>
-              Search for artists by keywords or paste Spotify URLs directly
+              Paste URLs or upload a CSV. One Spotify artist URL per line.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="space-y-2">
-              <Label>Search Keywords</Label>
-              <Input
-                placeholder="indie hip hop, alternative R&B, underground rap"
-                value={keywords}
-                onChange={(e) => setKeywords(e.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Comma-separated keywords to search Spotify
-              </p>
-              <p className="text-xs text-yellow-600">
-                Note: Actor input format may vary. Verify in Apify docs if discovery fails.
-              </p>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Max Results Per Keyword</Label>
-              <Input
-                type="number"
-                value={maxResults}
-                onChange={(e) => setMaxResults(e.target.value)}
-                placeholder="50"
-              />
-            </div>
-
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center">
-                <span className="w-full border-t" />
-              </div>
-              <div className="relative flex justify-center text-xs uppercase">
-                <span className="bg-background px-2 text-muted-foreground">Or</span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label>Paste Spotify URLs</Label>
+              <Label>Spotify Artist URLs</Label>
               <Textarea
                 placeholder="https://open.spotify.com/artist/3TVXtAsR1Inumwj472S9r4&#10;https://open.spotify.com/artist/..."
                 value={pastedUrls}
                 onChange={(e) => setPastedUrls(e.target.value)}
-                rows={6}
+                rows={8}
+                className="font-mono text-xs"
               />
               <p className="text-xs text-muted-foreground">
-                One URL per line (skips discovery step)
+                One URL per line. Non-URL lines are ignored. Duplicates are removed automatically.
               </p>
             </div>
 
-            {discoveryError && (
-              <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
-                <p className="text-sm text-destructive font-semibold mb-2">Discovery Error:</p>
-                <p className="text-sm text-destructive">{discoveryError}</p>
-                <p className="text-xs text-muted-foreground mt-2">
-                  Using Apify actor: VCXf9fqUpGHnOdeUV
-                </p>
-              </div>
-            )}
-
-            {discoveredUrls.length > 0 && (
-              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  <p className="font-semibold text-green-500">
-                    Found {discoveredUrls.length} artist URLs
-                  </p>
-                </div>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <Button variant="outline" onClick={() => fileInputRef.current?.click()}>
+                <Upload className="h-4 w-4 mr-2" />
+                Upload CSV
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.tsv,.txt"
+                className="hidden"
+                onChange={handleCsvUpload}
+              />
+              <p className="text-xs text-muted-foreground">
+                CSV columns containing Spotify artist URLs will be extracted automatically.
+              </p>
+            </div>
 
             <Button
-              onClick={handleDiscover}
-              disabled={discovering || (!keywords && !pastedUrls)}
+              onClick={handleCollectUrls}
+              disabled={!pastedUrls.trim()}
               className="w-full"
               size="lg"
             >
-              {discovering ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Discovering...
-                </>
-              ) : (
-                <>
-                  <Search className="h-4 w-4 mr-2" />
-                  Start Discovery
-                </>
-              )}
+              <LinkIcon className="h-4 w-4 mr-2" />
+              Proceed to Core Data Scrape
             </Button>
           </CardContent>
         </Card>
       )}
 
-      {/* Step 2: Core Data */}
+      {/* ── Step 2: Core Data ── */}
       {currentStep === 2 && (
         <Card>
           <CardHeader>
             <CardTitle>Step 2: Core Data Scrape</CardTitle>
             <CardDescription>
-              Scrape detailed streaming data, social links, and biography
+              Fetches streams, listeners, social links, bio, and top tracks from Spotify
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-muted/50 rounded-lg p-4">
-              <p className="text-sm">
-                <strong>{discoveredUrls.length}</strong> artist URLs ready to scrape
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                This will fetch: streams, listeners, social links, bio, albums, singles
-              </p>
+            <div className="bg-muted/50 rounded-lg p-4 text-sm">
+              <strong>{collectedUrls.length}</strong> artist URLs ready
+              <span className="text-muted-foreground ml-2">· Actor: {coreActorId}</span>
             </div>
 
-            {Object.keys(coreData).length > 0 && (
-              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  <p className="font-semibold text-green-500">
-                    Scraped {Object.keys(coreData).length} artists
-                  </p>
-                </div>
+            {coreStatus === 'running' && (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                {coreProgress}
+              </div>
+            )}
+            {coreStatus === 'succeeded' && (
+              <div className="flex items-center gap-2 text-green-600 text-sm">
+                <CheckCircle className="h-4 w-4" />
+                {coreProgress}
+              </div>
+            )}
+            {coreStatus === 'failed' && (
+              <div className="flex items-center gap-2 text-destructive text-sm">
+                <AlertTriangle className="h-4 w-4" />
+                {coreProgress}
               </div>
             )}
 
-            <Button
-              onClick={handleScrapeCore}
-              disabled={scrapingCore}
-              className="w-full"
-              size="lg"
-            >
-              {scrapingCore ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Scraping Core Data...
-                </>
-              ) : (
-                <>
-                  <Database className="h-4 w-4 mr-2" />
-                  Scrape Core Data
-                </>
-              )}
-            </Button>
+            {coreStatus === 'idle' && (
+              <Button onClick={handleStartCoreData} className="w-full" size="lg">
+                <Database className="h-4 w-4 mr-2" />
+                Start Core Data Scrape
+              </Button>
+            )}
+            {coreStatus === 'running' && (
+              <Button disabled className="w-full" size="lg">
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Polling for results every 5s...
+              </Button>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {/* Step 3: Genres */}
+      {/* ── Step 3: Genre Enrichment ── */}
       {currentStep === 3 && (
         <Card>
           <CardHeader>
-            <CardTitle>Step 3: Genre Enrichment</CardTitle>
+            <CardTitle>Step 3: Genre Enrichment <Badge variant="outline" className="ml-2">Optional</Badge></CardTitle>
             <CardDescription>
-              Optional: Add genre data and popularity scores
+              Adds genre tags and popularity scores
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="bg-muted/50 rounded-lg p-4">
-              <p className="text-sm">
-                <strong>{Object.keys(coreData).length}</strong> artists ready for genre enrichment
-              </p>
-              <p className="text-xs text-muted-foreground mt-1">
-                This adds genre tags and popularity metrics
-              </p>
+            <div className="bg-yellow-500/10 border border-yellow-500/20 rounded-lg p-4 flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-semibold text-yellow-700">Known reliability issues</p>
+                <p className="text-muted-foreground mt-1">
+                  This actor ({genreActorId}) has a ~65% failure rate. Results may be partial or missing.
+                  You can skip this step — genres can be added manually later.
+                </p>
+              </div>
             </div>
 
-            {Object.keys(genreData).length > 0 && (
-              <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
-                <div className="flex items-center gap-2">
-                  <CheckCircle className="h-5 w-5 text-green-500" />
-                  <p className="font-semibold text-green-500">
-                    Enriched {Object.keys(genreData).length} artists with genres
-                  </p>
-                </div>
+            {genreStatus === 'running' && (
+              <div className="flex items-center gap-3 text-sm text-muted-foreground">
+                <Loader2 className="h-4 w-4 animate-spin flex-shrink-0" />
+                {genreProgress}
+              </div>
+            )}
+            {genreStatus === 'succeeded' && (
+              <div className="flex items-center gap-2 text-green-600 text-sm">
+                <CheckCircle className="h-4 w-4" />
+                {genreProgress}
+              </div>
+            )}
+            {(genreStatus === 'failed') && (
+              <div className="flex items-center gap-2 text-destructive text-sm">
+                <AlertTriangle className="h-4 w-4" />
+                {genreProgress} — proceeding without genres
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Button
-                onClick={handleSkipGenres}
-                variant="outline"
-                className="flex-1"
-              >
-                Skip This Step
+            {genreStatus === 'idle' && (
+              <div className="flex gap-2">
+                <Button variant="outline" className="flex-1" onClick={handleSkipGenres}>
+                  Skip This Step
+                </Button>
+                <Button className="flex-1" onClick={handleStartGenres}>
+                  <TagIcon className="h-4 w-4 mr-2" />
+                  Try Genre Enrichment
+                </Button>
+              </div>
+            )}
+            {genreStatus === 'running' && (
+              <Button disabled className="w-full" size="lg">
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Polling for results every 5s...
               </Button>
-              <Button
-                onClick={handleScrapeGenres}
-                disabled={scrapingGenres}
-                className="flex-1"
-              >
-                {scrapingGenres ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Enriching...
-                  </>
-                ) : (
-                  <>
-                    <TagIcon className="h-4 w-4 mr-2" />
-                    Enrich Genres
-                  </>
-                )}
-              </Button>
-            </div>
+            )}
           </CardContent>
         </Card>
       )}
 
-      {/* Step 4: Review & Import */}
+      {/* ── Step 4: Review & Import ── */}
       {currentStep === 4 && (
         <>
-          <Card>
-            <CardHeader>
-              <CardTitle>Summary Statistics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="grid grid-cols-4 gap-4">
-                <div>
-                  <p className="text-sm text-muted-foreground">Total Artists</p>
-                  <p className="text-2xl font-bold">{artists.length}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">With Instagram</p>
-                  <p className="text-2xl font-bold">{withInstagram}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">With YouTube</p>
-                  <p className="text-2xl font-bold">{withYouTube}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground">Email-Findable</p>
-                  <p className="text-2xl font-bold">{withEmailFindable}</p>
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+          {/* Stats bar */}
+          <div className="grid grid-cols-4 gap-4">
+            {[
+              { label: 'Total Artists', value: filteredArtists.length },
+              { label: 'With Instagram', value: withInstagram },
+              { label: 'With YouTube', value: withYouTube },
+              { label: 'With Social Links', value: withSocial },
+            ].map(stat => (
+              <Card key={stat.label}>
+                <CardContent className="pt-4 pb-4">
+                  <p className="text-xs text-muted-foreground">{stat.label}</p>
+                  <p className="text-2xl font-bold">{stat.value}</p>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
 
           <Card>
             <CardHeader>
-              <CardTitle>Review & Import ({selectedCount} selected)</CardTitle>
-              <CardDescription>
-                Review scraped artists and select tags to apply
-              </CardDescription>
+              <CardTitle>Review & Import ({selectedArtists.length} selected)</CardTitle>
+              <CardDescription>Filter, deselect, and tag artists before importing</CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label>Auto-Apply Tags</Label>
-                <div className="flex flex-wrap gap-2">
-                  {availableTags.map((tag) => (
-                    <Badge
-                      key={tag.id}
-                      variant={selectedTags.includes(tag.id) ? 'default' : 'outline'}
-                      className="cursor-pointer"
-                      style={
-                        selectedTags.includes(tag.id)
-                          ? { backgroundColor: tag.color }
-                          : { borderColor: tag.color, color: tag.color }
-                      }
-                      onClick={() => {
-                        setSelectedTags(prev =>
-                          prev.includes(tag.id)
-                            ? prev.filter(id => id !== tag.id)
-                            : [...prev, tag.id]
-                        )
-                      }}
-                    >
-                      {tag.name}
-                    </Badge>
-                  ))}
+              {/* Filters */}
+              <div className="flex gap-4 items-end">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Min Monthly Listeners</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 1000"
+                    value={minListeners}
+                    onChange={e => setMinListeners(e.target.value)}
+                    className="w-40"
+                  />
                 </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Max Monthly Listeners</Label>
+                  <Input
+                    type="number"
+                    placeholder="e.g. 500000"
+                    value={maxListeners}
+                    onChange={e => setMaxListeners(e.target.value)}
+                    className="w-40"
+                  />
+                </div>
+                {(minListeners || maxListeners) && (
+                  <Button variant="ghost" size="sm" onClick={() => { setMinListeners(''); setMaxListeners('') }}>
+                    Clear filter
+                  </Button>
+                )}
               </div>
 
-              <div className="border rounded-lg max-h-[400px] overflow-y-auto">
+              {/* Tags */}
+              {availableTags.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Auto-Apply Tags</Label>
+                  <div className="flex flex-wrap gap-2">
+                    {availableTags.map(tag => (
+                      <Badge
+                        key={tag.id}
+                        variant={selectedTags.includes(tag.id) ? 'default' : 'outline'}
+                        className="cursor-pointer"
+                        style={selectedTags.includes(tag.id)
+                          ? { backgroundColor: tag.color }
+                          : { borderColor: tag.color, color: tag.color }}
+                        onClick={() => setSelectedTags(prev =>
+                          prev.includes(tag.id) ? prev.filter(id => id !== tag.id) : [...prev, tag.id]
+                        )}
+                      >
+                        {tag.name}
+                      </Badge>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Table */}
+              <div className="border rounded-lg max-h-[480px] overflow-y-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead className="w-12">
+                      <TableHead className="w-10">
                         <Checkbox
-                          checked={selectedCount === artists.length}
-                          onCheckedChange={() => {
-                            const allSelected = selectedCount === artists.length
-                            setArtists(prev => prev.map(a => ({ ...a, selected: !allSelected })))
+                          checked={filteredArtists.length > 0 && filteredArtists.every(a => a.selected)}
+                          onCheckedChange={(checked) => {
+                            const ids = new Set(filteredArtists.map(a => a.spotify_id))
+                            setArtists(prev => prev.map(a =>
+                              ids.has(a.spotify_id) ? { ...a, selected: !!checked } : a
+                            ))
                           }}
                         />
                       </TableHead>
                       <TableHead>Name</TableHead>
-                      <TableHead>Listeners</TableHead>
+                      <TableHead>Monthly Listeners</TableHead>
+                      <TableHead>Top Streams</TableHead>
                       <TableHead>Tracks</TableHead>
                       <TableHead>Genres</TableHead>
                       <TableHead>Social</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {artists.map((artist) => (
+                    {filteredArtists.map(artist => (
                       <TableRow key={artist.spotify_id}>
                         <TableCell>
                           <Checkbox
                             checked={artist.selected}
-                            onCheckedChange={() => toggleArtist(artist.spotify_id)}
+                            onCheckedChange={() =>
+                              setArtists(prev => prev.map(a =>
+                                a.spotify_id === artist.spotify_id ? { ...a, selected: !a.selected } : a
+                              ))
+                            }
                           />
                         </TableCell>
-                        <TableCell className="font-medium">{artist.name}</TableCell>
-                        <TableCell>{artist.monthlyListeners.toLocaleString()}</TableCell>
-                        <TableCell>{artist.trackCount}</TableCell>
-                        <TableCell className="text-xs">
+                        <TableCell className="font-medium max-w-[160px] truncate">{artist.name}</TableCell>
+                        <TableCell>{artist.monthly_listeners.toLocaleString()}</TableCell>
+                        <TableCell>{(artist.top_track_streams / 1_000_000).toFixed(1)}M</TableCell>
+                        <TableCell>{artist.track_count}</TableCell>
+                        <TableCell className="text-xs max-w-[120px] truncate">
                           {artist.genres.slice(0, 2).join(', ') || '—'}
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-1">
-                            {artist.hasInstagram && <Badge variant="outline">IG</Badge>}
-                            {artist.hasYouTube && <Badge variant="outline">YT</Badge>}
-                            {artist.hasWebsite && <Badge variant="outline">Web</Badge>}
+                            {artist.has_instagram && <Badge variant="outline" className="text-xs px-1">IG</Badge>}
+                            {artist.has_youtube && <Badge variant="outline" className="text-xs px-1">YT</Badge>}
+                            {artist.has_website && <Badge variant="outline" className="text-xs px-1">Web</Badge>}
                           </div>
                         </TableCell>
                       </TableRow>
@@ -763,42 +876,31 @@ export default function ScrapingPage() {
                 </Table>
               </div>
 
+              {/* Import result */}
               {importResult && (
                 <div className="bg-green-500/10 border border-green-500/20 rounded-lg p-4">
                   <div className="flex items-center gap-2 mb-2">
                     <CheckCircle className="h-5 w-5 text-green-500" />
-                    <p className="font-semibold text-green-500">Import Complete!</p>
+                    <p className="font-semibold text-green-600">Import Complete!</p>
                   </div>
                   <div className="grid grid-cols-3 gap-4 text-sm">
-                    <div>
-                      <p className="text-muted-foreground">Imported</p>
-                      <p className="font-bold">{importResult.imported}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Duplicates</p>
-                      <p className="font-bold">{importResult.skipped}</p>
-                    </div>
-                    <div>
-                      <p className="text-muted-foreground">Failed</p>
-                      <p className="font-bold">{importResult.failed || 0}</p>
-                    </div>
+                    <div><p className="text-muted-foreground">Imported</p><p className="font-bold">{importResult.imported}</p></div>
+                    <div><p className="text-muted-foreground">Duplicates</p><p className="font-bold">{importResult.skipped}</p></div>
+                    <div><p className="text-muted-foreground">Failed</p><p className="font-bold">{importResult.failed ?? 0}</p></div>
                   </div>
                 </div>
               )}
 
               <Button
                 onClick={handleImport}
-                disabled={importing || selectedCount === 0}
+                disabled={importing || selectedArtists.length === 0}
                 className="w-full"
                 size="lg"
               >
                 {importing ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Importing...
-                  </>
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Importing...</>
                 ) : (
-                  `Import ${selectedCount} Artists`
+                  `Import ${selectedArtists.length} Artists`
                 )}
               </Button>
             </CardContent>

@@ -45,9 +45,14 @@ export default function SettingsPage() {
   const [apifyConfigured, setApifyConfigured] = useState(false)
   const [testingApify, setTestingApify] = useState(false)
   const [apifyStatus, setApifyStatus] = useState<'idle' | 'success' | 'error'>('idle')
+  const [coreDataActorId, setCoreDataActorId] = useState('YZhD6hYc8daYSWXKs')
+  const [genreActorId, setGenreActorId] = useState('vJZ1EOCOEVCsENnWh')
+  const [actorsSaved, setActorsSaved] = useState(false)
 
   useEffect(() => {
     fetchProfile()
+    setCoreDataActorId(localStorage.getItem('apify_core_actor_id') || 'YZhD6hYc8daYSWXKs')
+    setGenreActorId(localStorage.getItem('apify_genre_actor_id') || 'vJZ1EOCOEVCsENnWh')
   }, [])
 
   const fetchProfile = async () => {
@@ -94,6 +99,13 @@ export default function SettingsPage() {
     } finally {
       setLoading(false)
     }
+  }
+
+  const handleSaveActorIds = () => {
+    localStorage.setItem('apify_core_actor_id', coreDataActorId.trim() || 'YZhD6hYc8daYSWXKs')
+    localStorage.setItem('apify_genre_actor_id', genreActorId.trim() || 'vJZ1EOCOEVCsENnWh')
+    setActorsSaved(true)
+    setTimeout(() => setActorsSaved(false), 2000)
   }
 
   const handleTestApify = async () => {
@@ -463,11 +475,38 @@ export default function SettingsPage() {
               </div>
             )}
 
-            <div className="text-xs text-muted-foreground space-y-1">
-              <p><strong>Default Actors:</strong></p>
-              <p>• Discovery: VCXf9fqUpGHnOdeUV</p>
-              <p>• Core Data: YZhD6hYc8daYSWXKs</p>
-              <p>• Genres: (optional)</p>
+            <div className="space-y-3">
+              <p className="text-sm font-medium">Actor Configuration</p>
+              <p className="text-xs text-muted-foreground">
+                Swap actors if better scrapers become available. IDs are saved in browser storage.
+              </p>
+              <div className="space-y-2">
+                <Label htmlFor="core-actor-id" className="text-xs">Core Data Actor ID</Label>
+                <Input
+                  id="core-actor-id"
+                  value={coreDataActorId}
+                  onChange={(e) => setCoreDataActorId(e.target.value)}
+                  placeholder="YZhD6hYc8daYSWXKs"
+                  className="font-mono text-xs h-8"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="genre-actor-id" className="text-xs">Genre Enrichment Actor ID</Label>
+                <Input
+                  id="genre-actor-id"
+                  value={genreActorId}
+                  onChange={(e) => setGenreActorId(e.target.value)}
+                  placeholder="vJZ1EOCOEVCsENnWh"
+                  className="font-mono text-xs h-8"
+                />
+              </div>
+              <Button onClick={handleSaveActorIds} variant="outline" size="sm" className="w-full">
+                {actorsSaved ? (
+                  <><CheckCircle className="h-3 w-3 mr-2 text-green-500" />Saved</>
+                ) : (
+                  <><Save className="h-3 w-3 mr-2" />Save Actor IDs</>
+                )}
+              </Button>
             </div>
           </CardContent>
         </Card>
