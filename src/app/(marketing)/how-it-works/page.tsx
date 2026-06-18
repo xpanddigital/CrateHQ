@@ -9,9 +9,10 @@ import { HeroVideoPlayer } from '@/components/marketing/HeroVideoPlayer'
 // Low direct volume but supports the homepage's primary keyword
 // and answers buyer-stage research questions.
 export const metadata: Metadata = {
-  title: 'How Praecora Works: Music Industry CRM Setup, Step by Step',
+  // " | Praecora" is appended by the root layout template.
+  title: 'How Praecora Works: Setup, Step by Step',
   description:
-    'From the day you pay onboarding to the day your first cold DM goes out — the 4-week setup, the daily rhythm after, and exactly what you own and what we manage.',
+    'From onboarding to your first cold DM — the 4-week setup, the daily rhythm after, and exactly what you own versus what we manage.',
   alternates: { canonical: 'https://www.praecora.com/how-it-works' },
   openGraph: {
     title: 'How Praecora Works: Music Industry CRM Setup, Step by Step',
@@ -19,6 +20,8 @@ export const metadata: Metadata = {
       'From the day you pay onboarding to the day your first cold DM goes out. The 4-week setup, the daily rhythm after.',
     url: 'https://www.praecora.com/how-it-works',
     type: 'website',
+    siteName: 'Praecora',
+    images: ['https://www.praecora.com/opengraph-image'],
   },
 }
 

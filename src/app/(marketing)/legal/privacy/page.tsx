@@ -1,5 +1,9 @@
 export const metadata = {
-  title: 'Privacy Policy — Praecora',
+  // " | Praecora" is appended by the root layout template.
+  title: 'Privacy Policy',
+  description:
+    'How Praecora collects, uses, and protects your data — the managed Instagram and email outreach platform for independent music catalog scouts.',
+  alternates: { canonical: 'https://www.praecora.com/legal/privacy' },
 }
 
 export default function PrivacyPage() {

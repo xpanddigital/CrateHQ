@@ -9,7 +9,16 @@
 
 export type BlogPost = {
   slug: string
+  /** Full, descriptive headline — used for the on-page H1 and listing. */
   title: string
+  /**
+   * Optional concise SERP title used for the HTML <title> only. Keep it
+   * ≤49 chars so that, with the " | Praecora" template suffix appended
+   * by the root layout, the rendered <title> stays ≤60 chars and avoids
+   * SERP truncation. Falls back to `title` when omitted.
+   */
+  seoTitle?: string
+  /** Meta description + OG description. Keep ≤155 chars (≤160 hard cap). */
   description: string
   /** ISO date — used for sitemap lastmod and visible publish date. */
   publishedAt: string
@@ -42,18 +51,19 @@ const JOEL: BlogPost['author'] = {
 }
 
 /**
- * Posts are listed newest-first. Order here is the display order on
- * /blog. Publish dates are staggered backwards from the launch date
- * so the listing reads like a normal editorial cadence rather than
- * "we shipped 10 posts in one day."
+ * Posts are listed newest-first by array position (display order on
+ * /blog is driven by array order, not date). Publish dates are
+ * staggered across the months before launch so the field guide reads
+ * like a steady editorial cadence rather than a single bulk drop.
  */
 export const POSTS: BlogPost[] = [
   {
     slug: 'best-crm-for-music-catalog-scouts',
     title:
       'The Best CRM for Music Catalog Scouts and Brokers in 2026',
+    seoTitle: 'Best CRM for Music Catalog Scouts (2026)',
     description:
-      'Generic CRMs were built for B2B SaaS sales. Music catalog scouting is a different sport. Here\'s what actually matters in a tool for this work — and why most software fails at it.',
+      'Generic CRMs were built for B2B SaaS. Catalog scouting is a different sport — here\'s what actually matters in a tool for it, and why most software fails.',
     publishedAt: '2026-05-18',
     author: JOEL,
     readingTime: 11,
@@ -66,8 +76,9 @@ export const POSTS: BlogPost[] = [
     slug: 'run-multiple-instagram-accounts-without-bans',
     title:
       'How to Run 7 Instagram Accounts Without Getting Banned: The 2026 Playbook',
+    seoTitle: 'Run 7 Instagram Accounts Without a Ban',
     description:
-      'Multiple Instagram accounts collapse inside 90 days for most operators — and the four structural fixes that keep an account fleet alive for 12+ months. Written from inside an operation that lost everything and rebuilt it.',
+      'Most multi-account Instagram setups collapse within 90 days. The four structural fixes that keep an account fleet alive for 12+ months.',
     publishedAt: '2026-05-16',
     author: JOEL,
     readingTime: 14,
@@ -86,8 +97,9 @@ export const POSTS: BlogPost[] = [
     slug: 'music-catalog-financing-broker-playbook',
     title:
       'The Music Catalog Financing Broker Playbook: Sourcing Indie Deals for 10% Commission',
+    seoTitle: 'Music Catalog Financing Broker Playbook',
     description:
-      'The independent music industry has $200M+ of fresh capital chasing catalog deals — and almost no formal job description for the people who source them. Here\'s how the role actually works, what scouts earn, and how to break in.',
+      'The indie music industry has $200M+ chasing catalog deals — and barely a job description for who sources them. How the scout role works, and what it pays.',
     publishedAt: '2026-05-14',
     author: JOEL,
     readingTime: 18,
@@ -106,8 +118,9 @@ export const POSTS: BlogPost[] = [
     slug: 'cold-dm-indie-artists-instagram',
     title:
       'How to Cold DM Indie Artists on Instagram: Templates, Reply Rates, and What Actually Works',
+    seoTitle: 'How to Cold DM Indie Artists on Instagram',
     description:
-      'Most cold DM templates were written for SMMA sales. Indie artists are not your typical B2B prospect. Here\'s the operator\'s guide to opening lines, follow-up cadence, and the messages that get replies from artists worth a catalog deal.',
+      'Cold DM templates written for SMMA sales fail with indie artists. The opener lines, follow-up cadence, and messages that actually get replies.',
     publishedAt: '2026-05-12',
     author: JOEL,
     readingTime: 13,
@@ -119,8 +132,9 @@ export const POSTS: BlogPost[] = [
     slug: 'praecora-vs-manychat',
     title:
       'Praecora vs ManyChat: Why Music Scouts Need More Than a Chatbot',
+    seoTitle: 'Praecora vs ManyChat for Music Scouts',
     description:
-      'Looking for a ManyChat alternative for cold outbound sales? ManyChat is a great tool, but it\'s the wrong tool for sourcing music catalog deals. Here\'s the architectural reason cold-outbound operators can\'t use comment-keyword chatbots — and what a deal-flow platform looks like instead.',
+      'A ManyChat alternative for cold outbound: why comment-keyword chatbots can\'t source music catalog deals, and what a deal-flow platform does instead.',
     publishedAt: '2026-05-10',
     author: JOEL,
     readingTime: 9,
@@ -132,8 +146,9 @@ export const POSTS: BlogPost[] = [
     slug: 'cloud-phones-for-instagram-geelark-bitbrowser-multilogin',
     title:
       'Cloud Phones for Instagram Outreach: GeeLark vs BitBrowser vs Multilogin (2026)',
+    seoTitle: 'Cloud Phones for Instagram Outreach (2026)',
     description:
-      'The best antidetect browser is no longer a browser — it\'s a cloud phone. Here\'s how the three serious cloud phone vendors (GeeLark, BitBrowser, Multilogin) compare for music catalog scouts running 5+ Instagram accounts in parallel, and why antidetect browser tooling alone stopped being enough in 2024.',
+      'The best antidetect "browser" is now a cloud phone. How GeeLark, BitBrowser, and Multilogin compare for scouts running 5+ Instagram accounts in parallel.',
     publishedAt: '2026-05-08',
     author: JOEL,
     readingTime: 12,
@@ -145,8 +160,9 @@ export const POSTS: BlogPost[] = [
     slug: 'music-catalog-financing-explained',
     title:
       'Music Catalog Financing, Explained: How Indie Artists Get Funded and Who Sources the Deals',
+    seoTitle: 'Music Catalog Financing, Explained',
     description:
-      'Royalty advances, catalog buyouts, term advances — the financial products fueling indie music in 2026, who provides them, and where independent scouts fit into the deal flow.',
+      'Royalty advances, catalog buyouts, term advances — the products funding indie music in 2026, who provides them, and where scouts fit in the deal flow.',
     publishedAt: '2026-05-06',
     author: JOEL,
     readingTime: 15,
@@ -164,8 +180,9 @@ export const POSTS: BlogPost[] = [
     slug: 'music-catalog-buyer-directory-2026',
     title:
       'The Music Catalog Buyer Directory: Every Active Indie Buyer in 2026',
+    seoTitle: 'Music Catalog Buyer Directory 2026',
     description:
-      'beatBread. Xposure Music. Connect Music. Symphonic. RoyFi. Intercept. Futures. Twenty-plus active buyers placing capital into independent catalogs right now — minimum deal sizes, advance multiples, and what each one actually buys.',
+      'beatBread, Xposure, Symphonic, RoyFi and more — 20+ active buyers placing capital into indie catalogs now, with deal sizes and advance multiples.',
     publishedAt: '2026-05-04',
     author: JOEL,
     readingTime: 16,
@@ -177,8 +194,9 @@ export const POSTS: BlogPost[] = [
     slug: 'instagram-dm-limits-2026',
     title:
       'Instagram DM Limits in 2026: How Scouts Send 140 a Day Without a Ban',
+    seoTitle: 'Instagram DM Limits in 2026',
     description:
-      'The 200/hour API rate limit is the floor, not the ceiling. The real limit is what Instagram\'s spam-detection model tolerates from a brand-new account — and how that scales as accounts age. The volume math, by account age.',
+      'The 200/hour API cap is the floor, not the ceiling. The real limit is what Instagram\'s spam model tolerates by account age — with the volume math.',
     publishedAt: '2026-05-02',
     author: JOEL,
     readingTime: 10,
@@ -190,8 +208,9 @@ export const POSTS: BlogPost[] = [
     slug: 'praecora-vs-pipedrive',
     title:
       'Praecora vs Pipedrive: Why Generic CRMs Fail Music Industry Sales',
+    seoTitle: 'Praecora vs Pipedrive for Music Sales',
     description:
-      'Looking for a Pipedrive alternative for music industry sales? Pipedrive is great for deals you already have, but music catalog scouting is mostly about the conversations that come before a deal exists. Here\'s why pipeline-first CRMs break for this work — and what fits instead.',
+      'A Pipedrive alternative for music sales: catalog scouting is mostly the conversations before a deal exists, which is where pipeline-first CRMs break.',
     publishedAt: '2026-04-30',
     author: JOEL,
     readingTime: 10,
@@ -199,13 +218,14 @@ export const POSTS: BlogPost[] = [
     pillar: 'tools-and-comparisons',
     tags: ['Pipedrive', 'comparison', 'CRM', 'music industry'],
   },
-  // ─────────────── TIER 2 — weekly drops, starting 2026-05-25 ───────────────
+  // ───────────────── TIER 2 — additional field-guide articles ─────────────────
   {
     slug: 'cold-email-templates-music-industry-sales',
     title:
       'Cold Email Templates for Music Industry Sales (That Actually Get Replies)',
+    seoTitle: 'Cold Email Templates for Music Sales',
     description:
-      'Most cold email templates are written for B2B SaaS. Music industry contacts — managers, labels, A&Rs — pattern-match on those templates instantly and delete. Here are the email structures that actually open doors in music catalog finance, with real examples and follow-up cadences.',
+      'Most cold email templates are built for B2B SaaS, and music managers and A&Rs delete them on sight. The structures that actually open doors in music.',
     publishedAt: '2026-05-25',
     author: JOEL,
     readingTime: 12,
@@ -217,8 +237,9 @@ export const POSTS: BlogPost[] = [
     slug: 'antidetect-browsers-explained-cloud-phone-replacement',
     title:
       'Antidetect Browsers Explained (and Why Cloud Phones Replaced Them in 2024)',
+    seoTitle: 'Antidetect Browsers, Explained (2024)',
     description:
-      'The best antidetect browser used to be enough for multi-account Instagram. Then Meta\'s risk model started weighing mobile-device signals over web signals, and the entire category changed. Here\'s what antidetect browsers do, what they no longer cover, and why operators moved to cloud phones.',
+      'Antidetect browsers used to be enough for multi-account Instagram, until Meta started weighting mobile signals. What they cover, what they don\'t.',
     publishedAt: '2026-06-01',
     author: JOEL,
     readingTime: 13,
@@ -230,8 +251,9 @@ export const POSTS: BlogPost[] = [
     slug: 'facebook-business-portfolio-multi-account-instagram',
     title:
       'Setting Up a Facebook Business Portfolio for Multi-Account Instagram (Without Risking Your Real Facebook)',
+    seoTitle: 'Facebook Business Portfolio for Instagram',
     description:
-      'The Facebook Business Portfolio is the hidden infrastructure layer behind every multi-account Instagram operation. Set it up wrong and one ban cascades to every account; set it up right and the blast radius stops at one Page. Here\'s the operator\'s guide.',
+      'The Facebook Business Portfolio is the hidden layer behind multi-account Instagram. Set it up wrong and one ban cascades — here\'s the operator\'s setup.',
     publishedAt: '2026-06-08',
     author: JOEL,
     readingTime: 11,
@@ -248,8 +270,9 @@ export const POSTS: BlogPost[] = [
     slug: 'beatbread-review-2026-indie-catalog-deals',
     title:
       'beatBread Review 2026: How It Works for Indie Catalog Deals',
+    seoTitle: 'beatBread Review 2026',
     description:
-      'beatBread is the largest indie-focused royalty advance platform in 2026 — $100M+ deployed across 1,700+ funding agreements. Here\'s an honest, operator\'s-perspective review of how the deals work, who qualifies, what scouts should know, and where beatBread fits in the broader buyer landscape.',
+      'beatBread is the largest indie royalty-advance platform in 2026 — $100M+ across 1,700+ deals. An operator\'s review of how it works and who qualifies.',
     publishedAt: '2026-06-15',
     author: JOEL,
     readingTime: 12,
@@ -261,9 +284,10 @@ export const POSTS: BlogPost[] = [
     slug: 'chartmetric-for-music-catalog-scouts',
     title:
       'Chartmetric for Music Catalog Scouts: What to Look at Before Pitching',
+    seoTitle: 'Chartmetric for Music Catalog Scouts',
     description:
-      'Chartmetric is the most-used music data platform in catalog finance underwriting. For scouts sourcing deals, it\'s the qualification engine that decides which artists are worth pitching. Here\'s exactly what to look at — and what most operators miss.',
-    publishedAt: '2026-06-22',
+      'Chartmetric is the data platform catalog buyers underwrite with. For scouts, it\'s the qualification engine — exactly what to look at, and what most miss.',
+    publishedAt: '2026-04-28',
     author: JOEL,
     readingTime: 11,
     funnel: 'MOFU',
@@ -274,9 +298,10 @@ export const POSTS: BlogPost[] = [
     slug: 'pipedrive-alternatives-for-outreach-teams',
     title:
       'Best Pipedrive Alternatives for Outreach-First Sales Teams (2026)',
+    seoTitle: 'Best Pipedrive Alternatives (2026)',
     description:
-      'Pipedrive is excellent at managing deals you already have. For teams whose work is mostly cold outreach before any deal exists, Pipedrive\'s pipeline-first design fights the shape of the work. Here\'s a breakdown of the alternatives that fit outreach-heavy sales motions.',
-    publishedAt: '2026-06-29',
+      'Pipedrive is built for deals you have. For outreach-heavy teams working mostly cold, its pipeline-first design fights the work — the alternatives that fit.',
+    publishedAt: '2026-04-25',
     author: JOEL,
     readingTime: 10,
     funnel: 'BOFU',
@@ -287,9 +312,10 @@ export const POSTS: BlogPost[] = [
     slug: 'instagram-dm-bots-why-cold-outbound-avoids-them',
     title:
       'Instagram DM Bots: Why Cold-Outbound Operators Avoid Them',
+    seoTitle: 'Instagram DM Bots vs Cold Outbound',
     description:
-      'Instagram DM bots are great for warm-trigger marketing — replying to story replies, comment keywords, ad clicks. They\'re the wrong tool for cold-outbound sales sourcing. Here\'s the architectural reason, and what cold-outbound operators use instead.',
-    publishedAt: '2026-07-06',
+      'Instagram DM bots shine at warm-trigger marketing: story replies, comment keywords, ad clicks. Why they\'re wrong for cold outbound — and what operators use.',
+    publishedAt: '2026-04-21',
     author: JOEL,
     readingTime: 10,
     funnel: 'BOFU',
@@ -300,9 +326,10 @@ export const POSTS: BlogPost[] = [
     slug: 'email-warm-up-explained-sender-domains',
     title:
       'Email Warm-Up Explained: Why New Sender Domains Need It (and How Long It Actually Takes)',
+    seoTitle: 'Email Warm-Up Explained',
     description:
-      'Cold email deliverability lives or dies on sender reputation. New sending domains start with zero reputation and earn it through controlled warm-up sequences. Here\'s what warm-up actually does, how long it takes, and what most warm-up tools get wrong.',
-    publishedAt: '2026-07-13',
+      'Cold email deliverability lives or dies on sender reputation. What domain warm-up actually does, how long it takes, and what most warm-up tools get wrong.',
+    publishedAt: '2026-04-18',
     author: JOEL,
     readingTime: 11,
     funnel: 'MOFU',
@@ -318,9 +345,10 @@ export const POSTS: BlogPost[] = [
     slug: 'how-to-become-ar-scout-independent-path',
     title:
       'How to Become an A&R Scout in 2026 (The Independent Path, Not the Label Path)',
+    seoTitle: 'How to Become an A&R Scout in 2026',
     description:
-      'Most A&R scout career guides assume you want to work inside a major label. There\'s a parallel path almost nobody writes about: independent commission-based catalog scout. Same skills, different revenue model, different ceiling. Here\'s how the independent route works in 2026.',
-    publishedAt: '2026-07-20',
+      'Most A&R guides assume a major label. There\'s a parallel path few write about: the independent commission-based catalog scout. How it works in 2026.',
+    publishedAt: '2026-04-14',
     author: JOEL,
     readingTime: 14,
     funnel: 'TOFU',
@@ -331,9 +359,10 @@ export const POSTS: BlogPost[] = [
     slug: 'music-catalog-valuation-multiples-2026',
     title:
       'Music Catalog Valuation Multiples: 2026 Indie Deal Math',
+    seoTitle: 'Music Catalog Valuation Multiples (2026)',
     description:
-      'How does $24K/year in streaming income become a $288K advance? Or sometimes a $144K one for the same income? The valuation multiple math behind indie catalog finance — what drives it up, what drives it down, and how to estimate a fair offer before talking to a buyer.',
-    publishedAt: '2026-07-27',
+      'How does $24K/year in streaming become a $288K advance — or $144K for the same income? The valuation-multiple math behind indie catalog deals.',
+    publishedAt: '2026-04-11',
     author: JOEL,
     readingTime: 13,
     funnel: 'TOFU',
@@ -344,9 +373,10 @@ export const POSTS: BlogPost[] = [
     slug: 'instagram-automation-tools-2026',
     title:
       'Instagram Automation Tools 2026: The Operator\'s Map',
+    seoTitle: 'Instagram Automation Tools 2026',
     description:
-      'Twenty-plus Instagram automation tools exist. They\'re built for different jobs: scheduling, chatbot replies, comment management, scraping, cold outbound. Operators who pick the wrong category waste months. Here\'s the working map by job, with where Praecora fits and where it doesn\'t.',
-    publishedAt: '2026-08-03',
+      '20+ Instagram automation tools exist for different jobs — scheduling, chatbots, scraping, cold outbound. The working map by job, and where Praecora fits.',
+    publishedAt: '2026-04-07',
     author: JOEL,
     readingTime: 12,
     funnel: 'BOFU',
@@ -362,9 +392,10 @@ export const POSTS: BlogPost[] = [
     slug: 'sales-crm-small-business-niche-fit',
     title:
       'Sales CRM for Small Business: When Generic Tools Stop Fitting',
+    seoTitle: 'Sales CRM for Small Business',
     description:
-      'HubSpot, Pipedrive, Zoho, Salesforce — the same five names dominate every "best sales CRM for small business" listicle. They\'re excellent at the work they were built for. They\'re also wrong-shaped for several specific kinds of small businesses. Here\'s how to tell which camp you\'re in.',
-    publishedAt: '2026-08-10',
+      'HubSpot, Pipedrive, Zoho and Salesforce dominate every "best small-business CRM" list — and are wrong-shaped for some businesses. How to tell which you are.',
+    publishedAt: '2026-04-04',
     author: JOEL,
     readingTime: 11,
     funnel: 'BOFU',
@@ -375,9 +406,10 @@ export const POSTS: BlogPost[] = [
     slug: 'music-promotion-platforms-vs-outreach-tools',
     title:
       'Music Promotion Platforms vs Outreach Tools: A 2026 Map for Indie Operators',
+    seoTitle: 'Music Promotion Platforms vs Outreach',
     description:
-      'Music promotion platforms (SubmitHub, Groover, Playlist Push) and music sales outreach tools (Praecora, Instantly + Apollo stacks) get conflated constantly. They do different jobs. Here\'s the map — when to use each, and why mixing them up wastes budget.',
-    publishedAt: '2026-08-17',
+      'Music promotion platforms (SubmitHub, Groover) and sales outreach tools (Praecora, Instantly) get conflated constantly. They do different jobs — the map.',
+    publishedAt: '2026-03-31',
     author: JOEL,
     readingTime: 11,
     funnel: 'BOFU',
@@ -393,9 +425,10 @@ export const POSTS: BlogPost[] = [
     slug: 'smartlead-instantly-lemlist-compared-music-industry',
     title:
       'Smartlead vs Instantly vs Lemlist: Honest Comparison for Music Industry Outreach',
+    seoTitle: 'Smartlead vs Instantly vs Lemlist',
     description:
-      'Smartlead, Instantly, and Lemlist are the three serious cold email infrastructure tools in 2026. None of them were built for music industry outreach specifically — and the differences matter when you\'re pitching managers and labels. Here\'s the operator\'s comparison.',
-    publishedAt: '2026-08-24',
+      'Smartlead, Instantly, and Lemlist are the serious cold-email tools in 2026. None were built for music outreach, and the differences matter. The comparison.',
+    publishedAt: '2026-03-28',
     author: JOEL,
     readingTime: 13,
     funnel: 'BOFU',
@@ -406,9 +439,10 @@ export const POSTS: BlogPost[] = [
     slug: 'independent-music-distribution-vs-catalog-buyers',
     title:
       'Independent Music Distribution Companies vs Catalog Buyers: What\'s the Difference?',
+    seoTitle: 'Music Distribution vs Catalog Buyers',
     description:
-      'TuneCore, DistroKid, CD Baby, United Masters — distributors. beatBread, Symphonic Advances, Xposure Music — catalog buyers. The two categories overlap in confusing ways, and the wrong choice for the wrong reason costs indie artists serious money. Here\'s the clean breakdown.',
-    publishedAt: '2026-08-31',
+      'TuneCore and DistroKid are distributors; beatBread and Symphonic are catalog buyers. The two overlap confusingly — and the wrong pick costs artists.',
+    publishedAt: '2026-03-24',
     author: JOEL,
     readingTime: 12,
     funnel: 'TOFU',
@@ -425,9 +459,10 @@ export const POSTS: BlogPost[] = [
     slug: 'instagram-account-warm-up-7-day-checklist',
     title:
       'Instagram Account Warm-Up: The 7-Day Checklist for New Outreach Accounts',
+    seoTitle: 'Instagram Account Warm-Up: 7-Day Plan',
     description:
-      'Brand-new Instagram Business accounts that immediately send DMs get banned within hours — Instagram\'s anti-abuse model is unforgiving toward unwarmed accounts. Here\'s the daily warm-up sequence we run on every new account in our fleet, with specific actions per day.',
-    publishedAt: '2026-09-07',
+      'Brand-new Instagram Business accounts that DM immediately get banned within hours. The day-by-day warm-up sequence we run on every new account in our fleet.',
+    publishedAt: '2026-03-21',
     author: JOEL,
     readingTime: 9,
     funnel: 'MOFU',
@@ -438,9 +473,10 @@ export const POSTS: BlogPost[] = [
     slug: 'royalty-advance-vs-catalog-sale-indie-artists',
     title:
       'Royalty Advance vs Catalog Sale: Which Should Indie Artists Pick?',
+    seoTitle: 'Royalty Advance vs Catalog Sale',
     description:
-      'A royalty advance and a catalog sale look similar to artists who haven\'t done either — both are big checks against future income. They\'re structurally very different. Here\'s the honest breakdown of when each one is the right choice (and when neither is).',
-    publishedAt: '2026-09-14',
+      'A royalty advance and a catalog sale look alike to artists who\'ve done neither, but they\'re structurally different. When each one is the right call.',
+    publishedAt: '2026-03-17',
     author: JOEL,
     readingTime: 12,
     funnel: 'TOFU',
@@ -456,9 +492,10 @@ export const POSTS: BlogPost[] = [
     slug: 'va-workflow-music-catalog-outreach',
     title:
       'The VA Workflow for Music Catalog Outreach: Hiring, Training, and Daily Operations',
+    seoTitle: 'The VA Workflow for Catalog Outreach',
     description:
-      'A serious music catalog scouting operation needs at least one virtual assistant — Instagram\'s cold-opener manual-send requirement makes this non-negotiable above ~50 DMs/day. Here\'s how to hire, train, and run a VA for this work, from someone who\'s done it across multiple operations.',
-    publishedAt: '2026-09-21',
+      'A serious scouting operation needs a VA — Instagram\'s manual cold-opener rule makes it non-negotiable past ~50 DMs/day. How to hire, train, and run one.',
+    publishedAt: '2026-03-14',
     author: JOEL,
     readingTime: 13,
     funnel: 'MOFU',
@@ -469,9 +506,10 @@ export const POSTS: BlogPost[] = [
     slug: 'instagram-business-vs-creator-account-outreach',
     title:
       'Instagram Business vs Creator Account for Outreach: Which Should Scouts Use?',
+    seoTitle: 'Instagram Business vs Creator Account',
     description:
-      'Instagram offers three account types: Personal, Creator, and Business. Cold outbound outreach requires specific capabilities only some account types support. Here\'s the breakdown of what each account type permits and which one to use for catalog scouting.',
-    publishedAt: '2026-09-28',
+      'Instagram has three account types: Personal, Creator, Business. Cold outreach needs capabilities only some support — what each permits, and which to use.',
+    publishedAt: '2026-03-10',
     author: JOEL,
     readingTime: 9,
     funnel: 'MOFU',
@@ -482,9 +520,10 @@ export const POSTS: BlogPost[] = [
     slug: 'spotify-for-artists-data-catalog-buyers',
     title:
       'Spotify for Artists Data: What Catalog Buyers Look at Before Underwriting',
+    seoTitle: 'Spotify for Artists Data for Buyers',
     description:
-      'When a buyer underwrites a catalog finance deal, the first data they want is the artist\'s Spotify for Artists statements. Here\'s exactly which fields matter, what the buyer is calculating from them, and how scouts can pre-qualify deals before pitching.',
-    publishedAt: '2026-10-05',
+      'When a buyer underwrites a catalog deal, the first data they want is Spotify for Artists. Which fields matter, what they calculate, and how to pre-qualify.',
+    publishedAt: '2026-03-07',
     author: JOEL,
     readingTime: 11,
     funnel: 'MOFU',

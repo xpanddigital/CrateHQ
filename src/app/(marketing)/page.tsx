@@ -15,7 +15,11 @@ import { HeroVideoPlayer } from '@/components/marketing/HeroVideoPlayer'
 // to fall back on. The brand name lives at the end of the title for
 // brand recall.
 export const metadata: Metadata = {
-  title: 'Music Industry CRM for Catalog Scouts | Praecora',
+  // The root layout template appends " | Praecora", so the page title
+  // must NOT include the brand suffix itself (that produced a doubled
+  // "… | Praecora | Praecora"). Rendered: "Music Industry CRM for
+  // Catalog Scouts | Praecora" (48 chars).
+  title: 'Music Industry CRM for Catalog Scouts',
   description:
     'The music industry CRM built for catalog scouts. AI-drafted Instagram and email outreach, unified inbox, deal pipeline — fully managed.',
   alternates: { canonical: 'https://www.praecora.com' },
@@ -26,6 +30,7 @@ export const metadata: Metadata = {
     url: 'https://www.praecora.com',
     type: 'website',
     siteName: 'Praecora',
+    images: ['https://www.praecora.com/opengraph-image'],
   },
 }
 
@@ -37,40 +42,30 @@ export const metadata: Metadata = {
  * entity rather than two unrelated declarations.
  */
 function HomepageJsonLd() {
-  // Per Joel's venture-identity brief: Organization and
-  // SoftwareApplication are merged into a single multi-typed entity
-  // (rather than two separate nodes in the @graph) so all venture-
-  // level schema lives on one @id. The founder references the
-  // canonical Person @id at JoelHouse.com — same identifier emitted
-  // by every Xpand venture site, so Google's entity resolver clusters
-  // them. The sameAs points at Joel's per-venture canonical page on
-  // JoelHouse.com — the entity hub for "what is this venture?"
+  // Organization and SoftwareApplication are emitted as two separate,
+  // single-typed nodes in the @graph (not one multi-typed node) — a
+  // multi-typed Organization/SoftwareApplication trips strict
+  // schema.org validation because offer/app properties aren't valid on
+  // Organization and vice-versa. The nodes stay linked via @id
+  // (SoftwareApplication.publisher → #organization), so the entity
+  // graph is still connected. The founder references the canonical
+  // Person @id at JoelHouse.com — the same identifier every Xpand
+  // venture site emits, so Google's entity resolver clusters them.
+  // `sameAs` points at Joel's per-venture canonical page on JoelHouse.com.
   const json = {
     '@context': 'https://schema.org',
     '@graph': [
       {
-        '@type': ['Organization', 'SoftwareApplication'],
+        '@type': 'Organization',
         '@id': 'https://www.praecora.com#organization',
         name: 'Praecora',
         url: 'https://www.praecora.com',
-        logo: 'https://www.praecora.com/opengraph-image',
+        logo: {
+          '@type': 'ImageObject',
+          url: 'https://www.praecora.com/opengraph-image',
+        },
         description:
           'The music industry CRM and outreach platform built for independent music catalog financing scouts.',
-        // SoftwareApplication-side properties
-        applicationCategory: 'BusinessApplication',
-        operatingSystem: 'Web',
-        offers: {
-          '@type': 'AggregateOffer',
-          lowPrice: '700',
-          highPrice: '2800',
-          priceCurrency: 'USD',
-          offerCount: '4',
-          priceSpecification: {
-            '@type': 'UnitPriceSpecification',
-            unitText: 'MONTH',
-          },
-        },
-        // Organization-side properties — canonical author signals
         sameAs: ['https://joelhouse.com/ventures/praecora'],
         founder: {
           '@type': 'Person',
@@ -78,6 +73,24 @@ function HomepageJsonLd() {
           name: 'Joel House',
           url: 'https://joelhouse.com',
         },
+      },
+      {
+        '@type': 'SoftwareApplication',
+        '@id': 'https://www.praecora.com#software',
+        name: 'Praecora',
+        url: 'https://www.praecora.com',
+        applicationCategory: 'BusinessApplication',
+        operatingSystem: 'Web',
+        description:
+          'The music industry CRM and outreach platform built for independent music catalog financing scouts.',
+        offers: {
+          '@type': 'AggregateOffer',
+          lowPrice: '700',
+          highPrice: '2800',
+          priceCurrency: 'USD',
+          offerCount: '4',
+        },
+        publisher: { '@id': 'https://www.praecora.com#organization' },
         creator: { '@id': 'https://joelhouse.com/#person' },
       },
       {
@@ -229,7 +242,7 @@ export default function MarketingHome() {
             {[
               {
                 title: 'My accounts keep getting banned.',
-                body: 'Because nobody told you accounts need 4 weeks of careful preparation before they can survive real volume. Without that, your fleet has a 90-day half-life.',
+                body: 'Because most outreach tools ship a UI, not infrastructure. We built the 13-Point Sentinel Protocol™ specifically to fix the structural reasons accounts die — identity isolation, dedicated environments per account, geographic anchoring, multi-week trust curves, account-level kill switches. Praecora scouts run their fleets for 12+ months. Without Sentinel, you have a 90-day half-life.',
               },
               {
                 title: "I don't have time to send 140 DMs and 500 emails a day.",
@@ -486,6 +499,9 @@ export default function MarketingHome() {
                 </p>
 
                 <div className="mt-6 space-y-2 border-t border-black/5 pt-6 text-sm text-neutral-700">
+                  <p className="font-medium text-[#0f0d08]">
+                    ✓ Full 13-Point Sentinel Protocol™
+                  </p>
                   <p>
                     <strong className="text-[#0f0d08]">{t.dmsPerDay}</strong>/day IG DMs
                   </p>

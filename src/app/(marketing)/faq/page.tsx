@@ -10,7 +10,8 @@ import { Eyebrow } from '@/components/marketing/Ornament'
 // "is Praecora against Meta's ToS", "Praecora pricing", etc.) without
 // the user having to click through.
 export const metadata: Metadata = {
-  title: 'Praecora FAQ — Music Industry CRM Questions Answered',
+  // " | Praecora" is appended by the root layout template.
+  title: 'Praecora FAQ — Music Industry CRM',
   description:
     'Common questions about Praecora — what it does, pricing, account safety, Meta\'s ToS, results to expect, and how the platform actually runs day to day.',
   alternates: { canonical: 'https://www.praecora.com/faq' },
@@ -20,6 +21,8 @@ export const metadata: Metadata = {
       'Common questions about Praecora — what it does, pricing, account safety, results to expect, and how it runs day to day.',
     url: 'https://www.praecora.com/faq',
     type: 'website',
+    siteName: 'Praecora',
+    images: ['https://www.praecora.com/opengraph-image'],
   },
 }
 
@@ -193,7 +196,7 @@ export default function FAQPage() {
               <div className="relative overflow-hidden rounded-2xl border border-black/10 shadow-[0_2px_8px_rgba(0,0,0,0.04),_0_16px_32px_-12px_rgba(184,83,29,0.08)]">
                 <img
                   src={group.image}
-                  alt=""
+                  alt={`Illustration for the “${group.title}” section of the Praecora FAQ`}
                   className="aspect-[16/6] w-full object-cover"
                   loading="lazy"
                 />

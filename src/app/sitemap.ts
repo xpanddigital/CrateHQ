@@ -53,6 +53,20 @@ export default function sitemap(): MetadataRoute.Sitemap {
       changeFrequency: 'monthly',
       priority: 0.7,
     },
+    // Legal pages are indexable; include them so they aren't flagged as
+    // "indexable page not in sitemap."
+    {
+      url: `${BASE}/legal/terms`,
+      lastModified: now,
+      changeFrequency: 'yearly',
+      priority: 0.3,
+    },
+    {
+      url: `${BASE}/legal/privacy`,
+      lastModified: now,
+      changeFrequency: 'yearly',
+      priority: 0.3,
+    },
   ]
 
   const postRoutes: MetadataRoute.Sitemap = visiblePosts.map((p) => ({

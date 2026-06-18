@@ -10,9 +10,10 @@ import { getVisiblePosts, PILLAR_LABELS, type BlogPost } from './posts'
 export const revalidate = 3600
 
 export const metadata: Metadata = {
-  title: 'The Praecora field guide — Music catalog scouting, written down',
+  // " | Praecora" is appended by the root layout template.
+  title: 'Praecora Field Guide — Music Catalog Scouting',
   description:
-    'Long-form writing on Instagram outreach, music catalog financing, and the operational craft of independent deal flow. Written by operators who do this work for a living.',
+    'Long-form writing on Instagram outreach, music catalog financing, and the operational craft of independent deal flow — by operators who do this for a living.',
   alternates: {
     canonical: 'https://www.praecora.com/blog',
   },
@@ -22,6 +23,8 @@ export const metadata: Metadata = {
       'Long-form writing on Instagram outreach, music catalog financing, and the operational craft of independent deal flow.',
     url: 'https://www.praecora.com/blog',
     type: 'website',
+    siteName: 'Praecora',
+    images: ['https://www.praecora.com/opengraph-image'],
   },
 }
 

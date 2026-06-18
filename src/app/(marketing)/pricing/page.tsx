@@ -10,9 +10,11 @@ import { Eyebrow } from '@/components/marketing/Ornament'
 // lets Google render price-range rich snippets in regular search results,
 // which is the real SEO win on this page.
 export const metadata: Metadata = {
-  title: 'Pricing — Music Industry CRM for Catalog Scouts | Praecora',
+  // Brand suffix " | Praecora" is appended by the root layout template —
+  // don't repeat it here.
+  title: 'Pricing — Music Industry CRM for Scouts',
   description:
-    'Four tiers of done-for-you Instagram and email outreach for music catalog scouts. $700–$2,800/month. Onboarding fee covers setup; subscription begins when outreach goes live.',
+    'Four tiers of done-for-you Instagram and email outreach for music catalog scouts, $700–$2,800/month. Onboarding covers setup; billing starts at go-live.',
   alternates: { canonical: 'https://www.praecora.com/pricing' },
   openGraph: {
     title: 'Praecora pricing — Music industry CRM for catalog scouts',
@@ -20,6 +22,8 @@ export const metadata: Metadata = {
       'Four tiers of done-for-you Instagram and email outreach. $700–$2,800/month for music catalog scouts.',
     url: 'https://www.praecora.com/pricing',
     type: 'website',
+    siteName: 'Praecora',
+    images: ['https://www.praecora.com/opengraph-image'],
   },
 }
 

@@ -20,9 +20,10 @@ import {
 export const revalidate = 3600
 
 export const metadata: Metadata = {
-  title: 'Joel House — Founder of Praecora, Joel House Search Media, and Xpand Digital',
+  // " | Praecora" is appended by the root layout template.
+  title: 'Joel House — Founder of Praecora',
   description:
-    'Joel House is the founder of Joel House Search Media and Xpand Digital, a Forbes Agency Council member, and author of AI for Revenue. He writes about music catalog scouting, AI search, and Generative Engine Optimization.',
+    'Founder of Joel House Search Media and Xpand Digital, Forbes Agency Council member, and author of AI for Revenue. Writes on catalog scouting and AI search.',
   alternates: { canonical: 'https://www.praecora.com/author/joel-house' },
   // Author page is indexable on purpose — it's a signal hub, not an
   // admin page. The canonical rel=author still points off-site to
@@ -34,6 +35,7 @@ export const metadata: Metadata = {
       'Founder of Joel House Search Media and Xpand Digital. Forbes Agency Council. Author of AI for Revenue. Writes about music catalog scouting and AI search.',
     url: 'https://www.praecora.com/author/joel-house',
     type: 'profile',
+    siteName: 'Praecora',
     images: [JOEL_HOUSE_HEADSHOT_URL],
   },
 }

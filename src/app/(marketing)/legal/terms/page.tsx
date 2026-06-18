@@ -1,5 +1,9 @@
 export const metadata = {
-  title: 'Terms of Service — Praecora',
+  // " | Praecora" is appended by the root layout template.
+  title: 'Terms of Service',
+  description:
+    'The terms of service governing use of Praecora — the managed Instagram and email outreach platform for independent music catalog scouts.',
+  alternates: { canonical: 'https://www.praecora.com/legal/terms' },
 }
 
 export default function TermsPage() {

@@ -3,9 +3,23 @@ import { ArrowRight, Calendar } from 'lucide-react'
 import { Eyebrow } from '@/components/marketing/Ornament'
 
 export const metadata = {
-  title: 'Book a demo — Praecora',
+  // " | Praecora" is appended by the root layout template.
+  title: 'Book a demo',
   description:
-    'See the platform with a real (anonymized) scout\'s inbox. 20 minutes, no slides.',
+    'See Praecora with a real (anonymized) scout\'s inbox — AI-drafted outreach, a unified reply inbox, and the deal pipeline. 20 minutes, no slides.',
+  // Self-canonical collapses query-string variants (e.g. the ?tier=whale
+  // link from /pricing) into a single indexable URL so they aren't
+  // flagged as duplicate pages.
+  alternates: { canonical: 'https://www.praecora.com/demo' },
+  openGraph: {
+    title: 'Book a Praecora demo',
+    description:
+      'See Praecora with a real (anonymized) scout\'s inbox — AI-drafted outreach, unified inbox, and deal pipeline. 20 minutes, no slides.',
+    url: 'https://www.praecora.com/demo',
+    type: 'website',
+    siteName: 'Praecora',
+    images: ['https://www.praecora.com/opengraph-image'],
+  },
 }
 
 const AGENDA = [

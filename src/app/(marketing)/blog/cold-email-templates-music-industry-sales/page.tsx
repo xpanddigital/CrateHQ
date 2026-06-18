@@ -10,11 +10,11 @@ export const revalidate = 3600
 const post = getPostBySlug('cold-email-templates-music-industry-sales')!
 
 export const metadata: Metadata = {
-  title: post.title,
+  title: post.seoTitle ?? post.title,
   description: post.description,
   alternates: { canonical: `https://www.praecora.com/blog/${post.slug}` },
   openGraph: {
-    title: post.title,
+    title: post.seoTitle ?? post.title,
     description: post.description,
     url: `https://www.praecora.com/blog/${post.slug}`,
     type: 'article',
