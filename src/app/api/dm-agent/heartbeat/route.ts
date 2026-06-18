@@ -63,10 +63,18 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Insert heartbeat log
+    // Insert heartbeat log — pull account_id from the verified ig_account so
+    // admin-side filtering and per-tenant observability work.
+    const { data: igAccountRow } = await supabase
+      .from('ig_accounts')
+      .select('account_id')
+      .eq('id', ig_account_id)
+      .maybeSingle()
+
     const { error: insertError } = await supabase
       .from('agent_heartbeats')
       .insert({
+        account_id: igAccountRow?.account_id ?? null,
         ig_account_id,
         status,
         messages_found: messages_found || 0,

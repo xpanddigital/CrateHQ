@@ -17,10 +17,12 @@ export const dynamic = 'force-dynamic'
  * ack 200 (Stripe retries on non-200).
  *
  * Events we care about:
- *   - checkout.session.completed   → upsert scout, record onboarding charge
- *   - invoice.payment_succeeded    → record recurring charge
- *   - invoice.payment_failed       → flag scout for follow-up
- *   - customer.subscription.deleted → mark scout cancelled
+ *   - checkout.session.completed     → upsert scout + account, record onboarding charge
+ *   - invoice.payment_succeeded      → record recurring charge, clear past_due
+ *   - invoice.payment_failed         → past_due (if retries exhausted) + alert
+ *   - customer.subscription.updated  → reflect plan/billing-cycle changes
+ *   - customer.subscription.deleted  → mark scout cancelled
+ *   - charge.refunded                → record negative ledger entry (commission accuracy)
  *
  * Everything else is logged + acked.
  */
@@ -70,8 +72,14 @@ export async function POST(request: NextRequest) {
       case 'invoice.payment_failed':
         await handleInvoiceFailed(event, supabase)
         break
+      case 'customer.subscription.updated':
+        await handleSubscriptionUpdated(event, supabase)
+        break
       case 'customer.subscription.deleted':
         await handleSubscriptionDeleted(event, supabase)
+        break
+      case 'charge.refunded':
+        await handleChargeRefunded(event, supabase)
         break
       default:
         logger.info('[Stripe Webhook] Unhandled event type', { type: event.type })
@@ -196,6 +204,25 @@ async function handleCheckoutCompleted(event: Stripe.Event, supabase: ServiceCli
     throw upsertErr
   }
 
+  // Create the account (tenant) for this scout if one doesn't exist yet.
+  // The account_member row gets added at signup time by the
+  // link_profile_to_scout_account trigger — at this point we don't yet have
+  // a profile id (the user hasn't signed up).
+  const { error: accountErr } = await supabase
+    .from('accounts')
+    .upsert(
+      {
+        name: fullName ?? email,
+        scout_id: scout.id,
+      },
+      { onConflict: 'scout_id' }
+    )
+  if (accountErr) {
+    logger.error('[Stripe Webhook] account upsert failed:', accountErr)
+    // Don't throw — the scout row succeeded, the account can be created later
+    // by /api/scouts when the admin invites this user.
+  }
+
   // Record charge for commission ledger
   const amountTotal = session.amount_total ?? 0
   const piId =
@@ -269,7 +296,7 @@ async function handleInvoicePaid(event: Stripe.Event, supabase: ServiceClient) {
 
   const { data: scout } = await supabase
     .from('scouts')
-    .select('id, commission_partner_id')
+    .select('id, status, commission_partner_id')
     .eq('stripe_customer_id', customerId)
     .maybeSingle()
   if (!scout) {
@@ -293,6 +320,14 @@ async function handleInvoicePaid(event: Stripe.Event, supabase: ServiceClient) {
     commission_rate: partnerSnapshot?.rate ?? null,
   })
 
+  // Successful payment heals a past_due account.
+  if (scout.status === 'past_due') {
+    await supabase
+      .from('scouts')
+      .update({ status: 'live', past_due_at: null })
+      .eq('id', scout.id)
+  }
+
   await supabase
     .from('stripe_events')
     .update({ related_scout_id: scout.id })
@@ -306,7 +341,7 @@ async function handleInvoiceFailed(event: Stripe.Event, supabase: ServiceClient)
   if (!customerId) return
   const { data: scout } = await supabase
     .from('scouts')
-    .select('id, email, subscription_tier')
+    .select('id, email, subscription_tier, status')
     .eq('stripe_customer_id', customerId)
     .maybeSingle()
   if (!scout) return
@@ -316,14 +351,26 @@ async function handleInvoiceFailed(event: Stripe.Event, supabase: ServiceClient)
     tier: scout.subscription_tier,
     invoice_id: invoice.id,
     amount_due: invoice.amount_due,
+    next_attempt: invoice.next_payment_attempt,
   })
   await supabase
     .from('stripe_events')
     .update({ related_scout_id: scout.id })
     .eq('event_id', event.id)
 
+  // Stripe sets next_payment_attempt = null when smart retries are exhausted.
+  // At that point flip to past_due — dashboard layout will gate access.
+  const retriesExhausted = !invoice.next_payment_attempt
+  if (retriesExhausted && scout.status === 'live') {
+    await supabase
+      .from('scouts')
+      .update({ status: 'past_due', past_due_at: new Date().toISOString() })
+      .eq('id', scout.id)
+    logger.warn('[Stripe Webhook] Scout flipped to past_due', { scout_id: scout.id })
+  }
+
   await sendOpsAlert({
-    subject: `Praecora payment FAILED — ${scout.email} (${scout.subscription_tier})`,
+    subject: `Praecora payment FAILED — ${scout.email} (${scout.subscription_tier})${retriesExhausted ? ' — RETRIES EXHAUSTED' : ''}`,
     html: `
       <h2>Invoice payment failed</h2>
       <p><strong>Scout email:</strong> ${scout.email}</p>
@@ -331,10 +378,108 @@ async function handleInvoiceFailed(event: Stripe.Event, supabase: ServiceClient)
       <p><strong>Amount due:</strong> $${((invoice.amount_due ?? 0) / 100).toFixed(2)}</p>
       <p><strong>Invoice:</strong> <code>${invoice.id}</code></p>
       <p><strong>Scout ID:</strong> <code>${scout.id}</code></p>
+      <p><strong>Next Stripe retry:</strong> ${invoice.next_payment_attempt ? new Date(invoice.next_payment_attempt * 1000).toISOString() : '<strong>NONE — retries exhausted, scout flipped to past_due, dashboard access blocked</strong>'}</p>
       <hr/>
-      <p>Stripe will retry automatically. Check the customer in the Stripe dashboard and follow up with the scout if it persists.</p>
+      <p>${retriesExhausted ? 'Reach out to this scout immediately to update their card.' : 'Stripe will retry automatically. Check the customer in the Stripe dashboard and follow up if it persists.'}</p>
     `,
   })
+}
+
+async function handleSubscriptionUpdated(event: Stripe.Event, supabase: ServiceClient) {
+  const sub = event.data.object as Stripe.Subscription
+  const customerId = typeof sub.customer === 'string' ? sub.customer : sub.customer?.id ?? null
+  if (!customerId) return
+  const { data: scout } = await supabase
+    .from('scouts')
+    .select('id, subscription_tier, billing_cycle')
+    .eq('stripe_customer_id', customerId)
+    .maybeSingle()
+  if (!scout) return
+
+  // Pull tier / cycle from the subscription's first item. We don't auto-mutate
+  // the scout row unless metadata explicitly mirrors a known tier — plan IDs
+  // change between Stripe accounts and we don't want to blow away the
+  // canonical billing_cycle the scout signed up on.
+  const newTier = sub.metadata?.praecora_tier
+  const newCycle = sub.metadata?.billing_cycle
+  const update: Record<string, any> = {}
+  if (newTier && ['starter','growth','pro','whale'].includes(newTier) && newTier !== scout.subscription_tier) {
+    update.subscription_tier = newTier
+  }
+  if (newCycle && ['monthly','annual'].includes(newCycle) && newCycle !== scout.billing_cycle) {
+    update.billing_cycle = newCycle
+  }
+  if (sub.cancel_at_period_end) {
+    // Don't mark cancelled yet — the actual subscription.deleted event will
+    // fire at period end. Just flag for ops visibility.
+    logger.info('[Stripe Webhook] Subscription set to cancel at period end', { scout_id: scout.id, cancel_at: sub.cancel_at })
+  }
+
+  if (Object.keys(update).length > 0) {
+    await supabase.from('scouts').update(update).eq('id', scout.id)
+    logger.info('[Stripe Webhook] Subscription updated', { scout_id: scout.id, ...update })
+  }
+
+  await supabase
+    .from('stripe_events')
+    .update({ related_scout_id: scout.id })
+    .eq('event_id', event.id)
+}
+
+async function handleChargeRefunded(event: Stripe.Event, supabase: ServiceClient) {
+  const charge = event.data.object as Stripe.Charge
+  const customerId = typeof charge.customer === 'string' ? charge.customer : charge.customer?.id ?? null
+  if (!customerId) return
+
+  const { data: scout } = await supabase
+    .from('scouts')
+    .select('id, commission_partner_id')
+    .eq('stripe_customer_id', customerId)
+    .maybeSingle()
+  if (!scout) {
+    logger.warn('[Stripe Webhook] charge.refunded but no matching scout', { customer: customerId })
+    return
+  }
+
+  // amount_refunded covers full + partial refunds. Stored as a NEGATIVE
+  // amount_cents so the partner-commission ledger (which sums charges) nets
+  // correctly. Each refund event gets its own row keyed by event.id so
+  // multiple partial refunds against one charge stay distinct.
+  const refundCents = -1 * (charge.amount_refunded ?? 0)
+  if (refundCents === 0) return
+
+  const partnerSnapshot = await getPartnerSnapshot(supabase, scout.commission_partner_id)
+
+  const { error: chargeErr } = await supabase.from('scout_charges').insert({
+    scout_id: scout.id,
+    stripe_event_id: event.id,
+    stripe_payment_intent_id: typeof charge.payment_intent === 'string' ? charge.payment_intent : charge.payment_intent?.id ?? null,
+    kind: 'refund',
+    amount_cents: refundCents,
+    currency: charge.currency ?? 'usd',
+    occurred_at: new Date().toISOString(),
+    commission_partner_id: partnerSnapshot?.id ?? null,
+    commission_rate: partnerSnapshot?.rate ?? null,
+  })
+  if (chargeErr && chargeErr.code !== '23505') {
+    logger.error('[Stripe Webhook] refund ledger insert failed:', chargeErr)
+  }
+
+  // Optional: flag scout as refunded if FULL refund of the most recent charge
+  if (charge.amount_refunded === charge.amount && charge.amount > 0) {
+    await supabase
+      .from('scouts')
+      .update({ status: 'refunded' })
+      .eq('id', scout.id)
+      .in('status', ['onboarding', 'live', 'past_due']) // don't downgrade from cancelled
+  }
+
+  await supabase
+    .from('stripe_events')
+    .update({ related_scout_id: scout.id })
+    .eq('event_id', event.id)
+
+  logger.info('[Stripe Webhook] Refund recorded', { scout_id: scout.id, refund_cents: refundCents })
 }
 
 async function handleSubscriptionDeleted(event: Stripe.Event, supabase: ServiceClient) {

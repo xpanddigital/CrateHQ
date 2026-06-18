@@ -2,12 +2,14 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
 import crypto from 'crypto'
+import { CLAUDE_MODELS } from '@/lib/ai/models'
+import { recordAnthropicUsage } from '@/lib/ai/usage'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 
 export const maxDuration = 60
 
-const MODEL = 'claude-sonnet-4-6'
+const MODEL = CLAUDE_MODELS.SONNET
 
 function sampleHashtags(pool: string[], count: number): string[] {
   const normalized = pool
@@ -50,7 +52,7 @@ export async function POST(request: NextRequest) {
 
     const { data: identity, error: idError } = await supabase
       .from('account_identities')
-      .select('*')
+      .select('*, ig_accounts!ig_account_id(account_id)')
       .eq('id', identity_id)
       .single()
 
@@ -58,6 +60,12 @@ export async function POST(request: NextRequest) {
       logger.error('[GeneratePost] Identity error:', idError)
       return NextResponse.json({ error: 'Identity not found' }, { status: 404 })
     }
+
+    // Pull the tenant scope from either the identity row or its parent ig_account
+    const accountId =
+      identity.account_id ||
+      (identity.ig_accounts as any)?.account_id ||
+      null
 
     const apiKey = process.env.ANTHROPIC_API_KEY
     if (!apiKey) {
@@ -101,6 +109,14 @@ Return STRICT JSON:
         messages: [{ role: 'user', content: userPrompt }],
       } as any)
 
+      recordAnthropicUsage(resp as any, {
+        accountId,
+        userId: user.id,
+        model: MODEL,
+        kind: 'content_post_carousel',
+        metadata: { identity_id, post_type: 'carousel' },
+      })
+
       const text =
         // @ts-ignore
         resp.content?.[0]?.type === 'text'
@@ -124,6 +140,7 @@ Return STRICT JSON:
       const { data: post, error: insertError } = await supabase
         .from('content_posts')
         .insert({
+          account_id: accountId,
           ig_account_id: identity.ig_account_id,
           identity_id,
           post_type: 'carousel',
@@ -149,6 +166,7 @@ Return STRICT JSON:
         .digest('hex')
 
       await supabase.from('content_topics').insert({
+        account_id: accountId,
         topic_hash,
         title: idea.title,
         ig_account_id: identity.ig_account_id,
@@ -207,6 +225,36 @@ Return only the caption text.
       } as any),
     ])
 
+    recordAnthropicUsage(nanoResp, {
+      accountId,
+      userId: user.id,
+      model: MODEL,
+      kind: 'content_post_nano_prompt',
+      metadata: { identity_id, post_type: 'single' },
+    })
+    recordAnthropicUsage(captionResp, {
+      accountId,
+      userId: user.id,
+      model: MODEL,
+      kind: 'content_post_caption',
+      metadata: { identity_id, post_type: 'single' },
+    })
+
+    recordAnthropicUsage(nanoResp as any, {
+      accountId,
+      userId: user.id,
+      model: MODEL,
+      kind: 'content_post_single_image_prompt',
+      metadata: { identity_id },
+    })
+    recordAnthropicUsage(captionResp as any, {
+      accountId,
+      userId: user.id,
+      model: MODEL,
+      kind: 'content_post_single_caption',
+      metadata: { identity_id },
+    })
+
     const nanoText =
       // @ts-ignore
       nanoResp.content?.[0]?.type === 'text'
@@ -236,6 +284,7 @@ Return only the caption text.
     const { data: post, error: insertError } = await supabase
       .from('content_posts')
       .insert({
+        account_id: accountId,
         ig_account_id: identity.ig_account_id,
         identity_id,
         post_type: 'single',
@@ -261,6 +310,7 @@ Return only the caption text.
       .digest('hex')
 
     await supabase.from('content_topics').insert({
+      account_id: accountId,
       topic_hash,
       title: singleIdea.title,
       ig_account_id: identity.ig_account_id,

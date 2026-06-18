@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import Anthropic from '@anthropic-ai/sdk'
+import { CLAUDE_MODELS } from '@/lib/ai/models'
+import { recordAnthropicUsage } from '@/lib/ai/usage'
 import { logger } from '@/lib/logger'
 import type { SequenceStep, SessionTask } from '@/types/database'
 import crypto from 'crypto'
@@ -41,10 +43,11 @@ export async function POST(request: NextRequest) {
   const startTime = Date.now()
 
   try {
-    // Fetch all active IG accounts
+    // Fetch all active IG accounts (with their owning tenant account_id
+    // so we can scope session_schedule + pending_outbound_messages inserts).
     const { data: accounts, error: accountsError } = await supabase
       .from('ig_accounts')
-      .select('id, ig_username, active_start_hour, active_end_hour, timezone, daily_cold_dm_limit')
+      .select('id, ig_username, active_start_hour, active_end_hour, timezone, daily_cold_dm_limit, account_id')
       .eq('is_active', true)
 
     if (accountsError) {
@@ -284,10 +287,11 @@ async function generateAccountSchedule(
         const dmText = enrollment.dm_message_text || null
 
         if (dmText) {
-          // Insert into pending_outbound_messages
+          // Insert into pending_outbound_messages — scoped to the account
           const { data: pendingMsg, error: insertErr } = await supabase
             .from('pending_outbound_messages')
             .insert({
+              account_id: account.account_id,
               ig_account_id: account.id,
               scout_id: enrollment.scout_id,
               artist_id: artist?.id,
@@ -324,13 +328,20 @@ async function generateAccountSchedule(
       for (const action of stepDef.actions) {
         if (action.type === 'comment' && anthropic && artist) {
           try {
-            const commentResp = await anthropic.messages.create({
-              model: 'claude-sonnet-4-20250514',
+            const commentResp: any = await anthropic.messages.create({
+              model: CLAUDE_MODELS.HAIKU,
               max_tokens: 30,
               messages: [{
                 role: 'user',
                 content: `Write a very short, authentic Instagram comment (4-10 words) for a music post by ${artist.name || 'an artist'}. Genres: ${(artist.genres || []).join(', ') || 'various'}. Sound like a real fan. No emojis, no hashtags. Just a genuine reaction. Examples: "this is so good", "the production on this is insane", "been on repeat all week". Only output the comment text, nothing else.`,
               }],
+            })
+            recordAnthropicUsage(commentResp, {
+              accountId: account.account_id,
+              userId: null,
+              model: CLAUDE_MODELS.HAIKU,
+              kind: 'sequence_comment',
+              metadata: { artist_id: artist.id, ig_account_id: account.id },
             })
             const commentText = commentResp.content[0]?.type === 'text'
               ? commentResp.content[0].text.trim().replace(/^["']|["']$/g, '')
@@ -403,6 +414,7 @@ async function createSession(
   const { error: insertError } = await supabase
     .from('session_schedule')
     .insert({
+      account_id: account.account_id,
       ig_account_id: account.id,
       scheduled_start: start.toISOString(),
       session_type: sessionType,

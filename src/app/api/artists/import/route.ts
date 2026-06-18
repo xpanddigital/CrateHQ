@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { valuateAndQualify } from '@/lib/qualification/qualifier'
 import { logger } from '@/lib/logger'
+
+const MAX_IMPORT_ROWS = 50_000
 
 export const maxDuration = 300
 
@@ -14,11 +17,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    // Imports MUST be scoped to the caller's account. RLS would block
+    // cross-account writes anyway, but setting it explicitly avoids the
+    // policy-blocked error and is clearer in intent.
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
     const { artists, format = 'cratehq' } = body
 
     if (!artists || !Array.isArray(artists) || artists.length === 0) {
       return NextResponse.json({ error: 'No artists provided' }, { status: 400 })
+    }
+    if (artists.length > MAX_IMPORT_ROWS) {
+      return NextResponse.json(
+        { error: `Import too large: ${artists.length} rows (max ${MAX_IMPORT_ROWS})` },
+        { status: 413 }
+      )
     }
 
     // ── Deduplication ────────────────────────────────────────────
@@ -31,12 +51,13 @@ export async function POST(request: NextRequest) {
       .map((a: any) => (a.name || '').trim().toLowerCase())
       .filter(Boolean)
 
-    // Fetch existing artists by spotify_id
+    // Fetch existing artists by spotify_id — scoped to this account
     let existingBySpotifyId: Record<string, any> = {}
     if (spotifyIds.length > 0) {
       const { data: existing } = await supabase
         .from('artists')
         .select('id, spotify_id, name')
+        .eq('account_id', accountId)
         .in('spotify_id', spotifyIds)
 
       if (existing) {
@@ -46,7 +67,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Fetch existing artists by name (case-insensitive)
+    // Fetch existing artists by name (case-insensitive) — scoped to account
     let existingByName: Record<string, any> = {}
     if (artistNames.length > 0) {
       // Batch in chunks of 200 to avoid query limits
@@ -55,6 +76,7 @@ export async function POST(request: NextRequest) {
         const { data: existing } = await supabase
           .from('artists')
           .select('id, spotify_id, name')
+          .eq('account_id', accountId)
           .in('name', chunk)
 
         if (existing) {
@@ -90,6 +112,7 @@ export async function POST(request: NextRequest) {
       if (artist.website) socialLinks.website = artist.website
 
       const record: any = {
+        account_id: accountId,
         name: artist.name,
         email: artist.email || null,
         email_source: artist.email_source || null,

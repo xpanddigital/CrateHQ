@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import { LoadingSpinner } from '@/components/shared/LoadingSpinner'
-import { Save, User, Bot, Link as LinkIcon, Mail, CheckCircle, XCircle, Loader2, Download } from 'lucide-react'
+import { Save, User, Bot, Link as LinkIcon, Mail, CheckCircle, XCircle, Loader2, Download, CreditCard } from 'lucide-react'
 import { Profile } from '@/types/database'
 import { SCOUT_PERSONAS, ScoutPersona } from '@/lib/ai/sdr'
 
@@ -49,6 +49,10 @@ export default function SettingsPage() {
   const [genreActorId, setGenreActorId] = useState('vJZ1EOCOEVCsENnWh')
   const [actorsSaved, setActorsSaved] = useState(false)
 
+  // Billing portal
+  const [openingPortal, setOpeningPortal] = useState(false)
+  const [portalError, setPortalError] = useState('')
+
   useEffect(() => {
     fetchProfile()
     setCoreDataActorId(localStorage.getItem('apify_core_actor_id') || 'YZhD6hYc8daYSWXKs')
@@ -77,16 +81,18 @@ export default function SettingsPage() {
           })
         }
 
-        // Fetch Instantly integration
-        const { data: integration } = await supabase
-          .from('integrations')
-          .select('*')
-          .eq('user_id', user.id)
-          .eq('service', 'instantly')
-          .single()
-
-        if (integration?.api_key) {
-          setInstantlyKey(integration.api_key)
+        // Fetch Instantly integration via API so the key is decrypted server-side.
+        // Reading the encrypted blob directly via supabase-js would only give us
+        // the ciphertext.
+        try {
+          const integrationsRes = await fetch('/api/integrations')
+          if (integrationsRes.ok) {
+            const { integrations } = await integrationsRes.json()
+            const instantly = (integrations || []).find((i: any) => i.service === 'instantly')
+            if (instantly?.api_key) setInstantlyKey(instantly.api_key)
+          }
+        } catch (e) {
+          console.warn('Failed to load Instantly integration:', e)
         }
 
         // Check if Apify is configured (server-side check)
@@ -106,6 +112,22 @@ export default function SettingsPage() {
     localStorage.setItem('apify_genre_actor_id', genreActorId.trim() || 'vJZ1EOCOEVCsENnWh')
     setActorsSaved(true)
     setTimeout(() => setActorsSaved(false), 2000)
+  }
+
+  const handleOpenBillingPortal = async () => {
+    setOpeningPortal(true)
+    setPortalError('')
+    try {
+      const res = await fetch('/api/billing/portal', { method: 'POST' })
+      const data = await res.json()
+      if (!res.ok || !data.url) {
+        throw new Error(data.error || 'Failed to open billing portal')
+      }
+      window.location.href = data.url
+    } catch (err: any) {
+      setPortalError(err.message || 'Failed to open billing portal')
+      setOpeningPortal(false)
+    }
   }
 
   const handleTestApify = async () => {
@@ -163,21 +185,21 @@ export default function SettingsPage() {
 
   const handleSaveInstantly = async () => {
     try {
-      const supabase = (await import('@/lib/supabase/client')).createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-
-      if (!user) throw new Error('Not authenticated')
-
-      const { error } = await supabase
-        .from('integrations')
-        .upsert({
-          user_id: user.id,
+      // Route through /api/integrations so the api_key is encrypted server-side
+      // before being written to the database. Never write integration secrets
+      // directly from the browser.
+      const res = await fetch('/api/integrations', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
           service: 'instantly',
           api_key: instantlyKey,
-          is_active: true,
-        })
-
-      if (error) throw error
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to save Instantly key')
+      }
       setConnectionStatus('idle')
     } catch (error) {
       console.error('Error saving Instantly key:', error)
@@ -300,6 +322,39 @@ export default function SettingsPage() {
               This link will be included in AI-generated replies when appropriate
             </p>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <CreditCard className="h-5 w-5" />
+            <CardTitle>Billing</CardTitle>
+          </div>
+          <CardDescription>
+            Update your card, view invoices, or cancel your subscription
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <Button onClick={handleOpenBillingPortal} disabled={openingPortal} variant="outline">
+            {openingPortal ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Opening Stripe…
+              </>
+            ) : (
+              <>
+                <CreditCard className="h-4 w-4 mr-2" />
+                Manage billing
+              </>
+            )}
+          </Button>
+          {portalError && (
+            <p className="text-sm text-destructive">{portalError}</p>
+          )}
+          <p className="text-xs text-muted-foreground">
+            You will be redirected to Stripe to manage your subscription securely.
+          </p>
         </CardContent>
       </Card>
 

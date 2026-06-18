@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import Anthropic from '@anthropic-ai/sdk'
+import { CLAUDE_MODELS } from '@/lib/ai/models'
+import { recordAnthropicUsage } from '@/lib/ai/usage'
 import { logger } from '@/lib/logger'
 import type { SequenceStep } from '@/types/database'
 
@@ -65,16 +67,17 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Template has no steps' }, { status: 400 })
     }
 
-    // Verify IG account exists
+    // Verify IG account exists; capture its owning account for tenant scoping
     const { data: igAccount, error: igError } = await supabase
       .from('ig_accounts')
-      .select('id, is_active')
+      .select('id, is_active, account_id')
       .eq('id', ig_account_id)
       .single()
 
     if (igError || !igAccount) {
       return NextResponse.json({ error: 'IG account not found' }, { status: 404 })
     }
+    const accountId = igAccount.account_id
 
     // Fetch all artists
     const { data: artists, error: artistsError } = await supabase
@@ -125,9 +128,16 @@ export async function POST(request: NextRequest) {
           const prompt = `Write a short, casual Instagram DM from a music industry scout to ${artist.name || 'an artist'}. Mention their ${(artist.genres || []).join(', ') || 'music'} and that you can offer around ${artist.estimated_offer_low ? `$${Math.round(artist.estimated_offer_low / 1000)}k` : 'a competitive amount'} to ${artist.estimated_offer_high ? `$${Math.round(artist.estimated_offer_high / 1000)}k` : 'a competitive amount'} for a short-term back catalogue distribution deal. Keep it 3-5 sentences, no em dashes, casual tone. Start with "Hey ${artist.name || 'there'}!"`.trim()
 
           const resp = await anthropicClient.messages.create({
-            model: 'claude-sonnet-4-20250514',
+            model: CLAUDE_MODELS.SONNET,
             max_tokens: 150,
             messages: [{ role: 'user', content: prompt }],
+          })
+          recordAnthropicUsage(resp, {
+            accountId,
+            userId: user!.id,
+            model: CLAUDE_MODELS.SONNET,
+            kind: 'sequence_pregen_dm',
+            metadata: { artist_id: artist.id, template_id },
           })
           dmMessageText = resp.content[0]?.type === 'text' ? resp.content[0].text.trim() : null
         } catch (aiErr) {
@@ -136,10 +146,11 @@ export async function POST(request: NextRequest) {
         }
       }
 
-      // Insert enrollment (partial unique index prevents duplicates)
+      // Insert enrollment (partial unique index prevents duplicates) — scoped to account
       const { error: enrollError } = await supabase
         .from('sequence_enrollments')
         .insert({
+          account_id: accountId,
           artist_id: artist.id,
           template_id,
           ig_account_id,
@@ -176,6 +187,7 @@ export async function POST(request: NextRequest) {
         const { error: dealError } = await supabase
           .from('deals')
           .insert({
+            account_id: accountId,
             artist_id: artist.id,
             scout_id: resolvedScoutId,
             stage: 'outreach_queued',

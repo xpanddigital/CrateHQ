@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
@@ -84,7 +85,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
     }
 
-    const { email, full_name, role = 'scout' } = await request.json()
+    const { email, full_name } = await request.json()
 
     if (!email || !full_name) {
       return NextResponse.json(
@@ -93,14 +94,14 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Use Supabase Admin API to create user
-    const { data: newUser, error: createError } = await supabase.auth.admin.createUser({
+    // Admin user creation requires service role. We've already verified the
+    // caller is admin above via the cookie session — now switch clients.
+    const adminSupabase = createServiceClient()
+
+    const { data: newUser, error: createError } = await adminSupabase.auth.admin.createUser({
       email,
       email_confirm: false,
-      user_metadata: {
-        full_name,
-        role,
-      },
+      user_metadata: { full_name },
     })
 
     if (createError) {
@@ -111,8 +112,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Send password reset email (acts as invite)
-    const { error: resetError } = await supabase.auth.admin.generateLink({
+    // Send invite email
+    const { error: resetError } = await adminSupabase.auth.admin.generateLink({
       type: 'invite',
       email,
     })
@@ -120,6 +121,19 @@ export async function POST(request: NextRequest) {
     if (resetError) {
       logger.error('Error sending invite:', resetError)
       // Don't fail the request, user is created
+    }
+
+    // If a paid scouts (billing) row already exists for this email, link it
+    // to the newly-created profile. This is the Stripe → invite → profile glue.
+    if (newUser?.user?.id) {
+      const { error: linkError } = await adminSupabase
+        .from('scouts')
+        .update({ profile_id: newUser.user.id })
+        .eq('email', email)
+        .is('profile_id', null)
+      if (linkError) {
+        logger.warn('Scout billing row link skipped (no matching row or already linked):', linkError.message)
+      }
     }
 
     return NextResponse.json(

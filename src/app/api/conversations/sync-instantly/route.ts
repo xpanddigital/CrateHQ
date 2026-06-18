@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { decrypt, isEncrypted } from '@/lib/crypto'
 import { logger } from '@/lib/logger'
 
 /**
@@ -26,27 +27,37 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
-    // Get artist email
+    // Get artist (with account_id so we can scope the conversation inserts)
     const { data: artist } = await supabase
       .from('artists')
-      .select('id, name, email, email_secondary, email_management')
+      .select('id, name, email, email_secondary, email_management, account_id')
       .eq('id', artist_id)
       .single()
 
     if (!artist?.email) {
       return NextResponse.json({ error: 'Artist has no email' }, { status: 400 })
     }
+    if (!artist.account_id) {
+      return NextResponse.json({ error: 'Artist has no account scope' }, { status: 409 })
+    }
 
-    // Get Instantly API key
-    let apiKey = process.env.INSTANTLY_API_KEY || ''
+    // Get Instantly API key — prefer this account's integration, fall back to
+    // the global env key. Stored keys are encrypted (see lib/crypto.ts).
+    let apiKey = ''
+    const { data: integration } = await supabase
+      .from('integrations')
+      .select('api_key')
+      .eq('account_id', artist.account_id)
+      .eq('service', 'instantly')
+      .eq('is_active', true)
+      .maybeSingle()
+    if (integration?.api_key) {
+      apiKey = isEncrypted(integration.api_key)
+        ? decrypt(integration.api_key)
+        : integration.api_key
+    }
     if (!apiKey) {
-      const { data: integration } = await supabase
-        .from('integrations')
-        .select('api_key')
-        .eq('service', 'instantly')
-        .eq('is_active', true)
-        .maybeSingle()
-      apiKey = integration?.api_key || ''
+      apiKey = process.env.INSTANTLY_API_KEY || ''
     }
 
     if (!apiKey) {
@@ -116,6 +127,7 @@ export async function POST(request: NextRequest) {
       const { error: insertError } = await supabase
         .from('conversations')
         .insert({
+          account_id: artist.account_id,
           artist_id,
           channel: 'email',
           direction,

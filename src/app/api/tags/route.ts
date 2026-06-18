@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
@@ -37,12 +38,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
     const { name, color, description } = body
 
     const { data: tag, error } = await supabase
       .from('tags')
       .insert({
+        account_id: accountId,
         name,
         color: color || '#6C5CE7',
         description,

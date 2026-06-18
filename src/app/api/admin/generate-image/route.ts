@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
+import { recordAiUsage } from '@/lib/ai/usage'
+import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 
 const IMAGEN_ENDPOINT =
@@ -7,6 +10,24 @@ const IMAGEN_ENDPOINT =
 
 export async function POST(request: NextRequest) {
   try {
+    // Auth: admin only. Burns Gemini quota AND can overwrite any post's image.
+    const userSupabase = await createClient()
+    const { data: { user } } = await userSupabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+    const { data: profile } = await userSupabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .single()
+    if (profile?.role !== 'admin') {
+      return NextResponse.json({ error: 'Admin only' }, { status: 403 })
+    }
+
+    const rl = checkRateLimit(rateLimitKey(user.id, 'admin/generate-image'), RATE_LIMITS.ai)
+    if (!rl.allowed) return rl.response
+
     const supabase = createServiceClient()
 
     const body = await request.json()
@@ -91,10 +112,12 @@ export async function POST(request: NextRequest) {
     const publicUrl = publicUrlData.publicUrl
 
     // 3. Update content_posts row
-    const { error: updateError } = await supabase
+    const { data: updatedPost, error: updateError } = await supabase
       .from('content_posts')
       .update({ image_url: publicUrl })
       .eq('id', postId)
+      .select('account_id')
+      .single()
 
     if (updateError) {
       logger.error('[GenerateImage] Update post error:', updateError)
@@ -103,6 +126,19 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       )
     }
+
+    // Telemetry. Gemini Imagen prices ~$0.04/image at the 'gemini-imagen' pricing
+    // entry — record 1 "output token" so the cost calc returns the per-image rate.
+    recordAiUsage({
+      accountId: updatedPost?.account_id ?? null,
+      userId: user.id,
+      provider: 'gemini',
+      model: 'gemini-imagen',
+      kind: 'image_generation',
+      inputTokens: 0,
+      outputTokens: 1,
+      metadata: { post_id: postId, ig_account_id: igAccountId },
+    })
 
     return NextResponse.json({ success: true, imageUrl: publicUrl })
   } catch (e: any) {

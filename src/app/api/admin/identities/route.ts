@@ -142,16 +142,27 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Enforce unique theme across accounts
+    // Pull the IG account's tenant so the identity inherits the right account_id.
+    const { data: igAccountRow } = await supabase
+      .from('ig_accounts')
+      .select('account_id')
+      .eq('id', ig_account_id)
+      .maybeSingle()
+    if (!igAccountRow?.account_id) {
+      return NextResponse.json({ error: 'IG account not associated with an account' }, { status: 404 })
+    }
+
+    // Enforce unique theme per account (multi-tenant scoping)
     const { data: existing } = await supabase
       .from('account_identities')
       .select('id, display_name')
+      .eq('account_id', igAccountRow.account_id)
       .eq('theme_id', theme_id)
       .limit(1)
 
     if (existing && existing.length > 0) {
       return NextResponse.json(
-        { error: `Theme already used by ${existing[0].display_name || 'another account'}` },
+        { error: `Theme already used by ${existing[0].display_name || 'another identity in this account'}` },
         { status: 400 }
       )
     }
@@ -160,6 +171,7 @@ export async function POST(request: NextRequest) {
     const { data, error: insertError } = await supabase
       .from('account_identities')
       .insert({
+        account_id: igAccountRow.account_id,
         ig_account_id,
         display_name: display_name || 'Unnamed',
         theme_id,

@@ -47,27 +47,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ received: true, duplicate: true })
     }
 
-    // Get assigned scout for this IG account
+    // Get assigned scout AND owning account for this IG account
     const { data: accountData } = await supabase
       .from('ig_accounts')
-      .select('assigned_scout_id')
+      .select('assigned_scout_id, account_id')
       .eq('id', ig_account_id)
       .single()
 
     const assignedScoutId = accountData?.assigned_scout_id || null
+    const accountId = accountData?.account_id || null
 
-    // Match sender to artist (case-insensitive)
+    // Match sender to artist — scoped to the account so we don't pull a
+    // matching @handle from another tenant.
     const handleLower = sender_username.toLowerCase()
-    const { data: artist } = await supabase
-      .from('artists')
-      .select('id, name')
-      .ilike('instagram_handle', handleLower)
-      .maybeSingle()
+    let artist: { id: string; name: string } | null = null
+    if (accountId) {
+      const { data: artistMatch } = await supabase
+        .from('artists')
+        .select('id, name')
+        .eq('account_id', accountId)
+        .ilike('instagram_handle', handleLower)
+        .maybeSingle()
+      artist = artistMatch
+    }
 
-    // Insert conversation
+    // Insert conversation — scoped to the account
     const { data: conversation, error: insertError } = await supabase
       .from('conversations')
       .insert({
+        account_id: accountId,
         artist_id: artist?.id || null,
         scout_id: assignedScoutId,
         channel: 'instagram',
@@ -93,10 +101,11 @@ export async function POST(request: NextRequest) {
     }
 
     // If artist matched and they have a deal in an outreach stage, update to 'replied'
-    if (artist) {
+    if (artist && accountId) {
       const { data: deals } = await supabase
         .from('deals')
         .select('id, stage')
+        .eq('account_id', accountId)
         .eq('artist_id', artist.id)
         .in('stage', OUTREACH_STAGES)
 

@@ -23,17 +23,17 @@ export async function POST(request: NextRequest) {
     const rl = checkRateLimit(rateLimitKeyByIP(request, 'webhooks/instantly'), RATE_LIMITS.webhook)
     if (!rl.allowed) return rl.response
 
-    // Verify webhook secret
+    // Verify webhook secret (mandatory; header only — never query param,
+    // which leaks into access logs).
     const webhookSecret = process.env.INSTANTLY_WEBHOOK_SECRET
-    if (webhookSecret) {
-      const providedSecret = request.nextUrl.searchParams.get('secret')
-        || request.headers.get('x-webhook-secret')
-      if (providedSecret !== webhookSecret) {
-        logger.error('[Webhook/Instantly] Invalid or missing webhook secret')
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
-    } else {
-      logger.warn('[Webhook/Instantly] INSTANTLY_WEBHOOK_SECRET not set — webhook is unauthenticated')
+    if (!webhookSecret) {
+      logger.error('[Webhook/Instantly] INSTANTLY_WEBHOOK_SECRET not configured — refusing all webhooks')
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 })
+    }
+    const providedSecret = request.headers.get('x-webhook-secret')
+    if (providedSecret !== webhookSecret) {
+      logger.error('[Webhook/Instantly] Invalid or missing webhook secret')
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
     const body = await request.json()
@@ -115,12 +115,20 @@ async function handleReply(supabase: any, body: any) {
     return NextResponse.json({ received: true, duplicate: true })
   }
 
-  // Match sender to artist (check primary, secondary, management emails)
-  let matchedArtist = null
+  // Match sender to artist (check primary, secondary, management emails).
+  //
+  // KNOWN multi-tenant gap: Instantly webhooks don't carry an
+  // account/scout identifier on the payload — Joel's Instantly account is
+  // global per scout in v1. We attribute the inbound to whichever account
+  // owns the matching artist. If two tenants happen to have the same email
+  // on file the FIRST match wins, which is wrong. Mitigation: until Instantly
+  // delivers per-scout webhook endpoints, every scout should have a distinct
+  // sending account so the artist they reach maps 1:1 to their tenant.
+  let matchedArtist: { id: string; name: string; account_id: string } | null = null
 
   const { data: primaryMatch } = await supabase
     .from('artists')
-    .select('id, name')
+    .select('id, name, account_id')
     .ilike('email', senderEmail)
     .maybeSingle()
   matchedArtist = primaryMatch
@@ -128,7 +136,7 @@ async function handleReply(supabase: any, body: any) {
   if (!matchedArtist) {
     const { data: secMatch } = await supabase
       .from('artists')
-      .select('id, name')
+      .select('id, name, account_id')
       .ilike('email_secondary', senderEmail)
       .maybeSingle()
     matchedArtist = secMatch
@@ -137,7 +145,7 @@ async function handleReply(supabase: any, body: any) {
   if (!matchedArtist) {
     const { data: mgmtMatch } = await supabase
       .from('artists')
-      .select('id, name')
+      .select('id, name, account_id')
       .ilike('email_management', senderEmail)
       .maybeSingle()
     matchedArtist = mgmtMatch
@@ -149,10 +157,13 @@ async function handleReply(supabase: any, body: any) {
     .replace(/------[\s\S]*$/m, '')
     .trim()
 
-  // Insert conversation
+  // Insert conversation — scoped to the matched artist's account if known.
+  // If no artist matched, account_id is null and the row is admin-visible
+  // only (per RLS).
   const { data: conversation, error: insertError } = await supabase
     .from('conversations')
     .insert({
+      account_id: matchedArtist?.account_id || null,
       artist_id: matchedArtist?.id || null,
       channel: 'email',
       direction: 'inbound',
@@ -184,6 +195,7 @@ async function handleReply(supabase: any, body: any) {
     const { data: deals } = await supabase
       .from('deals')
       .select('id, stage')
+      .eq('account_id', matchedArtist.account_id)
       .eq('artist_id', matchedArtist.id)
       .in('stage', ['outreach_queued', 'contacted'])
 
@@ -234,13 +246,14 @@ async function handleEmailSent(supabase: any, body: any) {
 
   const { data: artist } = await supabase
     .from('artists')
-    .select('id, name')
+    .select('id, name, account_id')
     .ilike('email', toEmail)
     .maybeSingle()
 
   const { data: conversation, error: insertError } = await supabase
     .from('conversations')
     .insert({
+      account_id: artist?.account_id || null,
       artist_id: artist?.id || null,
       channel: 'email',
       direction: 'outbound',

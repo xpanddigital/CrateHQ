@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 export async function GET(request: NextRequest) {
@@ -23,22 +24,28 @@ export async function GET(request: NextRequest) {
     }
 
     const isAdmin = profile.role === 'admin'
+    // Non-admins are scoped to their account; admins see global aggregates.
+    const accountId = isAdmin ? null : await resolveAccountIdForUser(supabase, user.id)
+    const applyAccountScope = <T extends { eq: (col: string, val: string) => T }>(q: T): T =>
+      accountId ? q.eq('account_id', accountId) : q
 
     // Build base queries with role-based filtering
     const dealsQuery = isAdmin
       ? supabase.from('deals').select('*')
       : supabase.from('deals').select('*').eq('scout_id', user.id)
 
-    // 1. Total Artists
-    const { count: totalArtists } = await supabase
+    // 1. Total Artists — account-scoped for non-admins so totals don't leak.
+    const totalArtistsQuery = supabase
       .from('artists')
       .select('*', { count: 'exact', head: true })
+    const { count: totalArtists } = await applyAccountScope(totalArtistsQuery as any)
 
-    // 2. Contactable Artists
-    const { count: contactableArtists } = await supabase
+    // 2. Contactable Artists — same scoping
+    const contactableArtistsQuery = supabase
       .from('artists')
       .select('*', { count: 'exact', head: true })
       .eq('is_contactable', true)
+    const { count: contactableArtists } = await applyAccountScope(contactableArtistsQuery as any)
 
     // 3. Active Deals (not closed_won or closed_lost)
     const { data: activeDeals, count: activeDealsCount } = await (isAdmin
@@ -153,12 +160,13 @@ export async function GET(request: NextRequest) {
           .order('sent_at', { ascending: false })
           .limit(10))
 
-    // Get recent artists
-    const { data: recentArtists } = await supabase
+    // Get recent artists — account-scoped for non-admins
+    const recentArtistsQuery = supabase
       .from('artists')
       .select('id, name, created_at')
       .order('created_at', { ascending: false })
       .limit(10)
+    const { data: recentArtists } = await applyAccountScope(recentArtistsQuery as any)
 
     // Combine and sort all activities
     const activities: any[] = []
@@ -191,7 +199,7 @@ export async function GET(request: NextRequest) {
       })
     })
 
-    recentArtists?.forEach((artist) => {
+    ;(recentArtists as Array<{ id: string; name: string; created_at: string }> | null)?.forEach((artist) => {
       activities.push({
         type: 'artist_added',
         timestamp: artist.created_at,

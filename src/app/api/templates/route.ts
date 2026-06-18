@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { DEFAULT_TEMPLATES } from '@/lib/templates/defaults'
 import { logger } from '@/lib/logger'
 
@@ -27,10 +28,17 @@ export async function GET(request: NextRequest) {
       )
     }
 
-    // If no templates exist, seed defaults
+    // If no templates exist, seed defaults — scoped to the caller's account
     if (!templates || templates.length === 0) {
+      const accountId = await resolveAccountIdForUser(supabase, user.id)
+      if (!accountId) {
+        // No account yet → nothing to seed. Return empty.
+        return NextResponse.json({ templates: [] })
+      }
+
       const defaultTemplates = DEFAULT_TEMPLATES.map(template => ({
         ...template,
+        account_id: accountId,
         created_by: user.id,
         is_active: true,
       }))
@@ -77,9 +85,18 @@ export async function POST(request: NextRequest) {
       )
     }
 
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const { data: template, error } = await supabase
       .from('email_templates')
       .insert({
+        account_id: accountId,
         name,
         category,
         sequence_position: sequence_position || null,

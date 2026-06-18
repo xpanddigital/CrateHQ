@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { generateFollowup, ScoutPersona } from '@/lib/ai/sdr'
+import { generateFollowupAI } from '@/lib/ai/sdr-claude'
+import type { ScoutPersona } from '@/lib/ai/sdr'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 
@@ -38,10 +40,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
     }
 
-    // Get scout profile for persona
+    // Get scout profile for persona + calendly link
     const { data: profile } = await supabase
       .from('profiles')
-      .select('ai_sdr_persona')
+      .select('ai_sdr_persona, full_name, calendly_link')
       .eq('id', user.id)
       .single()
 
@@ -61,7 +63,8 @@ export async function POST(request: NextRequest) {
         body: c.body
       }))
 
-    const { subject, body } = generateFollowup({
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    const { subject, body } = await generateFollowupAI({
       artistName: deal.artist.name,
       daysSinceContact,
       conversationHistory,
@@ -71,7 +74,10 @@ export async function POST(request: NextRequest) {
         estimated_offer_low: deal.artist.estimated_offer_low,
         estimated_offer_high: deal.artist.estimated_offer_high
       },
-      scoutPersona
+      scoutPersona,
+      scoutCalendlyLink: profile?.calendly_link ?? null,
+      scoutName: profile?.full_name ?? null,
+      usage: { accountId, userId: user.id },
     })
 
     return NextResponse.json({ subject, body, daysSinceContact })

@@ -3,6 +3,7 @@ import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import { getGHLClient } from '@/lib/ghl/client'
 import { sendInstagramMessage } from '@/lib/ghl/conversations'
+import { decrypt, isEncrypted } from '@/lib/crypto'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 
@@ -73,6 +74,7 @@ async function handleInstagramSend(
     ig_account_id: string | null
     ig_thread_id: string | null
     artist_id: string | null
+    account_id: string | null
     metadata: Record<string, any> | null
   } | null = null
   let lookupError: any = null
@@ -80,7 +82,7 @@ async function handleInstagramSend(
   if (params.artist_id) {
     const { data, error } = await supabase
       .from('conversations')
-      .select('ig_account_id, ig_thread_id, artist_id, metadata')
+      .select('ig_account_id, ig_thread_id, artist_id, account_id, metadata')
       .eq('artist_id', params.artist_id)
       .eq('channel', 'instagram')
       .eq('direction', 'inbound')
@@ -92,7 +94,7 @@ async function handleInstagramSend(
   } else if (params.thread_key) {
     const { data, error } = await supabase
       .from('conversations')
-      .select('ig_account_id, ig_thread_id, artist_id, metadata')
+      .select('ig_account_id, ig_thread_id, artist_id, account_id, metadata')
       .eq('ig_thread_id', params.thread_key)
       .eq('channel', 'instagram')
       .eq('direction', 'inbound')
@@ -130,6 +132,7 @@ async function handleInstagramSend(
         const { data: conversation, error: convoError } = await supabase
           .from('conversations')
           .insert({
+            account_id: lastInbound.account_id,
             artist_id: params.artist_id || lastInbound.artist_id || null,
             channel: 'instagram',
             direction: 'outbound',
@@ -193,6 +196,7 @@ async function handleInstagramSend(
   const { data: queued, error: queueError } = await supabase
     .from('pending_outbound_messages')
     .insert({
+      account_id: lastInbound.account_id,
       ig_account_id: lastInbound.ig_account_id,
       ig_thread_id: lastInbound.ig_thread_id,
       message_text: params.message_text,
@@ -211,6 +215,7 @@ async function handleInstagramSend(
   const { data: conversation, error: convoError } = await supabase
     .from('conversations')
     .insert({
+      account_id: lastInbound.account_id,
       artist_id: params.artist_id,
       channel: 'instagram',
       direction: 'outbound',
@@ -249,10 +254,10 @@ async function handleEmailSend(
   supabase: any,
   params: { artist_id: string; message_text: string; scout_id: string }
 ) {
-  // ── Step 1: Get artist ──
+  // ── Step 1: Get artist (+ account_id so we can scope the conversation insert) ──
   const { data: artist, error: artistError } = await supabase
     .from('artists')
-    .select('id, name, email')
+    .select('id, name, email, account_id')
     .eq('id', params.artist_id)
     .single()
 
@@ -262,19 +267,30 @@ async function handleEmailSend(
   if (!artist.email) {
     return NextResponse.json({ error: 'Artist has no email address' }, { status: 400 })
   }
+  if (!artist.account_id) {
+    return NextResponse.json({ error: 'Artist has no account scope' }, { status: 409 })
+  }
 
   const artistEmailLower = artist.email.toLowerCase()
 
   // ── Step 2: Get Instantly API key ──
-  let apiKey = process.env.INSTANTLY_API_KEY || ''
+  // Prefer the scout's own integration row; fall back to the global env key.
+  // Stored keys are encrypted; decrypt before use.
+  let apiKey = ''
+  const { data: integration } = await supabase
+    .from('integrations')
+    .select('api_key')
+    .eq('user_id', params.scout_id)
+    .eq('service', 'instantly')
+    .eq('is_active', true)
+    .maybeSingle()
+  if (integration?.api_key) {
+    apiKey = isEncrypted(integration.api_key)
+      ? decrypt(integration.api_key)
+      : integration.api_key
+  }
   if (!apiKey) {
-    const { data: integration } = await supabase
-      .from('integrations')
-      .select('api_key')
-      .eq('service', 'instantly')
-      .eq('is_active', true)
-      .maybeSingle()
-    apiKey = integration?.api_key || ''
+    apiKey = process.env.INSTANTLY_API_KEY || ''
   }
   if (!apiKey) {
     return NextResponse.json(
@@ -476,10 +492,11 @@ async function handleEmailSend(
     instantlyError = String(fetchError)
   }
 
-  // ── Step 7: ALWAYS save to conversations ──
+  // ── Step 7: ALWAYS save to conversations — scoped to the artist's account
   const { data: conversation, error: convoError } = await supabase
     .from('conversations')
     .insert({
+      account_id: artist.account_id,
       artist_id: params.artist_id,
       channel: 'email',
       direction: 'outbound',

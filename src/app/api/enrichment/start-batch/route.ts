@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 export const maxDuration = 300
@@ -13,13 +14,23 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const body = await request.json()
     const { name, limit, filter = 'qualified' } = body
 
-    // Concurrency guard: reject if there's already an active batch
+    // Concurrency guard: reject if there's already an active batch FOR THIS ACCOUNT.
+    // Different tenants can run concurrent batches.
     const { data: activeBatches } = await supabase
       .from('enrichment_batches')
       .select('id, name, status')
+      .eq('account_id', accountId)
       .in('status', ['queued', 'processing'])
       .limit(1)
 
@@ -30,7 +41,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Query artists that need enrichment (paginate to bypass Supabase 1000-row default)
+    // Query artists that need enrichment (paginate to bypass Supabase 1000-row default).
+    // Scoped to this account so we don't enrich another tenant's artists.
     const maxToQueue = limit || 50000
     let allArtists: Array<{ id: string; name: string }> = []
     let page = 0
@@ -40,6 +52,7 @@ export async function POST(request: NextRequest) {
       let query = supabase
         .from('artists')
         .select('id, name')
+        .eq('account_id', accountId)
         .is('email', null)
         .order('created_at', { ascending: true })
         .range(page * PAGE_SIZE, (page + 1) * PAGE_SIZE - 1)
@@ -75,6 +88,7 @@ export async function POST(request: NextRequest) {
     const { data: batch, error: batchError } = await supabase
       .from('enrichment_batches')
       .insert({
+        account_id: accountId,
         name: batchName,
         total_artists: artists.length,
         status: 'queued',
@@ -87,11 +101,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: batchError?.message || 'Failed to create batch' }, { status: 500 })
     }
 
-    // Insert queue jobs in chunks of 500
+    // Insert queue jobs in chunks of 500 — each row inherits the batch's account_id
     const CHUNK_SIZE = 500
     for (let i = 0; i < artists.length; i += CHUNK_SIZE) {
       const chunk = artists.slice(i, i + CHUNK_SIZE)
       const rows = chunk.map((a: any) => ({
+        account_id: accountId,
         artist_id: a.id,
         batch_id: batch.id,
         status: 'pending',

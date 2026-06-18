@@ -24,14 +24,15 @@ export default function SignupPage() {
     try {
       const supabase = createClient()
       
-      // First, try to sign up
+      // First, try to sign up. Role is hardcoded to 'scout' by the
+      // handle_new_user DB trigger; admin role can only be granted by an
+      // existing admin via /api/scouts. The metadata only carries full_name.
       const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
         email: email.trim(),
         password: password,
         options: {
           data: {
             full_name: fullName,
-            role: 'admin',
           },
         },
       })

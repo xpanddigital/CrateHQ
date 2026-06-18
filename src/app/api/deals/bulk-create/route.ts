@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 // POST /api/deals/bulk-create - Create deals for multiple artists
@@ -12,24 +13,34 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const { artistIds } = await request.json()
 
     if (!artistIds || !Array.isArray(artistIds) || artistIds.length === 0) {
       return NextResponse.json({ error: 'artistIds array is required' }, { status: 400 })
     }
 
-    // Get artists with their estimated offers
+    // Get artists with their estimated offers — scoped to account
     const { data: artists, error: artistsError } = await supabase
       .from('artists')
       .select('id, name, estimated_offer')
+      .eq('account_id', accountId)
       .in('id', artistIds)
 
     if (artistsError) throw artistsError
 
-    // Get existing active deals for these artists
+    // Get existing active deals for these artists (also account-scoped)
     const { data: existingDeals } = await supabase
       .from('deals')
       .select('artist_id')
+      .eq('account_id', accountId)
       .in('artist_id', artistIds)
       .not('stage', 'in', '(closed_won,closed_lost)')
 
@@ -48,6 +59,7 @@ export async function POST(request: NextRequest) {
 
     // Create deals
     const dealsToInsert = artistsToCreate.map(artist => ({
+      account_id: accountId,
       artist_id: artist.id,
       scout_id: user.id,
       stage: 'new',

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
 import Anthropic from '@anthropic-ai/sdk'
+import { CLAUDE_MODELS } from '@/lib/ai/models'
+import { recordAnthropicUsage } from '@/lib/ai/usage'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 export const maxDuration = 60
@@ -54,8 +57,10 @@ Write a concise but detailed "voice_prompt" that describes:
 Return just the voice prompt text, no bullet labels, no markdown.
     `.trim()
 
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+
     const resp = await client.messages.create({
-      model: 'claude-sonnet-4-6',
+      model: CLAUDE_MODELS.SONNET,
       max_tokens: 300,
       messages: [
         {
@@ -63,6 +68,14 @@ Return just the voice prompt text, no bullet labels, no markdown.
           content: prompt,
         },
       ],
+    })
+
+    recordAnthropicUsage(resp, {
+      accountId,
+      userId: user.id,
+      model: CLAUDE_MODELS.SONNET,
+      kind: 'voice_prompt',
+      metadata: { theme_id, display_name },
     })
 
     const text =

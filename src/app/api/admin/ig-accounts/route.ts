@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import crypto from 'crypto'
 import { logger } from '@/lib/logger'
 
@@ -39,6 +40,18 @@ export async function POST(request: NextRequest) {
         ? body.webhook_secret.trim()
         : crypto.randomBytes(24).toString('hex')
 
+    // Caller can pass an explicit account_id (e.g. provisioning for a specific scout);
+    // default to the admin's own account.
+    const bodyAccountId = typeof body.account_id === 'string' ? body.account_id : null
+    const { data: { user } } = await supabase.auth.getUser()
+    const accountId = bodyAccountId ?? (user ? await resolveAccountIdForUser(supabase, user.id) : null)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'account_id required — pass it in the body or join an account first' },
+        { status: 400 }
+      )
+    }
+
     if (!ig_username) {
       return NextResponse.json(
         { error: 'ig_username is required' },
@@ -52,6 +65,7 @@ export async function POST(request: NextRequest) {
       .from('ig_accounts')
       .insert({
         id,
+        account_id: accountId,
         ig_username,
         webhook_secret,
       })

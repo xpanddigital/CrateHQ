@@ -36,10 +36,12 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
-    // 1) Find the most recent inbound Instagram conversation for this thread
+    // 1) Find the most recent inbound Instagram conversation for this thread.
+    //    Pull account_id from the conversation so the new artist row gets the
+    //    same tenant as the thread that birthed it.
     const { data: convo, error: convoError } = await supabase
       .from('conversations')
-      .select('id, channel, direction, artist_id, sender, ig_thread_id, metadata')
+      .select('id, channel, direction, artist_id, sender, ig_thread_id, account_id, metadata')
       .eq('ig_thread_id', thread_key)
       .eq('channel', 'instagram')
       .eq('direction', 'inbound')
@@ -67,6 +69,13 @@ export async function POST(request: NextRequest) {
       })
     }
 
+    if (!convo.account_id) {
+      return NextResponse.json(
+        { error: 'Conversation has no account scope; cannot create artist' },
+        { status: 409 }
+      )
+    }
+
     const inferredName =
       name ||
       (convo.metadata as any)?.sender_full_name ||
@@ -78,10 +87,11 @@ export async function POST(request: NextRequest) {
       convo.sender ||
       null
 
-    // 2) Create the artist record
+    // 2) Create the artist record — inherit the conversation's account
     const { data: artist, error: artistError } = await supabase
       .from('artists')
       .insert({
+        account_id: convo.account_id,
         name: inferredName,
         instagram_handle: inferredHandle,
         email: email || null,
@@ -95,10 +105,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to create artist' }, { status: 500 })
     }
 
-    // 3) Backfill artist_id on all conversations in this IG thread
+    // 3) Backfill artist_id on all conversations in this IG thread (account-scoped)
     const { error: updateError } = await supabase
       .from('conversations')
       .update({ artist_id: artist.id })
+      .eq('account_id', convo.account_id)
       .eq('ig_thread_id', thread_key)
 
     if (updateError) {

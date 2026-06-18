@@ -28,7 +28,7 @@ export async function GET(request: NextRequest) {
 
     if (error) {
       logger.warn('[Install OAuth] Install denied or failed', { error, locationId })
-      return successPage(`Install was not completed: ${error}`, false)
+      return successPage(`Install was not completed: ${escapeHtml(error)}`, false)
     }
 
     if (!code) {
@@ -57,7 +57,7 @@ export async function GET(request: NextRequest) {
     }
 
     return successPage(
-      `CrateHQ installed successfully${locationId ? ` for location ${locationId}` : ''}. You can close this tab.`,
+      `CrateHQ installed successfully${locationId ? ` for location ${escapeHtml(locationId)}` : ''}. You can close this tab.`,
       true
     )
   } catch (e) {
@@ -68,6 +68,19 @@ export async function GET(request: NextRequest) {
 
 // Some marketplaces POST to the callback; accept both
 export const POST = GET
+
+/**
+ * Escape user-controlled values before interpolating into the HTML response.
+ * Without this, the ?error= query param yields a stored-XSS gadget.
+ */
+function escapeHtml(input: string): string {
+  return input
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
 
 function successPage(message: string, ok: boolean): NextResponse {
   const color = ok ? '#16a34a' : '#dc2626'

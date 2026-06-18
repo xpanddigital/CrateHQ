@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { generateReply, ReplyClassification, ScoutPersona } from '@/lib/ai/sdr'
+import { generateReplyAI } from '@/lib/ai/sdr-claude'
+import type { ReplyClassification, ScoutPersona } from '@/lib/ai/sdr'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 
@@ -41,10 +43,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Deal not found' }, { status: 404 })
     }
 
-    // Get scout profile for persona
+    // Get scout profile for persona + calendly link
     const { data: profile } = await supabase
       .from('profiles')
-      .select('ai_sdr_persona')
+      .select('ai_sdr_persona, full_name, calendly_link')
       .eq('id', user.id)
       .single()
 
@@ -58,9 +60,10 @@ export async function POST(request: NextRequest) {
         body: c.body
       }))
 
-    const draft = generateReply({
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    const draft = await generateReplyAI({
       replyText,
-      classification: classification || 'unclear',
+      classification: (classification || 'unclear') as ReplyClassification,
       artistName: deal.artist.name,
       artistData: {
         streams_last_month: deal.artist.streams_last_month,
@@ -70,7 +73,10 @@ export async function POST(request: NextRequest) {
         genres: deal.artist.genres
       },
       conversationHistory,
-      scoutPersona
+      scoutPersona,
+      scoutCalendlyLink: profile?.calendly_link ?? null,
+      scoutName: profile?.full_name ?? null,
+      usage: { accountId, userId: user.id },
     })
 
     return NextResponse.json({ draft })

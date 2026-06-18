@@ -18,10 +18,10 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'artist_id is required' }, { status: 400 })
     }
 
-    // Check if artist exists and get estimated offer
+    // Fetch artist + account_id so the new deal inherits the artist's tenant
     const { data: artist, error: artistError } = await supabase
       .from('artists')
-      .select('id, name, estimated_offer')
+      .select('id, name, estimated_offer, account_id')
       .eq('id', artist_id)
       .single()
 
@@ -44,10 +44,11 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Create deal
+    // Create deal — scoped to the artist's account
     const { data: deal, error: dealError } = await supabase
       .from('deals')
       .insert({
+        account_id: artist.account_id,
         artist_id,
         scout_id: user.id,
         stage: 'new',

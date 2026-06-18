@@ -34,13 +34,17 @@ const OUTREACH_STAGES = ['outreach_queued', 'contacted']
 export async function POST(request: NextRequest) {
   try {
     const expectedSecret = process.env.GHL_WEBHOOK_SECRET
-    if (expectedSecret) {
-      const providedSecret = request.headers.get('x-webhook-secret')
-      if (providedSecret !== expectedSecret) {
-        return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-      }
+    if (!expectedSecret) {
+      // Mandatory: refuse to start in production without a secret. This
+      // closes the loophole where a fresh deploy missed the env var and
+      // started accepting all webhook traffic.
+      logger.error('[Webhook Inbox] GHL_WEBHOOK_SECRET not configured — refusing all webhooks')
+      return NextResponse.json({ error: 'Webhook not configured' }, { status: 503 })
     }
-    // else: Phase 1 — accept all webhooks. See file header.
+    const providedSecret = request.headers.get('x-webhook-secret')
+    if (providedSecret !== expectedSecret) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
     const body = await request.json()
 
@@ -75,10 +79,10 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
-    // Map marketplace location → ig_account
+    // Map marketplace location → ig_account (and the tenant it belongs to)
     const { data: igAccount, error: accountError } = await supabase
       .from('ig_accounts')
-      .select('id, assigned_scout_id, is_active')
+      .select('id, account_id, assigned_scout_id, is_active')
       .eq('ghl_location_id', locationId)
       .maybeSingle()
 
@@ -126,21 +130,26 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    // Match IG handle → artist (case-insensitive)
+    // Match IG handle → artist (case-insensitive), SCOPED to the account that
+    // owns this IG account. Without the account_id filter, an inbound DM
+    // would be attributed to whichever tenant happens to have the same
+    // @handle on file — a cross-tenant leak.
     let artist: { id: string; name: string } | null = null
-    if (igHandle) {
+    if (igHandle && igAccount.account_id) {
       const { data: artistMatch } = await supabase
         .from('artists')
         .select('id, name')
+        .eq('account_id', igAccount.account_id)
         .ilike('instagram_handle', igHandle)
         .maybeSingle()
       artist = artistMatch
     }
 
-    // Insert conversation
+    // Insert conversation — scoped to the IG account's account_id
     const { data: conversation, error: insertError } = await supabase
       .from('conversations')
       .insert({
+        account_id: igAccount.account_id,
         artist_id: artist?.id ?? null,
         scout_id: igAccount.assigned_scout_id ?? null,
         channel: 'instagram',
@@ -169,11 +178,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Failed to store message' }, { status: 500 })
     }
 
-    // Auto-advance matched artist's deals from outreach stages → replied
+    // Auto-advance matched artist's deals from outreach stages → replied.
+    // Scoped to the same account so we don't touch another tenant's deals
+    // even if (somehow) the artist_id collision survives the account filter.
     if (artist) {
       const { data: deals } = await supabase
         .from('deals')
         .select('id, stage')
+        .eq('account_id', igAccount.account_id)
         .eq('artist_id', artist.id)
         .in('stage', OUTREACH_STAGES)
 

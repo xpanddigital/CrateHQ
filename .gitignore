@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# supabase cli local state (project-ref / pooler connection — never commit)
+/supabase/.temp/
+
+# claude code worktrees (other branches' checkouts)
+/.claude/worktrees/

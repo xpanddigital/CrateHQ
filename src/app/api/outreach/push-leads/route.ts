@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
+import { decrypt, isEncrypted } from '@/lib/crypto'
 import { InstantlyClient, artistToInstantlyLead } from '@/lib/instantly/client'
 import { logger } from '@/lib/logger'
 
@@ -14,6 +16,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
     }
 
+    const accountId = await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const { campaignId, artistIds } = await request.json()
 
     if (!campaignId || !artistIds || !Array.isArray(artistIds)) {
@@ -23,15 +33,25 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get Instantly API key
+    // Get Instantly API key — account-scoped, decrypted
     const { data: integration } = await supabase
       .from('integrations')
       .select('api_key')
-      .eq('user_id', user.id)
+      .eq('account_id', accountId)
       .eq('service', 'instantly')
-      .single()
+      .maybeSingle()
 
-    if (!integration?.api_key) {
+    let apiKey = ''
+    if (integration?.api_key) {
+      apiKey = isEncrypted(integration.api_key)
+        ? decrypt(integration.api_key)
+        : integration.api_key
+    }
+    if (!apiKey) {
+      apiKey = process.env.INSTANTLY_API_KEY || ''
+    }
+
+    if (!apiKey) {
       return NextResponse.json(
         { error: 'Instantly not configured' },
         { status: 400 }
@@ -45,10 +65,11 @@ export async function POST(request: NextRequest) {
       .eq('id', user.id)
       .single()
 
-    // Fetch artists
+    // Fetch artists — scoped to caller's account so cross-tenant push is impossible
     const { data: artists, error: artistsError } = await supabase
       .from('artists')
       .select('*')
+      .eq('account_id', accountId)
       .in('id', artistIds)
       .eq('is_contactable', true)
 
@@ -72,11 +93,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Push to Instantly
-    const client = new InstantlyClient(integration.api_key)
+    const client = new InstantlyClient(apiKey)
     const result = await client.addLeads(campaignId, leads)
 
     // Create deals for each artist
     const dealsToCreate = artists.map(artist => ({
+      account_id: accountId,
       artist_id: artist.id,
       scout_id: user.id,
       stage: 'outreach_queued' as const,
@@ -94,30 +116,21 @@ export async function POST(request: NextRequest) {
       // Don't fail the request, leads were still pushed
     }
 
-    // Get campaign name for logging
-    const { data: integrationData } = await supabase
-      .from('integrations')
-      .select('api_key')
-      .eq('user_id', user.id)
-      .eq('service', 'instantly')
-      .single()
-
+    // Get campaign name for logging — reuse the same client (and key)
     let campaignName = 'Unknown Campaign'
-    if (integrationData?.api_key) {
-      try {
-        const clientForName = new InstantlyClient(integrationData.api_key)
-        const campaigns = await clientForName.listCampaigns()
-        const campaign = campaigns.find((c: any) => c.id === campaignId)
-        if (campaign) campaignName = campaign.name
-      } catch (error) {
-        logger.error('Error fetching campaign name:', error)
-      }
+    try {
+      const campaigns = await client.listCampaigns()
+      const campaign = campaigns.find((c: any) => c.id === campaignId)
+      if (campaign) campaignName = campaign.name
+    } catch (error) {
+      logger.error('Error fetching campaign name:', error)
     }
 
     // Log the outreach activity
     const { error: logError } = await supabase
       .from('outreach_logs')
       .insert({
+        account_id: accountId,
         scout_id: user.id,
         campaign_id: campaignId,
         campaign_name: campaignName,

@@ -26,6 +26,8 @@ import {
   Send as SendIcon,
   CreditCard,
   Handshake,
+  Coins,
+  Smartphone,
 } from 'lucide-react'
 import { Profile } from '@/types/database'
 import { Button } from '@/components/ui/button'
@@ -41,6 +43,7 @@ const navigation = [
   { name: 'Outreach', href: '/outreach', icon: Mail, roles: ['admin', 'scout'] },
   { name: 'Templates', href: '/templates', icon: FileText, roles: ['admin', 'scout'] },
   { name: 'Inbox', href: '/inbox', icon: Inbox, roles: ['admin', 'scout'] },
+  { name: 'My Phones', href: '/operator/phones', icon: Smartphone, roles: ['admin', 'scout'] },
   { name: 'Enrichment Logs', href: '/enrichment-logs', icon: ClipboardList, roles: ['admin', 'scout'] },
   { name: 'Scraping', href: '/scraping', icon: Download, roles: ['admin'] },
   { name: 'Analytics', href: '/analytics', icon: BarChart3, roles: ['admin'] },
@@ -48,6 +51,8 @@ const navigation = [
 ]
 
 const adminNavigation = [
+  { name: 'Alias Generator', href: '/admin/aliases/generate', icon: Sparkles },
+  { name: 'Cloud Phones', href: '/admin/cloud-phones/provision', icon: Smartphone },
   { name: 'Outreach Queue', href: '/admin/outreach-queue', icon: SendIcon },
   { name: 'VA Worklist', href: '/admin/va-worklist', icon: ClipboardList },
   { name: 'Account Identities', href: '/admin/identities', icon: Users },
@@ -59,6 +64,7 @@ const adminNavigation = [
   { name: 'DM Agents', href: '/admin/agents', icon: Wifi },
   { name: 'Scouts', href: '/scouts', icon: Users },
   { name: 'Billing', href: '/admin/scouts', icon: CreditCard },
+  { name: 'AI Usage', href: '/admin/tokens', icon: Coins },
   { name: 'Partners', href: '/admin/partners', icon: Handshake },
 ]
 

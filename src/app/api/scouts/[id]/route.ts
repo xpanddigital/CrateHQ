@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { createServiceClient } from '@/lib/supabase/service'
 import { logger } from '@/lib/logger'
 
 export async function GET(
@@ -151,13 +152,21 @@ export async function PUT(
     const body = await request.json()
     const { full_name, role, is_active } = body
 
+    if (role !== undefined && role !== 'admin' && role !== 'scout') {
+      return NextResponse.json({ error: "role must be 'admin' or 'scout'" }, { status: 400 })
+    }
+
     const updateData: any = {}
     if (full_name !== undefined) updateData.full_name = full_name
     if (role !== undefined) updateData.role = role
     if (is_active !== undefined) updateData.is_active = is_active
     updateData.updated_at = new Date().toISOString()
 
-    const { data: updatedScout, error } = await supabase
+    // Use the service client so the role-change trigger sees a service_role JWT
+    // and allows the update. (The admin check above is enforced via the cookie
+    // session before we switch clients.)
+    const adminSupabase = createServiceClient()
+    const { data: updatedScout, error } = await adminSupabase
       .from('profiles')
       .update(updateData)
       .eq('id', id)

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 import type { SequenceActionType } from '@/types/database'
 
@@ -100,9 +101,18 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: stepError }, { status: 400 })
     }
 
+    const accountId = await resolveAccountIdForUser(supabase, user!.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account is associated with your user. Contact your admin.' },
+        { status: 403 }
+      )
+    }
+
     const { data: template, error: insertError } = await supabase
       .from('sequence_templates')
       .insert({
+        account_id: accountId,
         name: name.trim(),
         description: description || null,
         steps,

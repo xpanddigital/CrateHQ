@@ -40,10 +40,20 @@ export async function POST(request: NextRequest) {
 
     const supabase = createServiceClient()
 
+    // Pull the enrollment's account_id so the step log inherits the right tenant.
+    // Without this, the insert hits a NOT NULL constraint violation on account_id.
+    const { data: enrollment } = await supabase
+      .from('sequence_enrollments')
+      .select('account_id')
+      .eq('id', enrollment_id)
+      .maybeSingle()
+    const enrollmentAccountId = enrollment?.account_id
+
     // Insert step log as failed
     const { error: logError } = await supabase
       .from('sequence_step_log')
       .insert({
+        account_id: enrollmentAccountId,
         enrollment_id,
         ig_account_id,
         artist_id: body.artist_id || null,

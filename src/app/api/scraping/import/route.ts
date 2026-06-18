@@ -1,11 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 /**
  * POST /api/scraping/import
  * Bulk upsert scraped artists into the artists table.
- * Deduplicates by spotify_url. Applies optional tags.
+ * Deduplicates by spotify_url (within the caller's tenant). Applies optional tags.
  */
 export async function POST(request: NextRequest) {
   try {
@@ -19,16 +20,30 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Admin only' }, { status: 403 })
     }
 
-    const { artists, tagIds } = await request.json()
+    // Allow admin to pick an explicit target account; default to their own.
+    const body = await request.json()
+    const { artists, tagIds, account_id: bodyAccountId } = body
+    const accountId =
+      typeof bodyAccountId === 'string'
+        ? bodyAccountId
+        : await resolveAccountIdForUser(supabase, user.id)
+    if (!accountId) {
+      return NextResponse.json(
+        { error: 'No account_id resolved. Pass one explicitly or join an account first.' },
+        { status: 403 }
+      )
+    }
+
     if (!artists || !Array.isArray(artists)) {
       return NextResponse.json({ error: 'Invalid artists data' }, { status: 400 })
     }
 
-    // Check existing to track duplicates (don't block upsert — just count skipped)
+    // Check existing within this account to track duplicates
     const spotifyUrls = artists.map((a: any) => a.spotify_url).filter(Boolean)
     const { data: existing } = await supabase
       .from('artists')
       .select('spotify_url')
+      .eq('account_id', accountId)
       .in('spotify_url', spotifyUrls)
 
     const existingUrls = new Set(existing?.map(a => a.spotify_url) || [])
@@ -45,6 +60,7 @@ export async function POST(request: NextRequest) {
         const spotifyId = spotifyIdMatch ? spotifyIdMatch[1] : null
 
         return {
+          account_id: accountId,
           name: a.name,
           spotify_url: a.spotify_url,
           spotify_id: spotifyId,

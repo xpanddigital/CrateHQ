@@ -1,21 +1,53 @@
 import { NextRequest, NextResponse } from 'next/server'
+import { createClient } from '@/lib/supabase/server'
 import { createServiceClient } from '@/lib/supabase/service'
 import Anthropic from '@anthropic-ai/sdk'
+import { CLAUDE_MODELS } from '@/lib/ai/models'
+import { recordAnthropicUsage } from '@/lib/ai/usage'
+import { checkRateLimit, rateLimitKey, RATE_LIMITS } from '@/lib/rate-limit'
 import { logger } from '@/lib/logger'
 
 export async function POST(request: NextRequest) {
   try {
-    const body = await request.json()
-    const { artist_id, ig_account_id, scout_id } = body
+    // Auth: must be logged in. Caller must be admin OR the scout assigned to
+    // the ig_account they are generating a DM for. scout_id in the body is
+    // IGNORED — we derive it from the authenticated session / account assignment.
+    const userSupabase = await createClient()
+    const { data: { user } } = await userSupabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+    }
 
-    if (!artist_id || !ig_account_id || !scout_id) {
+    const rl = checkRateLimit(rateLimitKey(user.id, 'outreach/generate-cold'), RATE_LIMITS.ai)
+    if (!rl.allowed) return rl.response
+
+    const body = await request.json()
+    const { artist_id, ig_account_id } = body
+
+    if (!artist_id || !ig_account_id) {
       return NextResponse.json(
-        { error: 'Missing required fields: artist_id, ig_account_id, scout_id' },
+        { error: 'Missing required fields: artist_id, ig_account_id' },
         { status: 400 }
       )
     }
 
     const supabase = createServiceClient()
+
+    // Verify caller owns / is admin for this IG account; pull account_id too
+    const [{ data: profile }, { data: igAccountAuth }] = await Promise.all([
+      supabase.from('profiles').select('role').eq('id', user.id).single(),
+      supabase.from('ig_accounts').select('assigned_scout_id, account_id').eq('id', ig_account_id).single(),
+    ])
+    const isAdmin = profile?.role === 'admin'
+    const isOwningScout = igAccountAuth?.assigned_scout_id === user.id
+    if (!isAdmin && !isOwningScout) {
+      return NextResponse.json(
+        { error: 'Forbidden: you do not own this IG account' },
+        { status: 403 }
+      )
+    }
+    const scout_id = igAccountAuth?.assigned_scout_id || user.id
+    const account_id = igAccountAuth?.account_id
 
     // 0. Check Ramp-Up Limits
     const { data: accountData, error: accountError } = await supabase
@@ -123,9 +155,18 @@ EXAMPLE TONE (do not copy these, just match the energy):
 `.trim()
 
     const resp = await client.messages.create({
-      model: 'claude-opus-4-6', // standard model for the app
+      model: CLAUDE_MODELS.OPUS,
       max_tokens: 150,
       messages: [{ role: 'user', content: prompt }],
+    })
+
+    // Telemetry — fire-and-forget; failures never break the request
+    recordAnthropicUsage(resp, {
+      accountId: account_id ?? null,
+      userId: user.id,
+      model: CLAUDE_MODELS.OPUS,
+      kind: 'cold_dm',
+      metadata: { artist_id, ig_account_id },
     })
 
     const generatedMessage = resp.content[0]?.type === 'text' ? resp.content[0].text.trim() : ''
@@ -134,10 +175,11 @@ EXAMPLE TONE (do not copy these, just match the energy):
       throw new Error('AI returned empty message')
     }
 
-    // 3. Queue Insertion
+    // 3. Queue Insertion — scoped to the IG account's tenant
     const { data: pendingMsg, error: insertError } = await supabase
       .from('pending_outbound_messages')
       .insert({
+        account_id,
         ig_account_id,
         scout_id,
         artist_id,

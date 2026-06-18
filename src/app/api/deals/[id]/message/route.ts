@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { createClient } from '@/lib/supabase/server'
-import { classifyReply } from '@/lib/ai/sdr'
+import { classifyReplyAI } from '@/lib/ai/sdr-claude'
+import { resolveAccountIdForUser } from '@/lib/auth/account'
 import { logger } from '@/lib/logger'
 
 // POST /api/deals/[id]/message - Add message to conversation
@@ -26,10 +27,10 @@ export async function POST(
       )
     }
 
-    // Get deal to get artist_id
+    // Get deal — pull account_id so the new conversation row inherits the tenant
     const { data: deal, error: dealError } = await supabase
       .from('deals')
-      .select('artist_id, scout_id')
+      .select('artist_id, scout_id, account_id')
       .eq('id', id)
       .single()
 
@@ -51,7 +52,11 @@ export async function POST(
         .order('sent_at', { ascending: true })
 
       const conversationHistory = history || []
-      const classification = classifyReply(body, conversationHistory)
+      const accountId = await resolveAccountIdForUser(supabase, user.id)
+      const classification = await classifyReplyAI(body, conversationHistory, {
+        accountId,
+        userId: user.id,
+      })
 
       aiClassification = classification.classification
       aiConfidence = classification.confidence
@@ -62,10 +67,11 @@ export async function POST(
       }
     }
 
-    // Create conversation record
+    // Create conversation record — scoped to the deal's tenant
     const { data: conversation, error: convError } = await supabase
       .from('conversations')
       .insert({
+        account_id: deal.account_id,
         deal_id: id,
         artist_id: deal.artist_id,
         scout_id: user.id,
