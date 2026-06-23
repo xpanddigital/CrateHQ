@@ -58,6 +58,27 @@ const JOEL: BlogPost['author'] = {
  */
 export const POSTS: BlogPost[] = [
   {
+    slug: 'artist-friendly-catalog-buyers',
+    title:
+      'The Rise of Artist-Friendly Catalog Buyers (And What It Means for Scouts)',
+    seoTitle: 'Artist-Friendly Catalog Buyers in 2026',
+    description:
+      'A new class of catalog buyer competes on fairness and stewardship, not just cheque size. What the artist-friendly shift means for artists, scouts, and the deals in between.',
+    publishedAt: '2026-06-19',
+    author: JOEL,
+    readingTime: 9,
+    funnel: 'MOFU',
+    pillar: 'closing-catalog-deals',
+    tags: [
+      'music catalog',
+      'catalog buyers',
+      'artist-friendly',
+      'royalty advance',
+      'deal sourcing',
+    ],
+    featured: true,
+  },
+  {
     slug: 'best-crm-for-music-catalog-scouts',
     title:
       'The Best CRM for Music Catalog Scouts and Brokers in 2026',
